@@ -31,6 +31,21 @@ var contactBeginCount = 0;
 var contactEndCount = 0;
 var nextBodyId = 1;
 
+// GIF capture (F12 toggle)
+var gif = Gif();
+var gifRec = false;
+var gifFrames = 0;
+var gifCentis = 5;
+var gifSampleEvery = 2;
+var gifSampleCounter = 0;
+var f12Latch = false;
+var gifPath = "box2d_stack.gif";
+var capW = 0;
+var capH = 0;
+var capX = 0;
+var capY = 0;
+var capPixels = nil;
+
 
 struct Body
 {
@@ -194,7 +209,7 @@ class TestContact:B2ContactListener
             var tagB = b.getTag();
             var (ax, ay) = a.getPosition();
             var (bx, by) = b.getPosition();
-            print("CONTACT BEGIN #" + contactBeginCount + " A[id=" + idA + ",tag=" + tagA + "](" + ax + "," + ay + ") B[id=" + idB + ",tag=" + tagB + "](" + bx + "," + by + ")");
+            //print("CONTACT BEGIN #" + contactBeginCount + " A[id=" + idA + ",tag=" + tagA + "](" + ax + "," + ay + ") B[id=" + idB + ",tag=" + tagB + "](" + bx + "," + by + ")");
         }
     }
     def EndContact(a, b) 
@@ -202,7 +217,7 @@ class TestContact:B2ContactListener
         contactEndCount = contactEndCount + 1;
         if ((contactEndCount % 40) == 1)
         {
-            print("CONTACT END #" + contactEndCount);
+           // print("CONTACT END #" + contactEndCount);
         }
     }
     def PreSolve(a, b) 
@@ -412,7 +427,7 @@ def screenToWorldY(py)
 }
 
 resetScene();
-print("Box2D demo ready: LMB box | RMB ball | Space blast | R reset");
+print("Box2D demo ready: LMB box | RMB ball | Space blast | R reset | F12 GIF");
 
 while (Running())
 {
@@ -422,6 +437,45 @@ while (Running())
     if (IsKeyDown(KEY_ESCAPE)) Quit();
     if (IsKeyPressed(KEY_R)) resetScene();
     if (IsKeyPressed(KEY_F2)) showDebugDraw = !showDebugDraw;
+
+    if (IsKeyDown(KEY_F12))
+    {
+        if (!f12Latch)
+        {
+            f12Latch = true;
+            if (!gifRec)
+            {
+                capW = GetWidth();
+                capH = GetHeight();
+                if (capW < 1) capW = 1;
+                if (capH < 1) capH = 1;
+                capX = 0;
+                capY = 0;
+
+                capPixels = Uint8Array(capW * capH * 4);
+                gif.reset();
+                if (gif.begin(capW, capH))
+                {
+                    gifRec = true;
+                    gifFrames = 0;
+                    gifSampleCounter = 0;
+                    print("GIF REC START " + capW + "x" + capH);
+                }
+                else
+                {
+                    print("GIF REC START FAILED");
+                }
+            }
+            else
+            {
+                var okStop = gif.save(gifPath);
+                gifRec = false;
+                if (okStop) print("GIF SAVED " + gifPath + " (" + gifFrames + " frames)");
+                else print("GIF SAVE FAILED");
+            }
+        }
+    }
+    else { f12Latch = false; }
 
     if (IsMousePressed(MOUSE_LEFT))
     {
@@ -439,8 +493,8 @@ while (Running())
 
     if (IsKeyPressed(KEY_SPACE))
     {
-        var cx = worldW * 0.5;
-        var cy = worldH * 0.5;
+          var cx = screenToWorldX(GetMouseX());
+        var cy = screenToWorldY(GetMouseY());
         for (var i = 0; i < len(bodies); i++)
         {
             var item = bodies[i];
@@ -508,8 +562,8 @@ while (Running())
         glRotatef(a * RAD2DEG, 0.0, 0.0, 1.0);
         glColor3f(item2.r, item2.g, item2.b);
 
-        // if (item2.shapeType == 0) drawBox(item2.sizeX, item2.sizeY);
-        // else drawCircle(item2.radius);
+         if (item2.shapeType == 0) drawBox(item2.sizeX, item2.sizeY);
+         else drawCircle(item2.radius);
 
         glPopMatrix();
     }
@@ -519,8 +573,28 @@ while (Running())
         world.debugDraw();
     }
 
+    if (gifRec)
+    {
+        gifSampleCounter = gifSampleCounter + 1;
+        if (gifSampleCounter >= gifSampleEvery)
+        {
+            gifSampleCounter = 0;
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(capX, capY, capW, capH, GL_RGBA, GL_UNSIGNED_BYTE, capPixels);
+            var okFrame = gif.addFrame(capPixels, gifCentis, 16, -capW * 4);
+            if (okFrame) gifFrames = gifFrames + 1;
+            else
+            {
+                print("GIF FRAME FAILED");
+                gif.reset();
+                gifRec = false;
+            }
+        }
+    }
+
     Flip();
 }
 
+if (gifRec) gif.save(gifPath);
 if (world != nil) world.destroy();
 Close();

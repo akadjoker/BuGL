@@ -29,6 +29,21 @@ var mouseJoint = nil;
 var draggedBody = nil;
 var queryHitBody = nil;
 
+// GIF capture (F12 toggle)
+var gif = Gif();
+var gifRec = false;
+var gifFrames = 0;
+var gifCentis = 5;
+var gifSampleEvery = 2;
+var gifSampleCounter = 0;
+var f12Latch = false;
+var gifPath = "box2d_mouse_joint.gif";
+var capW = 0;
+var capH = 0;
+var capX = 0;
+var capY = 0;
+var capPixels = nil;
+
 class MyDebugDraw:B2DebugDraw
 {
     def init()
@@ -325,7 +340,7 @@ def stopMouseJoint()
 }
 
 resetScene();
-print("Box2D MouseJoint: hold LMB to drag | RMB spawn ball | R reset");
+print("Box2D MouseJoint: hold LMB drag | RMB spawn ball | R reset | F12 GIF");
 
 while (Running())
 {
@@ -334,6 +349,45 @@ while (Running())
 
     if (IsKeyDown(KEY_ESCAPE)) Quit();
     if (IsKeyPressed(KEY_R)) resetScene();
+
+    if (IsKeyDown(KEY_F12))
+    {
+        if (!f12Latch)
+        {
+            f12Latch = true;
+            if (!gifRec)
+            {
+                capW = GetWidth();
+                capH = GetHeight();
+                if (capW < 1) capW = 1;
+                if (capH < 1) capH = 1;
+                capX = 0;
+                capY = 0;
+
+                capPixels = Uint8Array(capW * capH * 4);
+                gif.reset();
+                if (gif.begin(capW, capH))
+                {
+                    gifRec = true;
+                    gifFrames = 0;
+                    gifSampleCounter = 0;
+                    print("GIF REC START " + capW + "x" + capH);
+                }
+                else
+                {
+                    print("GIF REC START FAILED");
+                }
+            }
+            else
+            {
+                var okStop = gif.save(gifPath);
+                gifRec = false;
+                if (okStop) print("GIF SAVED " + gifPath + " (" + gifFrames + " frames)");
+                else print("GIF SAVE FAILED");
+            }
+        }
+    }
+    else { f12Latch = false; }
 
     if (IsResized())
     {
@@ -397,9 +451,30 @@ while (Running())
         glEnd();
     }
 
+    if (gifRec)
+    {
+        gifSampleCounter = gifSampleCounter + 1;
+        if (gifSampleCounter >= gifSampleEvery)
+        {
+            gifSampleCounter = 0;
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(capX, capY, capW, capH, GL_RGBA, GL_UNSIGNED_BYTE, capPixels);
+
+            var okFrame = gif.addFrame(capPixels, gifCentis, 16, -capW * 4);
+            if (okFrame) gifFrames = gifFrames + 1;
+            else
+            {
+                print("GIF FRAME FAILED");
+                gif.reset();
+                gifRec = false;
+            }
+        }
+    }
+
     Flip();
 }
 
 stopMouseJoint();
+if (gifRec) gif.save(gifPath);
 if (world != nil) world.destroy();
 Close();
