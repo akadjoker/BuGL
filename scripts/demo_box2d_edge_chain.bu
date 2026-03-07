@@ -1,0 +1,335 @@
+// ================================================================
+// BuGL Demo — Box2D Edge + Chain
+// LMB        -> spawn box
+// RMB        -> spawn ball
+// 1          -> spawn row of boxes
+// 2          -> spawn row of balls
+// R          -> reset world
+// ESC        -> quit
+// ================================================================
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL  Box2D Edge + Chain", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.05, 0.06, 0.09, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glDisable(GL_DEPTH_TEST);
+
+var PI = 3.141592653589793;
+var ppm = 32.0;
+
+var worldW = GetWidth() / ppm;
+var worldH = GetHeight() / ppm;
+var fixedStep = 1.0 / 60.0;
+var accumulator = 0.0;
+var world = nil;
+
+class MyDebugDraw:B2DebugDraw
+{
+    def init()
+    {
+        self.setFlags(B2_DRAW_SHAPE_BIT);
+        self.appendFlags(B2_DRAW_CENTER_OF_MASS_BIT);
+        self.setLineWidth(1.25);
+        self.setFillAlpha(0.16);
+        self.setAxisScale(0.35);
+        self.setPointSize(4.0);
+    }
+
+    def DrawPolygon(vertices, r, g, b)
+    {
+        var n = len(vertices);
+        if (n < 4) return;
+        glLineWidth(self.getLineWidth());
+        glColor3f(r, g, b);
+        glBegin(GL_LINE_LOOP);
+        for (var i = 0; i < n; i = i + 2)
+        {
+            glVertex2f(vertices[i], vertices[i + 1]);
+        }
+        glEnd();
+    }
+
+    def DrawSolidPolygon(vertices, r, g, b)
+    {
+        var n = len(vertices);
+        if (n < 6) return;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(r, g, b, self.getFillAlpha());
+        glBegin(GL_TRIANGLE_FAN);
+        for (var i = 0; i < n; i = i + 2)
+        {
+            glVertex2f(vertices[i], vertices[i + 1]);
+        }
+        glEnd();
+
+        self.DrawPolygon(vertices, r, g, b);
+    }
+
+    def DrawCircle(cx, cy, radius, r, g, b)
+    {
+        var segs = 24;
+        glLineWidth(self.getLineWidth());
+        glColor3f(r, g, b);
+        glBegin(GL_LINE_LOOP);
+        for (var i = 0; i < segs; i++)
+        {
+            var a = (i / segs) * PI * 2.0;
+            glVertex2f(cx + cos(a) * radius, cy + sin(a) * radius);
+        }
+        glEnd();
+    }
+
+    def DrawSolidCircle(cx, cy, radius, axisX, axisY, r, g, b)
+    {
+        var segs = 24;
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(r, g, b, self.getFillAlpha());
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(cx, cy);
+        for (var i = 0; i <= segs; i++)
+        {
+            var a = (i / segs) * PI * 2.0;
+            glVertex2f(cx + cos(a) * radius, cy + sin(a) * radius);
+        }
+        glEnd();
+
+        self.DrawCircle(cx, cy, radius, r, g, b);
+    }
+
+    def DrawSegment(x1, y1, x2, y2, r, g, b)
+    {
+        glLineWidth(self.getLineWidth() + 0.4);
+        glColor3f(r, g, b);
+        glBegin(GL_LINES);
+        glVertex2f(x1, y1);
+        glVertex2f(x2, y2);
+        glEnd();
+    }
+
+    def DrawTransform(px, py, qs, qc)
+    {
+        var s = self.getAxisScale();
+        var x1 = px + qc * s;
+        var y1 = py + qs * s;
+        var x2 = px - qs * s;
+        var y2 = py + qc * s;
+
+        glLineWidth(self.getLineWidth());
+        glBegin(GL_LINES);
+        glColor3f(1.0, 0.2, 0.2);
+        glVertex2f(px, py);
+        glVertex2f(x1, y1);
+        glColor3f(0.2, 1.0, 0.2);
+        glVertex2f(px, py);
+        glVertex2f(x2, y2);
+        glEnd();
+    }
+
+    def DrawPoint(px, py, size, r, g, b)
+    {
+        glPointSize(size);
+        glColor3f(r, g, b);
+        glBegin(GL_POINTS);
+        glVertex2f(px, py);
+        glEnd();
+    }
+}
+
+var debugDraw = MyDebugDraw();
+
+def screenToWorldX(px)
+{
+    var out = px / ppm;
+    return out;
+}
+
+def screenToWorldY(py)
+{
+    var out2 = (GetHeight() - py) / ppm;
+    return out2;
+}
+
+def spawnBox(x, y, hx, hy)
+{
+    var bd = B2BodyDef();
+    bd.setType(B2_DYNAMIC_BODY);
+    bd.setPosition(x, y);
+
+    var shape = B2PolygonShape();
+    shape.setAsBox(hx, hy);
+
+    var fd = B2FixtureDef();
+    fd.setShape(shape);
+    fd.setDensity(1.0);
+    fd.setFriction(0.45);
+    fd.setRestitution(0.05);
+
+    var body = world.createBody(bd);
+    body.createFixture(fd);
+}
+
+def spawnBall(x, y, radius)
+{
+    var bd = B2BodyDef();
+    bd.setType(B2_DYNAMIC_BODY);
+    bd.setPosition(x, y);
+
+    var shape = B2CircleShape();
+    shape.setRadius(radius);
+
+    var fd = B2FixtureDef();
+    fd.setShape(shape);
+    fd.setDensity(1.1);
+    fd.setFriction(0.25);
+    fd.setRestitution(0.30);
+
+    var body = world.createBody(bd);
+    body.createFixture(fd);
+}
+
+def buildTerrain()
+{
+    // Main terrain with open chain.
+    var bdGround = B2BodyDef();
+    bdGround.setType(B2_STATIC_BODY);
+    var ground = world.createBody(bdGround);
+
+    var chain = B2ChainShape();
+    chain.createChain([
+        0.5, 2.0,
+        3.0, 2.4,
+        6.0, 1.6,
+        9.0, 2.8,
+        12.0, 2.0,
+        15.0, 2.35,
+        18.0, 1.8,
+        21.0, 2.1,
+        24.0, 2.0
+    ]);
+
+    var fdChain = B2FixtureDef();
+    fdChain.setShape(chain);
+    fdChain.setFriction(0.95);
+    ground.createFixture(fdChain);
+
+    // Closed loop "island".
+    var islandBody = world.createBody(bdGround);
+    var island = B2ChainShape();
+    island.createLoop([
+        18.0, 7.3,
+        20.0, 8.7,
+        22.0, 8.0,
+        21.3, 6.4,
+        19.2, 6.2
+    ]);
+    var fdIsland = B2FixtureDef();
+    fdIsland.setShape(island);
+    fdIsland.setFriction(0.7);
+    islandBody.createFixture(fdIsland);
+
+    // Two-sided edge (classic segment).
+    var edgeBodyA = world.createBody(bdGround);
+    var edgeA = B2EdgeShape();
+    edgeA.setTwoSided(5.5, 5.2, 9.5, 6.6);
+    var fdEdgeA = B2FixtureDef();
+    fdEdgeA.setShape(edgeA);
+    fdEdgeA.setFriction(0.8);
+    edgeBodyA.createFixture(fdEdgeA);
+
+    // One-sided edge (with ghost vertices for smooth transitions).
+    var edgeBodyB = world.createBody(bdGround);
+    var edgeB = B2EdgeShape();
+    edgeB.setOneSided(11.5, 4.9, 12.6, 5.0, 16.0, 6.5, 17.4, 6.4);
+    var fdEdgeB = B2FixtureDef();
+    fdEdgeB.setShape(edgeB);
+    fdEdgeB.setFriction(0.8);
+    edgeBodyB.createFixture(fdEdgeB);
+}
+
+def resetScene()
+{
+    if (world != nil) world.destroy();
+    world = B2World(0.0, -18.0);
+    world.setDebugDraw(debugDraw);
+
+    buildTerrain();
+
+    for (var i = 0; i < 10; i++)
+    {
+        spawnBox(3.0 + i * 0.75, 10.0 + i * 0.45, 0.28, 0.28);
+    }
+    for (var j = 0; j < 7; j++)
+    {
+        spawnBall(9.5 + j * 0.82, 12.0 + j * 0.35, 0.27);
+    }
+}
+
+resetScene();
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    accumulator = accumulator + dt;
+
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) resetScene();
+
+    if (IsMousePressed(MOUSE_LEFT))
+    {
+        var mx = GetMouseX();
+        var my = GetMouseY();
+        spawnBox(screenToWorldX(mx), screenToWorldY(my), 0.30, 0.30);
+    }
+    if (IsMousePressed(MOUSE_RIGHT))
+    {
+        var mx2 = GetMouseX();
+        var my2 = GetMouseY();
+        spawnBall(screenToWorldX(mx2), screenToWorldY(my2), 0.30);
+    }
+
+    if (IsKeyPressed(KEY_1))
+    {
+        for (var i = 0; i < 12; i++)
+        {
+            spawnBox(1.8 + i * 0.62, worldH - 1.0, 0.24, 0.24);
+        }
+    }
+    if (IsKeyPressed(KEY_2))
+    {
+        for (var j = 0; j < 12; j++)
+        {
+            spawnBall(1.8 + j * 0.62, worldH - 1.0, 0.24);
+        }
+    }
+
+    while (accumulator >= fixedStep)
+    {
+        world.step(fixedStep, 8, 3);
+        accumulator = accumulator - fixedStep;
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+    worldW = GetWidth() / ppm;
+    worldH = GetHeight() / ppm;
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, worldW, 0.0, worldH, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    world.debugDraw();
+    Flip();
+}
+
+if (world != nil) world.destroy();
+Close();

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <SDL2/SDL_opengl.h>
 
 namespace SDLBindings
@@ -15,6 +16,8 @@ namespace SDLBindings
     static constexpr const char *kClassB2BodyDef = "B2BodyDef";
     static constexpr const char *kClassB2PolygonShape = "B2PolygonShape";
     static constexpr const char *kClassB2CircleShape = "B2CircleShape";
+    static constexpr const char *kClassB2EdgeShape = "B2EdgeShape";
+    static constexpr const char *kClassB2ChainShape = "B2ChainShape";
     static constexpr const char *kClassB2FixtureDef = "B2FixtureDef";
     static constexpr const char *kClassB2DebugDraw = "B2DebugDraw";
     static constexpr const char *kClassB2ContactListener = "B2ContactListener";
@@ -387,6 +390,8 @@ namespace SDLBindings
     static b2BodyDef *as_bodydef(void *instance) { return (b2BodyDef *)instance; }
     static b2PolygonShape *as_polygon_shape(void *instance) { return (b2PolygonShape *)instance; }
     static b2CircleShape *as_circle_shape(void *instance) { return (b2CircleShape *)instance; }
+    static b2EdgeShape *as_edge_shape(void *instance) { return (b2EdgeShape *)instance; }
+    static b2ChainShape *as_chain_shape(void *instance) { return (b2ChainShape *)instance; }
     static b2FixtureDef *as_fixturedef(void *instance) { return (b2FixtureDef *)instance; }
     static B2DebugDrawNative *as_debugdraw(void *instance) { return (B2DebugDrawNative *)instance; }
     static B2ContactListenerNative *as_contact_listener(void *instance) { return (B2ContactListenerNative *)instance; }
@@ -530,6 +535,71 @@ namespace SDLBindings
             return false;
         }
         *out = v.asNumber();
+        return true;
+    }
+
+    static bool read_b2vec2(const Value &v, const char *fn, int argIndex, b2Vec2 *out);
+
+    static bool read_vec2_array(const Value &v, std::vector<b2Vec2> *outVerts, const char *fn, int argIndex, int minVerts)
+    {
+        if (!v.isArray())
+        {
+            Error("%s arg %d expects array", fn, argIndex);
+            return false;
+        }
+
+        ArrayInstance *arr = v.asArray();
+        if (!arr)
+        {
+            Error("%s arg %d invalid array", fn, argIndex);
+            return false;
+        }
+
+        const int n = (int)arr->values.size();
+        outVerts->clear();
+        if (n <= 0)
+        {
+            Error("%s arg %d array is empty", fn, argIndex);
+            return false;
+        }
+
+        // Variant A: array of b2Vec2 structs
+        if (arr->values[0].isNativeStructInstance())
+        {
+            outVerts->reserve((size_t)n);
+            for (int i = 0; i < n; i++)
+            {
+                b2Vec2 p;
+                if (!read_b2vec2(arr->values[i], fn, argIndex, &p))
+                    return false;
+                outVerts->push_back(p);
+            }
+        }
+        else
+        {
+            // Variant B: flat numeric array [x0, y0, x1, y1, ...]
+            if ((n % 2) != 0)
+            {
+                Error("%s arg %d flat numeric array must have even length", fn, argIndex);
+                return false;
+            }
+            outVerts->reserve((size_t)(n / 2));
+            for (int i = 0; i < n; i += 2)
+            {
+                if (!arr->values[i].isNumber() || !arr->values[i + 1].isNumber())
+                {
+                    Error("%s arg %d flat numeric array must contain only numbers", fn, argIndex);
+                    return false;
+                }
+                outVerts->push_back(b2Vec2((float)arr->values[i].asNumber(), (float)arr->values[i + 1].asNumber()));
+            }
+        }
+
+        if ((int)outVerts->size() < minVerts)
+        {
+            Error("%s arg %d expects at least %d vertices", fn, argIndex, minVerts);
+            return false;
+        }
         return true;
     }
 
@@ -1832,7 +1902,19 @@ namespace SDLBindings
                 vm->pushBool(fx != nullptr);
                 return 1;
             }
-            Error("B2Body.createFixture() expects shape as B2PolygonShape/B2CircleShape");
+            if (try_get_native_value_ptr(args[0], kClassB2EdgeShape, &shapePtr))
+            {
+                b2Fixture *fx = body->CreateFixture((b2EdgeShape *)shapePtr, (float)args[1].asNumber());
+                vm->pushBool(fx != nullptr);
+                return 1;
+            }
+            if (try_get_native_value_ptr(args[0], kClassB2ChainShape, &shapePtr))
+            {
+                b2Fixture *fx = body->CreateFixture((b2ChainShape *)shapePtr, (float)args[1].asNumber());
+                vm->pushBool(fx != nullptr);
+                return 1;
+            }
+            Error("B2Body.createFixture() expects shape as B2PolygonShape/B2CircleShape/B2EdgeShape/B2ChainShape");
             return push_nil1(vm);
         }
 
@@ -2300,6 +2382,131 @@ namespace SDLBindings
         return 0;
     }
 
+    // ---------------- B2EdgeShape ----------------
+
+    static void *b2edgeshape_ctor(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)vm;
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("B2EdgeShape expects 0 arguments");
+            return nullptr;
+        }
+        return new b2EdgeShape();
+    }
+
+    static void b2edgeshape_dtor(Interpreter *vm, void *instance)
+    {
+        (void)vm;
+        delete as_edge_shape(instance);
+    }
+
+    static int b2edgeshape_set_two_sided(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 4)
+        {
+            Error("B2EdgeShape.setTwoSided() expects (x1, y1, x2, y2)");
+            return 0;
+        }
+        as_edge_shape(instance)->SetTwoSided(
+            b2Vec2((float)args[0].asNumber(), (float)args[1].asNumber()),
+            b2Vec2((float)args[2].asNumber(), (float)args[3].asNumber()));
+        return 0;
+    }
+
+    static int b2edgeshape_set_one_sided(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 8)
+        {
+            Error("B2EdgeShape.setOneSided() expects (x0, y0, x1, y1, x2, y2, x3, y3)");
+            return 0;
+        }
+        as_edge_shape(instance)->SetOneSided(
+            b2Vec2((float)args[0].asNumber(), (float)args[1].asNumber()),
+            b2Vec2((float)args[2].asNumber(), (float)args[3].asNumber()),
+            b2Vec2((float)args[4].asNumber(), (float)args[5].asNumber()),
+            b2Vec2((float)args[6].asNumber(), (float)args[7].asNumber()));
+        return 0;
+    }
+
+    // ---------------- B2ChainShape ----------------
+
+    static void *b2chainshape_ctor(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)vm;
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("B2ChainShape expects 0 arguments");
+            return nullptr;
+        }
+        return new b2ChainShape();
+    }
+
+    static void b2chainshape_dtor(Interpreter *vm, void *instance)
+    {
+        (void)vm;
+        delete as_chain_shape(instance);
+    }
+
+    static int b2chainshape_clear(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)vm;
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("B2ChainShape.clear() expects 0 arguments");
+            return 0;
+        }
+        as_chain_shape(instance)->Clear();
+        return 0;
+    }
+
+    static int b2chainshape_create_loop(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1)
+        {
+            Error("B2ChainShape.createLoop() expects (verticesArray)");
+            return 0;
+        }
+
+        std::vector<b2Vec2> verts;
+        if (!read_vec2_array(args[0], &verts, "B2ChainShape.createLoop()", 1, 3))
+            return 0;
+
+        b2ChainShape *shape = as_chain_shape(instance);
+        shape->Clear();
+        shape->CreateLoop(verts.data(), (int32)verts.size());
+        return 0;
+    }
+
+    static int b2chainshape_create_chain(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1 && argCount != 5)
+        {
+            Error("B2ChainShape.createChain() expects (verticesArray) or (verticesArray, prevX, prevY, nextX, nextY)");
+            return 0;
+        }
+
+        std::vector<b2Vec2> verts;
+        if (!read_vec2_array(args[0], &verts, "B2ChainShape.createChain()", 1, 2))
+            return 0;
+
+        b2Vec2 prev = verts.front();
+        b2Vec2 next = verts.back();
+        if (argCount == 5)
+        {
+            prev.Set((float)args[1].asNumber(), (float)args[2].asNumber());
+            next.Set((float)args[3].asNumber(), (float)args[4].asNumber());
+        }
+
+        b2ChainShape *shape = as_chain_shape(instance);
+        shape->Clear();
+        shape->CreateChain(verts.data(), (int32)verts.size(), prev, next);
+        return 0;
+    }
+
     // ---------------- B2FixtureDef ----------------
 
     static void *b2fixturedef_ctor(Interpreter *vm, int argCount, Value *args)
@@ -2340,8 +2547,18 @@ namespace SDLBindings
             fd->shape = (b2CircleShape *)shapePtr;
             return 0;
         }
+        if (try_get_native_value_ptr(args[0], kClassB2EdgeShape, &shapePtr))
+        {
+            fd->shape = (b2EdgeShape *)shapePtr;
+            return 0;
+        }
+        if (try_get_native_value_ptr(args[0], kClassB2ChainShape, &shapePtr))
+        {
+            fd->shape = (b2ChainShape *)shapePtr;
+            return 0;
+        }
 
-        Error("B2FixtureDef.setShape() expects B2PolygonShape or B2CircleShape");
+        Error("B2FixtureDef.setShape() expects B2PolygonShape, B2CircleShape, B2EdgeShape or B2ChainShape");
         return 0;
     }
 
@@ -2684,6 +2901,8 @@ namespace SDLBindings
         NativeClassDef *bodyDefClass = vm.registerNativeClass(kClassB2BodyDef, b2bodydef_ctor, b2bodydef_dtor, 0, false);
         NativeClassDef *polyShapeClass = vm.registerNativeClass(kClassB2PolygonShape, b2polygonshape_ctor, b2polygonshape_dtor, 0, false);
         NativeClassDef *circleShapeClass = vm.registerNativeClass(kClassB2CircleShape, b2circleshape_ctor, b2circleshape_dtor, 0, false);
+        NativeClassDef *edgeShapeClass = vm.registerNativeClass(kClassB2EdgeShape, b2edgeshape_ctor, b2edgeshape_dtor, 0, false);
+        NativeClassDef *chainShapeClass = vm.registerNativeClass(kClassB2ChainShape, b2chainshape_ctor, b2chainshape_dtor, 0, false);
         NativeClassDef *fixtureDefClass = vm.registerNativeClass(kClassB2FixtureDef, b2fixturedef_ctor, b2fixturedef_dtor, 0, false);
         g_b2ContactListenerClass = vm.registerNativeClass(kClassB2ContactListener, b2contact_listener_ctor, b2contact_listener_dtor, 0, false);
         g_b2QueryCallbackClass = vm.registerNativeClass(kClassB2QueryCallback, b2query_callback_ctor, b2query_callback_dtor, 0, false);
@@ -2732,6 +2951,11 @@ namespace SDLBindings
 
         vm.addNativeMethod(circleShapeClass, "setRadius", b2circleshape_set_radius);
         vm.addNativeMethod(circleShapeClass, "setPosition", b2circleshape_set_position);
+        vm.addNativeMethod(edgeShapeClass, "setTwoSided", b2edgeshape_set_two_sided);
+        vm.addNativeMethod(edgeShapeClass, "setOneSided", b2edgeshape_set_one_sided);
+        vm.addNativeMethod(chainShapeClass, "clear", b2chainshape_clear);
+        vm.addNativeMethod(chainShapeClass, "createLoop", b2chainshape_create_loop);
+        vm.addNativeMethod(chainShapeClass, "createChain", b2chainshape_create_chain);
 
         vm.addNativeMethod(fixtureDefClass, "setShape", b2fixturedef_set_shape);
         vm.addNativeMethod(fixtureDefClass, "setDensity", b2fixturedef_set_density);
