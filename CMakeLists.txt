@@ -22,6 +22,11 @@ add_subdirectory(vendor/miniz)
 add_subdirectory(vendor/poly2tri)
 add_subdirectory(vendor/box2d)
 
+# Embed ODE as a dependency only (skip upstream demos/tests targets).
+set(ODE_WITH_DEMOS OFF CACHE BOOL "Disable ODE demos in BuGL build" FORCE)
+set(ODE_WITH_TESTS OFF CACHE BOOL "Disable ODE tests in BuGL build" FORCE)
+add_subdirectory(vendor/ODE)
+
 
 add_subdirectory(libbu)
 add_subdirectory(main)

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+ 
 project(poly2tri)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -13,7 +13,7 @@ file(GLOB SOURCES src/common/*.cc src/sweep/*.cc)
 file(GLOB HEADERS include/*.h include/common/*.h include/sweep/*.h)
 
 
-add_library(poly2tri ${SOURCES} ${HEADERS})
+add_library(poly2tri STATIC ${SOURCES} ${HEADERS})
 target_include_directories(poly2tri INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 
