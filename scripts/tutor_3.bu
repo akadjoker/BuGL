@@ -1,0 +1,120 @@
+
+
+// Tutor 3: pipeline moderno mínimo (shader + VAO/VBO/EBO)
+
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!Init("Tutor 3 - Modern Triangle", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.06, 0.10, 1.0);
+
+var vs_src =
+"#version 330 core\n" +
+"layout(location = 0) in vec3 aPos;\n" +
+"layout(location = 1) in vec3 aColor;\n" +
+"out vec3 vColor;\n" +
+"void main() {\n" +
+"    vColor = aColor;\n" +
+"    gl_Position = vec4(aPos, 1.0);\n" +
+"}\n";
+
+var fs_src =
+"#version 330 core\n" +
+"in vec3 vColor;\n" +
+"out vec4 FragColor;\n" +
+"void main() {\n" +
+"    FragColor = vec4(vColor, 1.0);\n" +
+"}\n";
+
+var vs = glCreateShader(GL_VERTEX_SHADER);
+glShaderSource(vs, vs_src);
+glCompileShader(vs);
+if (glGetShaderiv(vs, GL_COMPILE_STATUS) == 0)
+{
+    print("VS ERROR:");
+    print(glGetShaderInfoLog(vs));
+    Quit();
+}
+
+var fs = glCreateShader(GL_FRAGMENT_SHADER);
+glShaderSource(fs, fs_src);
+glCompileShader(fs);
+if (glGetShaderiv(fs, GL_COMPILE_STATUS) == 0)
+{
+    print("FS ERROR:");
+    print(glGetShaderInfoLog(fs));
+    Quit();
+}
+
+var program = glCreateProgram();
+glAttachShader(program, vs);
+glAttachShader(program, fs);
+glLinkProgram(program);
+if (glGetProgramiv(program, GL_LINK_STATUS) == 0)
+{
+    print("LINK ERROR:");
+    print(glGetProgramInfoLog(program));
+    Quit();
+}
+
+glDeleteShader(vs);
+glDeleteShader(fs);
+
+var vertices = Float32Array(18);
+vertices.add(
+    // x, y, z,   r, g, b
+    -0.6, -0.5, 0.0,  1.0, 0.2, 0.2,
+     0.6, -0.5, 0.0,  0.2, 1.0, 0.3,
+     0.0,  0.6, 0.0,  0.2, 0.5, 1.0
+);
+
+var indices = Uint16Array(3);
+indices.add(0, 1, 2);
+
+var vao = glGenVertexArrays();
+var vbo = glGenBuffers();
+var ebo = glGenBuffers();
+
+glBindVertexArray(vao);
+
+glBindBuffer(GL_ARRAY_BUFFER, vbo);
+glBufferData(GL_ARRAY_BUFFER, vertices.byteLength(), vertices, GL_STATIC_DRAW);
+
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.byteLength(), indices, GL_STATIC_DRAW);
+
+glEnableVertexAttribArray(0);
+glVertexAttribPointer(0, 3, GL_FLOAT, false, 6 * 4, 0);
+
+glEnableVertexAttribArray(1);
+glVertexAttribPointer(1, 3, GL_FLOAT, false, 6 * 4, 3 * 4);
+
+glBindVertexArray(0);
+
+while (Running())
+{
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+
+    if (IsResized())
+    {
+        glViewport(0, 0, GetWidth(), GetHeight());
+    }
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glUseProgram(program);
+    glBindVertexArray(vao);
+    glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+
+    Flip();
+}
+
+glDeleteBuffers(vbo);
+glDeleteBuffers(ebo);
+glDeleteVertexArrays(vao);
+glDeleteProgram(program);
+Close();

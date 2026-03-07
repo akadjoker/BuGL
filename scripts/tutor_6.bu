@@ -1,0 +1,224 @@
+// Tutor 6: text rendering 2D (stb_truetype + OpenGL 3.3 core)
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import STB;
+using STB;
+
+
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!Init("Tutor 6 - 2D Text", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.06, 0.08, 0.12, 1.0);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+glDisable(GL_DEPTH_TEST);
+
+var vs_src =
+"#version 330 core\n" +
+"layout(location = 0) in vec2 aPos;\n" +
+"layout(location = 1) in vec2 aUV;\n" +
+"uniform vec2 uScreen;\n" +
+"out vec2 vUV;\n" +
+"void main() {\n" +
+"    vec2 ndc = vec2((aPos.x / uScreen.x) * 2.0 - 1.0, 1.0 - (aPos.y / uScreen.y) * 2.0);\n" +
+"    vUV = aUV;\n" +
+"    gl_Position = vec4(ndc, 0.0, 1.0);\n" +
+"}\n";
+
+var fs_src =
+"#version 330 core\n" +
+"in vec2 vUV;\n" +
+"uniform sampler2D uFont;\n" +
+"uniform vec4 uColor;\n" +
+"out vec4 FragColor;\n" +
+"void main() {\n" +
+"    float a = texture(uFont, vUV).a;\n" +
+"    FragColor = vec4(uColor.rgb, uColor.a * a);\n" +
+"}\n";
+
+def compileShader(shaderType, src)
+{
+    var s = glCreateShader(shaderType);
+    glShaderSource(s, src);
+    glCompileShader(s);
+    if (glGetShaderiv(s, GL_COMPILE_STATUS) == 0)
+    {
+        print("SHADER ERROR:");
+        print(glGetShaderInfoLog(s));
+        Quit();
+    }
+    return s;
+}
+
+def linkProgram(vsSource, fsSource)
+{
+    var vs = compileShader(GL_VERTEX_SHADER, vsSource);
+    var fs = compileShader(GL_FRAGMENT_SHADER, fsSource);
+
+    var p = glCreateProgram();
+    glAttachShader(p, vs);
+    glAttachShader(p, fs);
+    glLinkProgram(p);
+
+    if (glGetProgramiv(p, GL_LINK_STATUS) == 0)
+    {
+        print("PROGRAM LINK ERROR:");
+        print(glGetProgramInfoLog(p));
+        Quit();
+    }
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return p;
+}
+
+var program = linkProgram(vs_src, fs_src);
+var uScreen = glGetUniformLocation(program, "uScreen");
+var uFont = glGetUniformLocation(program, "uFont");
+var uColor = glGetUniformLocation(program, "uColor");
+
+var fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+var font = Font(fontPath);
+
+var pixelHeight = 42.0;
+var atlasW = 512;
+var atlasH = 512;
+
+var (row, firstChar, numChars, glyphs, bitmap) = font.bake(pixelHeight, atlasW, atlasH, 32, 96);
+if (row <= 0 || bitmap == nil)
+{
+    print("Font.bake failed");
+    Quit();
+}
+
+var fontTex = glGenTextures();
+glBindTexture(GL_TEXTURE_2D, fontTex);
+glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, atlasW, atlasH, 0, GL_ALPHA, GL_UNSIGNED_BYTE, bitmap);
+glBindTexture(GL_TEXTURE_2D, 0);
+
+var vao = glGenVertexArrays();
+var vbo = glGenBuffers();
+
+glBindVertexArray(vao);
+glBindBuffer(GL_ARRAY_BUFFER, vbo);
+glBufferData(GL_ARRAY_BUFFER, 0, nil, GL_DYNAMIC_DRAW);
+glEnableVertexAttribArray(0);
+glVertexAttribPointer(0, 2, GL_FLOAT, false, 4 * 4, 0);
+glEnableVertexAttribArray(1);
+glVertexAttribPointer(1, 2, GL_FLOAT, false, 4 * 4, 2 * 4);
+glBindVertexArray(0);
+
+var textVerts = Float32Array(20000);
+
+var asciiChars = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,:!+-_/()";
+var asciiCodes = [
+    32,
+    48,49,50,51,52,53,54,55,56,57,
+    65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,
+    97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,
+    46,44,58,33,43,45,95,47,40,41
+];
+
+def asciiCodeOf(ch)
+{
+    for (var i = 0; i < len(asciiChars); i++)
+    {
+        if (asciiChars[i] == ch) return asciiCodes[i];
+    }
+    return 32;
+}
+
+def pushGlyphQuad(dst, q)
+{
+    var x0 = q[0]; var y0 = q[1]; var s0 = q[2]; var t0 = q[3];
+    var x1 = q[4]; var y1 = q[5]; var s1 = q[6]; var t1 = q[7];
+
+    dst.add(
+        x0, y0, s0, t0,
+        x1, y0, s1, t0,
+        x1, y1, s1, t1,
+
+        x0, y0, s0, t0,
+        x1, y1, s1, t1,
+        x0, y1, s0, t1
+    );
+}
+
+def pushText(dst, text, x, y)
+{
+    var penX = x;
+    var penY = y;
+
+    for (var i = 0; i < len(text); i++)
+    {
+        var ch = text[i];
+        var code = asciiCodeOf(ch);
+
+        var (nx, ny, q) = font.getBakedQuad(code, penX, penY, 1);
+        if (q != nil) pushGlyphQuad(dst, q);
+
+        penX = nx;
+        penY = ny;
+    }
+
+    return [penX, penY];
+}
+
+var timer = 0.0;
+print("Tutor 6 controls: Mouse Left changes text tint, ESC quit");
+print("Using font: " + fontPath);
+
+while (Running())
+{
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    timer = timer + GetDeltaTime();
+
+    textVerts.clear();
+    pushText(textVerts, "BuGL Tutor 6", 36.0, 80.0);
+    pushText(textVerts, "2D text with stb_truetype atlas", 36.0, 132.0);
+    pushText(textVerts, "Mouse Left: tint text  ESC: quit", 36.0, 184.0);
+
+    var tint = 1.0;
+    if (IsMouseDown(MOUSE_LEFT)) tint = 0.5 + 0.5 * sin(timer * 8.0);
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(program);
+    glUniform2f(uScreen, GetWidth(), GetHeight());
+    glUniform1i(uFont, 0);
+    glUniform4f(uColor, 0.95 * tint, 0.98 * tint, 1.0, 1.0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fontTex);
+
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, textVerts.byteLength(), textVerts, GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, textVerts.length() / 4);
+
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+
+    Flip();
+}
+
+glDeleteTextures(fontTex);
+glDeleteBuffers(vbo);
+glDeleteVertexArrays(vao);
+glDeleteProgram(program);
+Close();

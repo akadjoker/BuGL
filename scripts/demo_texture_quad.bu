@@ -1,0 +1,265 @@
+// ================================================================
+// Demo: Texture Quad — OpenGL 3.3 Core
+// Quad com textura procedural (checkerboard + gradiente)
+// Demonstra: textura, UV coords, sampler2D, glTexImage2D
+// WASD → mover   scroll → zoom
+// ================================================================
+
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("Texture Quad", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glEnable(GL_DEPTH_TEST);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+glClearColor(0.12, 0.12, 0.15, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+
+// ── Shaders ───────────────────────────────────────────────────
+var vs_src =
+"#version 330 core\n" +
+"layout(location = 0) in vec3 aPos;\n" +
+"layout(location = 1) in vec2 aUV;\n" +
+"uniform mat4 uMVP;\n" +
+"out vec2 vUV;\n" +
+"void main() {\n" +
+"    vUV = aUV;\n" +
+"    gl_Position = uMVP * vec4(aPos, 1.0);\n" +
+"}\n";
+
+var fs_src =
+"#version 330 core\n" +
+"in vec2 vUV;\n" +
+"out vec4 FragColor;\n" +
+"uniform sampler2D uTex0;\n" +
+"uniform sampler2D uTex1;\n" +
+"uniform float uTime;\n" +
+"void main() {\n" +
+"    vec4 t0 = texture(uTex0, vUV);\n" +
+"    vec4 t1 = texture(uTex1, vUV * 4.0);\n" +
+"    float blend = sin(uTime * 0.8) * 0.5 + 0.5;\n" +
+"    FragColor = mix(t0, t1, blend * 0.4);\n" +
+"}\n";
+
+// ── Compilar ──────────────────────────────────────────────────
+def compileShader(_type, src)
+{
+    var s = glCreateShader(_type);
+    glShaderSource(s, src);
+    glCompileShader(s);
+    if (glGetShaderiv(s, GL_COMPILE_STATUS) == 0)
+    {
+        print("SHADER ERROR: " + glGetShaderInfoLog(s));
+        Quit();
+    }
+    return s;
+}
+
+def clamp(x, minVal, maxVal)
+{
+    if (x < minVal) return minVal;
+    if (x > maxVal) return maxVal;
+    return x;
+}
+
+var vs   = compileShader(GL_VERTEX_SHADER,   vs_src);
+var fs   = compileShader(GL_FRAGMENT_SHADER, fs_src);
+var prog = glCreateProgram();
+glAttachShader(prog, vs);
+glAttachShader(prog, fs);
+glLinkProgram(prog);
+if (glGetProgramiv(prog, GL_LINK_STATUS) == 0)
+{
+    print("LINK ERROR: " + glGetProgramInfoLog(prog));
+    Quit();
+}
+glDeleteShader(vs);
+glDeleteShader(fs);
+
+// ── Quad — 2 triângulos, layout: pos(vec3) + uv(vec2) ─────────
+//
+//  3 ──── 2
+//  │    / │
+//  │   /  │
+//  │  /   │
+//  0 ──── 1
+//
+var verts = Float32Array([
+//   x     y     z     u     v
+    -1.0, -1.0,  0.0,  0.0,  0.0,   // 0 — baixo esquerdo
+     1.0, -1.0,  0.0,  1.0,  0.0,   // 1 — baixo direito
+     1.0,  1.0,  0.0,  1.0,  1.0,   // 2 — cima direito
+    -1.0,  1.0,  0.0,  0.0,  1.0    // 3 — cima esquerdo
+]);
+var indices = Uint16Array([0, 1, 2,  0, 2, 3]);
+var stride  = 5 * 4;
+
+var vao = glGenVertexArrays();
+var vbo = glGenBuffers();
+var ebo = glGenBuffers();
+
+glBindVertexArray(vao);
+glBindBuffer(GL_ARRAY_BUFFER, vbo);
+glBufferData(GL_ARRAY_BUFFER, verts.byteLength(), verts, GL_STATIC_DRAW);
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.byteLength(), indices, GL_STATIC_DRAW);
+glEnableVertexAttribArray(0);
+glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0);
+glEnableVertexAttribArray(1);
+glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 3 * 4);
+glBindVertexArray(0);
+
+// ── Gerar texturas procedurais ────────────────────────────────
+var texSize = 256;
+
+// Textura 0 — checkerboard colorido
+def makeCheckerboard(size, tileSize)
+{
+    var pixels = @(size * size * 4, 0); // Buffer UINT8
+    var p = 0;
+    for (var y = 0; y < size; y++)
+    {
+        for (var x = 0; x < size; x++)
+        {
+            var tx = floor(x / tileSize);
+            var ty = floor(y / tileSize);
+            if ((tx + ty) % 2 == 0)
+            {
+                pixels[p + 0] = 220;
+                pixels[p + 1] = 80;
+                pixels[p + 2] = 60;
+                pixels[p + 3] = 255;
+            }
+            else
+            {
+                pixels[p + 0] = 240;
+                pixels[p + 1] = 220;
+                pixels[p + 2] = 180;
+                pixels[p + 3] = 255;
+            }
+            p = p + 4;
+        }
+    }
+    return pixels;
+}
+
+// Textura 1 — gradiente radial
+def makeRadialGradient(size)
+{
+    var pixels = @(size * size * 4, 0); // Buffer UINT8
+    var half = size / 2.0;
+    var p = 0;
+    for (var y = 0; y < size; y++)
+    {
+        for (var x = 0; x < size; x++)
+        {
+            var dx = (x - half) / half;
+            var dy = (y - half) / half;
+            var d  = sqrt(dx*dx + dy*dy);
+            d = 1.0 - clamp(d, 0.0, 1.0);
+            pixels[p + 0] = floor(d * 80);
+            pixels[p + 1] = floor(d * 160);
+            pixels[p + 2] = floor(d * 255);
+            pixels[p + 3] = 255;
+            p = p + 4;
+        }
+    }
+    return pixels;
+}
+
+var checker  = makeCheckerboard(texSize, 32);
+var gradient = makeRadialGradient(texSize);
+
+def uploadTexture(pixels, size)
+{
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+var tex0 = uploadTexture(checker,  texSize);
+var tex1 = uploadTexture(gradient, texSize);
+
+// ── Uniforms ──────────────────────────────────────────────────
+var uMVP  = glGetUniformLocation(prog, "uMVP");
+var uTex0 = glGetUniformLocation(prog, "uTex0");
+var uTex1 = glGetUniformLocation(prog, "uTex1");
+var uTime = glGetUniformLocation(prog, "uTime");
+
+var bufMVP = MatrixToBuffer(MatrixIdentity());
+var deg2rad = 0.017453292519943295;
+
+// ── Camera ────────────────────────────────────────────────────
+var camX = 0.0;  var camY = 0.0;  var camZ = 3.0;
+var zoom = 3.0;
+var rotY = 0.0;
+var time = 0.0;
+
+// ── Loop ──────────────────────────────────────────────────────
+while (Running())
+{
+    var dt = GetDeltaTime();
+    time = time + dt;
+
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+    if (IsKeyDown(KEY_W))     camY = camY + 2.0 * dt;
+    if (IsKeyDown(KEY_S))     camY = camY - 2.0 * dt;
+    if (IsKeyDown(KEY_A))     camX = camX - 2.0 * dt;
+    if (IsKeyDown(KEY_D))     camX = camX + 2.0 * dt;
+    if (IsKeyDown(KEY_LEFT))  rotY = rotY + 60.0 * dt;
+    if (IsKeyDown(KEY_RIGHT)) rotY = rotY - 60.0 * dt;
+    if (IsKeyDown(KEY_UP))    zoom = zoom - 2.0 * dt;
+    if (IsKeyDown(KEY_DOWN))  zoom = zoom + 2.0 * dt;
+    zoom = clamp(zoom, 0.5, 20.0);
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    var aspect = GetWidth() / GetHeight();
+    var proj   = MatrixPerspective(60.0 * deg2rad, aspect, 0.1, 100.0);
+    var eye    = Vector3(camX, camY, zoom);
+    var tgt    = Vector3(camX, camY, 0.0);
+    var up     = Vector3(0.0, 1.0, 0.0);
+    var view   = MatrixLookAt(eye, tgt, up);
+    var model  = MatrixRotateY(rotY * deg2rad);
+    var mvp    = MatrixMultiply(MatrixMultiply(model, view), proj);
+    MatrixWriteBuffer(mvp, bufMVP);
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glUseProgram(prog);
+
+    // Bind texturas nas unidades 0 e 1
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex0);
+    glUniform1i(uTex0, 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, tex1);
+    glUniform1i(uTex1, 1);
+
+    glUniformMatrix4fv(uMVP, 1, false, bufMVP);
+    glUniform1f(uTime, time);
+
+    glBindVertexArray(vao);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+    glBindVertexArray(0);
+
+    glUseProgram(0);
+    Flip();
+}
+
+glDeleteTextures(tex0);
+glDeleteTextures(tex1);
+glDeleteBuffers(vbo);
+glDeleteBuffers(ebo);
+glDeleteVertexArrays(vao);
+glDeleteProgram(prog);
+Close();

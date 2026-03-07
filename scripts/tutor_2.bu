@@ -1,0 +1,87 @@
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+
+// Tutor 2: grid legacy + navegação básica (WASD + Q/E)
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!Init("Tutor 2 - Legacy Grid", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glEnable(GL_DEPTH_TEST);
+glLineWidth(1.0);
+glClearColor(0.05, 0.06, 0.08, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+
+var camX = 0.0;
+var camY = 8.0;
+var camZ = 10.0;
+var moveSpeed = 8.0;
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    var step = moveSpeed * dt;
+
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+    if (IsKeyDown(KEY_A)) camX = camX - step;
+    if (IsKeyDown(KEY_D)) camX = camX + step;
+    if (IsKeyDown(KEY_W)) camZ = camZ - step;
+    if (IsKeyDown(KEY_S)) camZ = camZ + step;
+    if (IsKeyDown(KEY_Q)) camY = camY + step;
+    if (IsKeyDown(KEY_E)) camY = camY - step;
+
+    if (IsResized())
+    {
+        glViewport(0, 0, GetWidth(), GetHeight());
+    }
+
+    var aspect = GetWidth() / GetHeight();
+    var size = 10.0;
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-size * aspect, size * aspect, -size, size, -200.0, 200.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glRotatef(60.0, 1.0, 0.0, 0.0);
+    glTranslatef(-camX, -camY, -camZ);
+
+    glBegin(GL_LINES);
+
+    var gridN = 20;
+    for (var i = -gridN; i <= gridN; i++)
+    {
+        if (i == 0)
+        {
+            glColor3f(0.9, 0.2, 0.2);   // eixo X/Z
+        }
+        else
+        {
+            glColor3f(0.25, 0.28, 0.32);
+        }
+
+        glVertex3f(i, 0.0, -gridN);
+        glVertex3f(i, 0.0,  gridN);
+
+        glVertex3f(-gridN, 0.0, i);
+        glVertex3f( gridN, 0.0, i);
+    }
+
+    // eixo Y
+    glColor3f(0.2, 0.8, 0.3);
+    glVertex3f(0.0, 0.0, 0.0);
+    glVertex3f(0.0, 6.0, 0.0);
+
+    glEnd();
+
+    Flip();
+}
+
+Close();

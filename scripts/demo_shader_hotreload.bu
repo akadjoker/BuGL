@@ -1,0 +1,113 @@
+// ================================================================
+// Demo: Shader Hot Reload + GL Debug + Screenshot
+// F3  -> toggle GLDebug
+// F5  -> force shader reload
+// F12 -> save screenshot
+// ESC -> quit
+// ================================================================
+
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL - Shader Hot Reload", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.06, 0.10, 1.0);
+
+var debugEnabled = true;
+GLDebug(debugEnabled);
+
+var program = LoadShaderProgram("assets/shaders/hotreload.vert", "assets/shaders/hotreload.frag");
+if (program <= 0)
+{
+    print("Failed to load shader program.");
+    Quit();
+}
+
+var vertices = Float32Array([
+    // x, y, u, v
+    -0.9, -0.9, 0.0, 0.0,
+     0.9, -0.9, 1.0, 0.0,
+     0.9,  0.9, 1.0, 1.0,
+    -0.9,  0.9, 0.0, 1.0
+]);
+
+var indices = Uint16Array([0, 1, 2, 0, 2, 3]);
+
+var vao = glGenVertexArrays();
+var vbo = glGenBuffers();
+var ebo = glGenBuffers();
+var stride = 4 * 4;
+
+glBindVertexArray(vao);
+glBindBuffer(GL_ARRAY_BUFFER, vbo);
+glBufferData(GL_ARRAY_BUFFER, vertices.byteLength(), vertices, GL_STATIC_DRAW);
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.byteLength(), indices, GL_STATIC_DRAW);
+
+glEnableVertexAttribArray(0);
+glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0);
+glEnableVertexAttribArray(1);
+glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2 * 4);
+glBindVertexArray(0);
+
+print("Demo controls:");
+print("  F3  -> GLDebug on/off");
+print("  F5  -> force shader reload");
+print("  F12 -> screenshot");
+print("Edit scripts/shaders/hotreload.frag while demo runs.");
+
+var timeSec = 0.0;
+while (Running())
+{
+    var dt = GetDeltaTime();
+    timeSec = timeSec + dt;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_F3))
+    {
+        debugEnabled = !debugEnabled;
+        GLDebug(debugEnabled);
+        print("GLDebug = " + debugEnabled);
+    }
+
+    if (IsKeyPressed(KEY_F5))
+    {
+        if (ReloadShaderProgram(program))
+            print("Shader reloaded (manual)");
+    }
+
+    if (IsKeyPressed(KEY_F12))
+    {
+        SaveScreenshot("hotreload_frame.png");
+        print("Saved screenshot: hotreload_frame.png");
+    }
+
+    if (IsResized())
+    {
+        glViewport(0, 0, GetWidth(), GetHeight());
+    }
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glUseProgram(program);
+
+    var uTime = glGetUniformLocation(program, "uTime");
+    if (uTime >= 0) glUniform1f(uTime, timeSec);
+
+    var uResolution = glGetUniformLocation(program, "uResolution");
+    if (uResolution >= 0) glUniform2f(uResolution, GetWidth(), GetHeight());
+
+    glBindVertexArray(vao);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+
+    Flip();
+}
+
+glDeleteBuffers(vbo);
+glDeleteBuffers(ebo);
+glDeleteVertexArrays(vao);
+glDeleteProgram(program);
+Close();
