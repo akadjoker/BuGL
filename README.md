@@ -79,12 +79,12 @@ Drop captured GIFs under `assets/gifs/` and wire them here:
 
 | Demo | Preview |
 |---|---|
-| `demo_box2d_mouse_joint.bu` | ![box2d mouse joint](assets/gifs/box2d_mouse_joint.gif) |
-| `demo_box2d_stack.bu` | ![box2d stack](assets/gifs/box2d_stack.gif) |
-| `demo_bloom_hdr.bu` | ![bloom hdr](assets/gifs/bloom_hdr.gif) |
-| `demo_particles.bu` | ![particles](assets/gifs/particles.gif) |
-| `demo_raymarching.bu` | ![raymarching](assets/gifs/raymarching.gif) |
-| `demo_raytrace.bu` | ![raytrace](assets/gifs/raytrace.gif) |
+| `demo_box2d_mouse_joint.bu` | ![box2d mouse joint](gifs/box2d_mouse_joint.gif) |
+| `demo_box2d_stack.bu` | ![box2d stack](gifs/box2d_stack.gif) |
+| `demo_bloom_hdr.bu` | ![bloom hdr](gifs/bloom_hdr.gif) |
+| `demo_particles.bu` | ![particles](gifs/particles.gif) |
+| `demo_raymarching.bu` | ![raymarching](gifs/raymarching.gif) |
+| `demo_raytrace.bu` | ![raytrace](gifs/raytrace.gif) |
 
 ## Module Overview
 
