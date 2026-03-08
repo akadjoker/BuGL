@@ -1,21 +1,36 @@
 # BuGL
 
-BuGL is a graphics-oriented runtime that combines:
+BuGL is a graphics runtime and learning platform for **BuLang**.
 
-- **BuLang** scripting
-- **SDL2** window/input/context management
-- **OpenGL** bindings (legacy + modern)
-- **STB utilities** (image I/O, resize, fonts, packing, noise)
+It gives you a fast path to build visual demos with script code first, while still exposing real low-level APIs (OpenGL, buffers, shaders, textures, physics helpers).
 
-The goal is simple: **learn and prototype computer graphics fast**, then scale to more advanced OpenGL workflows without leaving the same scripting environment.
+Physics support in this repo includes:
+
+- **Box2D** for 2D rigid-body workflows
+- **ODE** for 3D rigid-body workflows
+
+In short:
+
+- **BuLang** = the language/runtime
+- **BuGL** = the graphics stack and bindings on top of BuLang
+
+## What Is BuLang
+
+BuLang is a lightweight scripting language designed for embedding and fast iteration.
+
+Core BuLang VM/language development is here:
+
+- https://github.com/akadjoker/BuLangVM
+
+BuGL uses BuLang as its scripting layer and focuses on graphics/gameplay workflows.
 
 ## Why BuGL
 
-- Fast iteration with scripts (no C++ rebuild for every visual tweak)
-- Legacy OpenGL path for teaching and rapid experiments
-- Modern OpenGL path for shaders, VBO/VAO/EBO, textures, uniforms
-- Low-copy upload path via `Buffer` and built-in typed arrays
-- Built-in helpers for GIF capture, font baking, atlas packing, triangulation
+- Learn graphics with immediate visual feedback
+- Prototype quickly with scripts (no C++ rebuild for every tweak)
+- Move from legacy OpenGL to modern OpenGL in the same environment
+- Use low-copy data paths (`Buffer`, typed arrays) for real-time workloads
+- Keep everything in one stack: window/input + rendering + utilities + demos
 
 ## Current Status
 
@@ -70,6 +85,8 @@ Extra demos:
 - `scripts/demo_shader_hotreload.bu`
 - `scripts/demo_box2d_stack.bu`
 - `scripts/demo_box2d_mouse_joint.bu`
+- `scripts/demo_box2d_edge_chain.bu`
+- `scripts/demo_ode_fall3d.bu`
 
 Many demos support GIF capture with `F12` toggle.
 
@@ -81,6 +98,7 @@ Drop captured GIFs under `assets/gifs/` and wire them here:
 |---|---|
 | `demo_box2d_mouse_joint.bu` | ![box2d mouse joint](gif/box2d_mouse_joint.gif) |
 | `demo_box2d_stack.bu` | ![box2d stack](gif/box2d_stack.gif) |
+| `demo_ode_fall3d.bu` | ![ode 3d fall](gif/ode_fall3d.gif) |
 | `demo_bloom_hdr.bu` | ![bloom hdr](gif/bloom_hdr.gif) |
 | `demo_particles.bu` | ![particles](gif/particles.gif) |
 | `demo_raymarching.bu` | ![raymarching](gif/raymarching.gif) |
@@ -143,7 +161,14 @@ Includes:
   - `Font` (truetype load, bake, quads)
   - `RectPack`
   - `Gif`
-  - `CDT` (poly2tri)
+- `CDT` (poly2tri)
+
+### `Box2D` and `ODE`
+
+Physics modules are exposed directly to script with API-first bindings:
+
+- `Box2D`: 2D world/body/shapes/joints/debug-draw and callbacks
+- `ODE`: 3D world/space/body/geom/joints and contact collision helpers
 
 ## Data Types for Uploads
 

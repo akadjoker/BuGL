@@ -1,0 +1,135 @@
+// ================================================================
+// BuGL Demo — ODE Falling Box
+// SPACE -> aplica impulso para cima
+// R     -> reset
+// ESC   -> sair
+// ================================================================
+
+import ODE;
+using ODE;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL  ODE Falling Box", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.06, 0.08, 0.12, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glDisable(GL_DEPTH_TEST);
+
+dInitODE2(0);
+
+var world = dWorldCreate();
+var space = dSimpleSpaceCreate(nil);
+
+dWorldSetGravity(world, 0.0, -9.81, 0.0);
+dWorldSetQuickStepNumIterations(world, 30);
+
+var boxSize = 0.9;
+var half = boxSize * 0.5;
+
+var body = dBodyCreate(world);
+dBodySetMassBoxTotal(body, 1.0, boxSize, boxSize, boxSize);
+dBodySetPosition(body, 0.0, 7.0, 0.0);
+
+var geom = dCreateBox(space, boxSize, boxSize, boxSize);
+dGeomSetBody(geom, body);
+
+var fixedStep = 1.0 / 120.0;
+var accumulator = 0.0;
+
+def resetBody()
+{
+    dBodySetPosition(body, 0.0, 7.0, 0.0);
+    dBodySetLinearVel(body, 0.0, 0.0, 0.0);
+    dBodySetAngularVel(body, 0.0, 0.0, 0.0);
+}
+
+def drawGrid()
+{
+    glLineWidth(1.0);
+    glColor3f(0.17, 0.22, 0.28);
+    glBegin(GL_LINES);
+    for (var i = -10; i <= 10; i++)
+    {
+        glVertex2f(i, -5.0);
+        glVertex2f(i, 10.0);
+        glVertex2f(-10.0, i);
+        glVertex2f(10.0, i);
+    }
+    glEnd();
+}
+
+def drawBox(cx, cy, hx, hy)
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glColor4f(0.33, 0.78, 1.0, 0.35);
+    glBegin(GL_QUADS);
+    glVertex2f(cx - hx, cy - hy);
+    glVertex2f(cx + hx, cy - hy);
+    glVertex2f(cx + hx, cy + hy);
+    glVertex2f(cx - hx, cy + hy);
+    glEnd();
+
+    glLineWidth(2.0);
+    glColor3f(0.62, 0.92, 1.0);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(cx - hx, cy - hy);
+    glVertex2f(cx + hx, cy - hy);
+    glVertex2f(cx + hx, cy + hy);
+    glVertex2f(cx - hx, cy + hy);
+    glEnd();
+}
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) resetBody();
+    if (IsKeyPressed(KEY_SPACE)) dBodyAddForce(body, 0.0, 220.0, 0.0);
+
+    var dt = GetDeltaTime();
+    accumulator = accumulator + dt;
+    while (accumulator >= fixedStep)
+    {
+        dWorldQuickStep(world, fixedStep);
+        accumulator = accumulator - fixedStep;
+    }
+
+    var (bx, by, bz) = dBodyGetPosition(body);
+    if (by < -8.0) resetBody();
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    var aspect = GetWidth() / GetHeight();
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-8.0 * aspect, 8.0 * aspect, -5.0, 10.0, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    drawGrid();
+
+    glLineWidth(2.0);
+    glColor3f(0.88, 0.34, 0.34);
+    glBegin(GL_LINES);
+    glVertex2f(-100.0, -4.0);
+    glVertex2f(100.0, -4.0);
+    glEnd();
+
+    drawBox(bx, by, half, half);
+
+    Flip();
+}
+
+dGeomDestroy(geom);
+dBodyDestroy(body);
+dSpaceDestroy(space);
+dWorldDestroy(world);
+dCloseODE();
+
+Close();

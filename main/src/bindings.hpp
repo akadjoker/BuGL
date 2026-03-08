@@ -31,6 +31,7 @@ namespace SDLBindings
     void register_poly2tri(Interpreter &vm);
     void register_box2d(Interpreter &vm);
     void register_box2d_joints(Interpreter &vm);
+    void register_ode(Interpreter &vm);
     void register_raymath(Interpreter &vm);
  
 }

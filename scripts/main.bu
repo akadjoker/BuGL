@@ -43,7 +43,9 @@ using Box2D;
 //include "demo_box2d_stack.bu";
 
 //include "demo_box2d_mouse_joint.bu";
-include "demo_box2d_edge_chain.bu";
+//include "demo_box2d_edge_chain.bu";
+//include "demo_ode_fall.bu";
+include "demo_ode_fall3d.bu";
 
 //include "test_box2d_callbacks.bu";
 

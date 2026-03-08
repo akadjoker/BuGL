@@ -66,5 +66,6 @@ namespace SDLBindings
         register_raymath(vm);
         register_box2d(vm);
         register_box2d_joints(vm);
+        register_ode(vm);
     }
 }
