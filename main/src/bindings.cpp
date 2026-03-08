@@ -70,5 +70,8 @@ namespace SDLBindings
 
         module = vm.addModule("Audio");
         register_audio(module);
+
+        module = vm.addModule("Shapes");
+        register_shapes(module);
     }
 }

@@ -34,6 +34,7 @@ namespace SDLBindings
     void register_ode(Interpreter &vm);
     void register_raymath(Interpreter &vm);
     void register_audio(ModuleBuilder &module);
+    void register_shapes(ModuleBuilder &module);
  
 }
  

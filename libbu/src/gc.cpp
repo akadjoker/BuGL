@@ -26,6 +26,12 @@
  */
 #include "interpreter.hpp"
 
+#if defined(DEBUG_GC)
+#define GC_DEBUG_LOG(...) Info(__VA_ARGS__)
+#else
+#define GC_DEBUG_LOG(...) ((void)0)
+#endif
+
 void Interpreter::markRoots()
 {
 
@@ -279,7 +285,6 @@ void Interpreter::blackenObject(GCObject *obj)
     case GCObjectType::MAP:
     {
         MapInstance *m = static_cast<MapInstance *>(obj);
-        // Marcamos apenas os VALORES. As chaves (Strings) são ignoradas como pediste.
         m->table.forEach([this](String *key, Value val)
                          { 
                             if(val.isObject())
@@ -335,8 +340,10 @@ void Interpreter::runGC()
         return;
     gcInProgress = true;
 
+#if defined(DEBUG_GC)
     size_t bytesBefore = totalAllocated;
     size_t objectsBefore = totalArrays + totalClasses + totalStructs + totalMaps + totalBuffers + totalNativeClasses + totalNativeStructs + totalClosures + totalUpvalues;
+#endif
 
     grayStack.clear();
 
@@ -345,11 +352,6 @@ void Interpreter::runGC()
     traceReferences();
 
     sweep();
-
-    size_t objectCount = totalArrays + totalClasses + totalStructs + totalMaps + totalBuffers + totalNativeClasses + totalNativeStructs + totalClosures + totalUpvalues;
-
-    size_t bytesFreed = bytesBefore - totalAllocated;
-    size_t objectsFreed = objectsBefore - objectCount;
 
     nextGC = static_cast<size_t>(totalAllocated * GC_GROWTH_FACTOR);
     if (nextGC < MIN_GC_THRESHOLD)
@@ -361,10 +363,15 @@ void Interpreter::runGC()
         nextGC = MAX_GC_THRESHOLD;
     }
 
-    // Info("GC: End - Freed %zu objects (%.2f KB). Remaining: %zu objects (%.2f KB). Next GC: %.2f KB",
-    //          objectsFreed, bytesFreed / 1024.0,
-    //          objectCount, totalAllocated / 1024.0,
-    //          nextGC / 1024.0);
+#if defined(DEBUG_GC)
+    size_t objectCount = totalArrays + totalClasses + totalStructs + totalMaps + totalBuffers + totalNativeClasses + totalNativeStructs + totalClosures + totalUpvalues;
+    size_t bytesFreed = bytesBefore - totalAllocated;
+    size_t objectsFreed = objectsBefore - objectCount;
+    GC_DEBUG_LOG("GC: End - Freed %zu objects (%.2f KB). Remaining: %zu objects (%.2f KB). Next GC: %.2f KB",
+                 objectsFreed, bytesFreed / 1024.0,
+                 objectCount, totalAllocated / 1024.0,
+                 nextGC / 1024.0);
+#endif
 
     gcInProgress = false;
 
