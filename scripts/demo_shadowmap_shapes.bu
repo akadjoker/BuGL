@@ -1,0 +1,340 @@
+import SDL;
+using SDL;
+
+import OpenGl;
+using OpenGl;
+
+import GLM;
+using GLM;
+
+import Shapes;
+using Shapes;
+
+import math;
+using math;
+
+// ================================================================
+// BuGL Demo — Shadow Map + Shapes
+// Uses shader files from disk:
+//   assets/shaders/shadowmap_depth.vert/.frag
+//   assets/shaders/shadowmap_scene.vert/.frag
+//
+// Controls:
+//   Arrow keys -> orbit camera
+//   W/S        -> zoom
+//   F5         -> force shader reload
+//   F12        -> screenshot
+//   ESC        -> quit
+// ================================================================
+
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL  ShadowMap + Shapes", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glEnable(GL_DEPTH_TEST);
+glEnable(GL_CULL_FACE);
+glCullFace(GL_BACK);
+glClearColor(0.07, 0.09, 0.12, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+
+var progDepth = LoadShaderProgram("../assets/shaders/depth.vert", "../assets/shaders/depth.frag");
+var progScene = LoadShaderProgram("../assets/shaders/shadowmap_scene.vert", "../assets/shaders/shadowmap_scene.frag");
+if (progDepth <= 0 || progScene <= 0)
+{
+    print("Failed to load shadow map shaders from files.");
+    Quit();
+}
+
+struct MeshGL
+{
+    var vao;
+    var vbo;
+    var ebo;
+    var count;
+}
+
+def buildMeshFromShape(shapeId)
+{
+    if (shapeId == 0) return nil;
+
+    var pbuf = ShapeGetPositions(shapeId);
+    var nbuf = ShapeGetNormals(shapeId);
+    var ibuf = ShapeGetIndices(shapeId);
+    if (pbuf == nil || nbuf == nil || ibuf == nil) return nil;
+
+    var pos = Float32Array(pbuf);
+    var nrm = Float32Array(nbuf);
+    var idx = Uint16Array(ibuf);
+
+    var vcount = int(pos.length() / 3);
+    if (vcount <= 0) return nil;
+
+    var verts = Float32Array(vcount * 6);
+    for (var i = 0; i < vcount; i++)
+    {
+        var b = i * 3;
+        verts.add(
+            pos.get(b), pos.get(b + 1), pos.get(b + 2),
+            nrm.get(b), nrm.get(b + 1), nrm.get(b + 2)
+        );
+    }
+
+    var vao = glGenVertexArrays();
+    var vbo = glGenBuffers();
+    var ebo = glGenBuffers();
+
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.byteLength(), verts, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.byteLength(), idx, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, false, 6 * 4, 0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, false, 6 * 4, 3 * 4);
+    glBindVertexArray(0);
+
+    return MeshGL(vao, vbo, ebo, idx.length());
+}
+
+def drawMesh(mesh)
+{
+    if (mesh == nil) return;
+    glBindVertexArray(mesh.vao);
+    glDrawElements(GL_TRIANGLES, mesh.count, GL_UNSIGNED_SHORT, 0);
+    glBindVertexArray(0);
+}
+
+def freeMesh(mesh)
+{
+    if (mesh == nil) return;
+    glDeleteBuffers(mesh.vbo);
+    glDeleteBuffers(mesh.ebo);
+    glDeleteVertexArrays(mesh.vao);
+}
+
+// Build scene meshes from Shapes API
+var idFloor  = ShapeCreateBox(24.0, 0.8, 24.0);
+var idBox    = ShapeCreateBox(2.2, 2.2, 2.2);
+var idSphere = ShapeCreateSphere(1.2, 24, 14);
+var idTorus  = ShapeCreateTorus(1.7, 0.42, 32, 18);
+
+var meshFloor  = buildMeshFromShape(idFloor);
+var meshBox    = buildMeshFromShape(idBox);
+var meshSphere = buildMeshFromShape(idSphere);
+var meshTorus  = buildMeshFromShape(idTorus);
+
+if (meshFloor == nil || meshBox == nil || meshSphere == nil || meshTorus == nil)
+{
+    print("Failed to build one or more meshes from Shapes.");
+    Quit();
+}
+
+// Shadow map FBO
+var SHADOW_W = 1024;
+var SHADOW_H = 1024;
+var fboShadow = glGenFramebuffers();
+var texShadowDepth = glGenTextures();
+var texShadowColor = glGenTextures();
+
+glBindTexture(GL_TEXTURE_2D, texShadowDepth);
+glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, SHADOW_W, SHADOW_H, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nil);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+// Dummy color attachment to keep FBO complete without GL_NONE draw/read state calls.
+glBindTexture(GL_TEXTURE_2D, texShadowColor);
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SHADOW_W, SHADOW_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+glBindFramebuffer(GL_FRAMEBUFFER, fboShadow);
+glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texShadowDepth, 0);
+glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texShadowColor, 0);
+glDrawBuffers(1, [GL_COLOR_ATTACHMENT0]);
+var fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+if (fboStatus != GL_FRAMEBUFFER_COMPLETE)
+{
+    print("Shadow FBO incomplete. Status = " + fboStatus);
+    Quit();
+}
+
+// Uniform locations
+var dLightMVP = glGetUniformLocation(progDepth, "uLightMVP");
+
+var sMVP       = glGetUniformLocation(progScene, "uMVP");
+var sModel     = glGetUniformLocation(progScene, "uModel");
+var sLightMVP  = glGetUniformLocation(progScene, "uLightMVP");
+var sShadowMap = glGetUniformLocation(progScene, "uShadowMap");
+var sLightDir  = glGetUniformLocation(progScene, "uLightDir");
+var sViewPos   = glGetUniformLocation(progScene, "uViewPos");
+var sBaseColor = glGetUniformLocation(progScene, "uBaseColor");
+
+// Reusable matrix buffers
+var bufModel    = MatrixToBuffer(MatrixIdentity());
+var bufMVP      = MatrixToBuffer(MatrixIdentity());
+var bufLightMVP = MatrixToBuffer(MatrixIdentity());
+
+def renderObjectDepth(mesh, model, lightVP)
+{
+    var lightMVP = MatrixMultiply(model, lightVP);
+    MatrixWriteBuffer(lightMVP, bufLightMVP);
+    glUniformMatrix4fv(dLightMVP, 1, false, bufLightMVP);
+    drawMesh(mesh);
+}
+
+def renderObjectScene(mesh, model, vp, lightVP, r, g, b)
+{
+    var mvp = MatrixMultiply(model, vp);
+    var lightMVP = MatrixMultiply(model, lightVP);
+
+    MatrixWriteBuffer(model, bufModel);
+    MatrixWriteBuffer(mvp, bufMVP);
+    MatrixWriteBuffer(lightMVP, bufLightMVP);
+
+    glUniformMatrix4fv(sModel, 1, false, bufModel);
+    glUniformMatrix4fv(sMVP, 1, false, bufMVP);
+    glUniformMatrix4fv(sLightMVP, 1, false, bufLightMVP);
+    glUniform3f(sBaseColor, r, g, b);
+    drawMesh(mesh);
+}
+
+var deg2rad = 0.017453292519943295;
+var camYaw = 35.0;
+var camPitch = -24.0;
+var camDist = 26.0;
+var lightAngle = 0.0;
+
+print("Shadow map shapes demo:");
+print("Arrow keys orbit | W/S zoom | F5 reload shader files | F12 screenshot | ESC quit");
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    var turn = 65.0 * dt;
+    var zoom = 14.0 * dt;
+
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+    if (IsKeyDown(KEY_LEFT)) camYaw = camYaw - turn;
+    if (IsKeyDown(KEY_RIGHT)) camYaw = camYaw + turn;
+    if (IsKeyDown(KEY_UP)) camPitch = camPitch + turn;
+    if (IsKeyDown(KEY_DOWN)) camPitch = camPitch - turn;
+    if (IsKeyDown(KEY_W)) camDist = camDist - zoom;
+    if (IsKeyDown(KEY_S)) camDist = camDist + zoom;
+
+    if (camPitch > -5.0) camPitch = -5.0;
+    if (camPitch < -80.0) camPitch = -80.0;
+    if (camDist < 8.0) camDist = 8.0;
+    if (camDist > 48.0) camDist = 48.0;
+
+    if (IsKeyPressed(KEY_F5))
+    {
+        var okA = ReloadShaderProgram(progDepth);
+        var okB = ReloadShaderProgram(progScene);
+        print("Reload depth=" + okA + " scene=" + okB);
+    }
+
+    if (IsKeyPressed(KEY_F12))
+    {
+        SaveScreenshot("shadowmap_shapes.png");
+        print("Saved screenshot: shadowmap_shapes.png");
+    }
+
+    lightAngle = lightAngle + dt * 22.0;
+    var lr = lightAngle * deg2rad;
+    var lightX = cos(lr) * 11.0;
+    var lightY = 13.0;
+    var lightZ = sin(lr) * 9.0;
+
+    var yawR = camYaw * deg2rad;
+    var pitR = camPitch * deg2rad;
+    var cp = cos(pitR);
+    var camX = sin(yawR) * cp * camDist;
+    var camY = sin(pitR) * camDist + 6.0;
+    var camZ = cos(yawR) * cp * camDist;
+
+    var eye = Vector3(camX, camY, camZ);
+    var tgt = Vector3(0.0, 1.2, 0.0);
+    var upV = Vector3(0.0, 1.0, 0.0);
+
+    var view = MatrixLookAt(eye, tgt, upV);
+    var aspect = GetWidth() / GetHeight();
+    var proj = MatrixPerspective(60.0 * deg2rad, aspect, 0.1, 180.0);
+    var vp = MatrixMultiply(view, proj);
+
+    var lightEye = Vector3(lightX, lightY, lightZ);
+    var lightTgt = Vector3(0.0, 0.0, 0.0);
+    var lightView = MatrixLookAt(lightEye, lightTgt, upV);
+    var lightProj = MatrixOrtho(-16.0, 16.0, -16.0, 16.0, 0.8, 40.0);
+    var lightVP = MatrixMultiply(lightView, lightProj);
+
+    var ldx = -lightX;
+    var ldy = -lightY;
+    var ldz = -lightZ;
+    var llen = sqrt(ldx*ldx + ldy*ldy + ldz*ldz);
+    if (llen < 0.0001) llen = 1.0;
+    ldx = ldx / llen;
+    ldy = ldy / llen;
+    ldz = ldz / llen;
+
+    // Scene models
+    var mFloor  = MatrixTranslate(0.0, -1.4, 0.0);
+    var mBox    = MatrixTranslate(-4.2, 0.1, 0.0);
+    var mSphere = MatrixTranslate(3.8, 1.0, 1.8);
+    var spin = MatrixRotateY(lightAngle * 1.7 * deg2rad);
+    var mTorus = MatrixMultiply(spin, MatrixTranslate(0.0, 1.3, -4.0));
+
+    // Pass 1: depth from light
+    glViewport(0, 0, SHADOW_W, SHADOW_H);
+    glBindFramebuffer(GL_FRAMEBUFFER, fboShadow);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glCullFace(GL_FRONT);
+    glUseProgram(progDepth);
+    renderObjectDepth(meshFloor,  mFloor, lightVP);
+    renderObjectDepth(meshBox,    mBox, lightVP);
+    renderObjectDepth(meshSphere, mSphere, lightVP);
+    renderObjectDepth(meshTorus,  mTorus, lightVP);
+    glUseProgram(0);
+    glCullFace(GL_BACK);
+
+    // Pass 2: shaded scene using shadow map
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glUseProgram(progScene);
+    glUniform3f(sLightDir, ldx, ldy, ldz);
+    glUniform3f(sViewPos, camX, camY, camZ);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texShadowDepth);
+    glUniform1i(sShadowMap, 1);
+
+    renderObjectScene(meshFloor,  mFloor, vp, lightVP, 0.28, 0.31, 0.36);
+    renderObjectScene(meshBox,    mBox, vp, lightVP, 0.84, 0.28, 0.24);
+    renderObjectScene(meshSphere, mSphere, vp, lightVP, 0.25, 0.72, 0.95);
+    renderObjectScene(meshTorus,  mTorus, vp, lightVP, 0.92, 0.86, 0.33);
+
+    glUseProgram(0);
+    Flip();
+}
+
+freeMesh(meshFloor);
+freeMesh(meshBox);
+freeMesh(meshSphere);
+freeMesh(meshTorus);
+ShapeClear();
+
+glDeleteTextures(texShadowDepth);
+glDeleteTextures(texShadowColor);
+glDeleteFramebuffers(fboShadow);
+glDeleteProgram(progDepth);
+glDeleteProgram(progScene);
+
+Close();

@@ -44,7 +44,7 @@ using Box2D;
 //include "demo_audio.bu";
 //include "demo_shapes_legacy.bu";
 
-include  "demo_shapes_gc_repro.bu";
+//include  "demo_shapes_gc_repro.bu";
 
 //include "demo_box2d_mouse_joint.bu";
 //include "demo_box2d_edge_chain.bu";
@@ -56,3 +56,8 @@ include  "demo_shapes_gc_repro.bu";
 
 //include "demo_raytrace.bu";
 //clude "demo_showcase_portal.bu";
+
+
+//include  "demo_shadowmap_shapes.bu";
+include "demo_shadowmap_shapes_v2.bu";
+//include "demo_shadowmap_csm_v3.bu";
