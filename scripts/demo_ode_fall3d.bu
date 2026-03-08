@@ -120,42 +120,53 @@ def drawFloor()
     glEnd();
 }
 
-def drawCube(x, y, z, h)
+def drawBoxLocal(hx, hy, hz)
 {
-    glPushMatrix();
-    glTranslatef(x, y, z);
-
-    glColor3f(0.35, 0.78, 1.0);
     glBegin(GL_QUADS);
     // front
-    glVertex3f(-h, -h,  h); glVertex3f( h, -h,  h); glVertex3f( h,  h,  h); glVertex3f(-h,  h,  h);
+    glVertex3f(-hx, -hy,  hz); glVertex3f( hx, -hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
     // back
-    glVertex3f( h, -h, -h); glVertex3f(-h, -h, -h); glVertex3f(-h,  h, -h); glVertex3f( h,  h, -h);
+    glVertex3f( hx, -hy, -hz); glVertex3f(-hx, -hy, -hz); glVertex3f(-hx,  hy, -hz); glVertex3f( hx,  hy, -hz);
     // left
-    glVertex3f(-h, -h, -h); glVertex3f(-h, -h,  h); glVertex3f(-h,  h,  h); glVertex3f(-h,  h, -h);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx, -hy,  hz); glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
     // right
-    glVertex3f( h, -h,  h); glVertex3f( h, -h, -h); glVertex3f( h,  h, -h); glVertex3f( h,  h,  h);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx,  hy, -hz); glVertex3f( hx,  hy,  hz);
     // top
-    glVertex3f(-h,  h,  h); glVertex3f( h,  h,  h); glVertex3f( h,  h, -h); glVertex3f(-h,  h, -h);
+    glVertex3f(-hx,  hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f( hx,  hy, -hz); glVertex3f(-hx,  hy, -hz);
     // bottom
-    glVertex3f(-h, -h, -h); glVertex3f( h, -h, -h); glVertex3f( h, -h,  h); glVertex3f(-h, -h,  h);
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx, -hy,  hz); glVertex3f(-hx, -hy,  hz);
     glEnd();
 
     glColor3f(0.92, 0.97, 1.0);
     glLineWidth(1.8);
     glBegin(GL_LINE_LOOP);
-    glVertex3f(-h, -h,  h); glVertex3f( h, -h,  h); glVertex3f( h,  h,  h); glVertex3f(-h,  h,  h);
+    glVertex3f(-hx, -hy,  hz); glVertex3f( hx, -hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
     glEnd();
     glBegin(GL_LINE_LOOP);
-    glVertex3f(-h, -h, -h); glVertex3f( h, -h, -h); glVertex3f( h,  h, -h); glVertex3f(-h,  h, -h);
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx,  hy, -hz); glVertex3f(-hx,  hy, -hz);
     glEnd();
     glBegin(GL_LINES);
-    glVertex3f(-h, -h,  h); glVertex3f(-h, -h, -h);
-    glVertex3f( h, -h,  h); glVertex3f( h, -h, -h);
-    glVertex3f( h,  h,  h); glVertex3f( h,  h, -h);
-    glVertex3f(-h,  h,  h); glVertex3f(-h,  h, -h);
+    glVertex3f(-hx, -hy,  hz); glVertex3f(-hx, -hy, -hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx, -hy, -hz);
+    glVertex3f( hx,  hy,  hz); glVertex3f( hx,  hy, -hz);
+    glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
     glEnd();
+}
 
+def drawBoxBody(bodyRef, hx, hy, hz)
+{
+    if (bodyRef == nil) return;
+    var (px, py, pz) = dBodyGetPosition(bodyRef);
+    var (r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11) = dBodyGetRotation(bodyRef);
+    var m = [
+        r0, r4, r8, 0.0,
+        r1, r5, r9, 0.0,
+        r2, r6, r10, 0.0,
+        px, py, pz, 1.0
+    ];
+    glPushMatrix();
+    glMultMatrixf(m);
+    drawBoxLocal(hx, hy, hz);
     glPopMatrix();
 }
 
@@ -333,10 +344,7 @@ while (Running())
         if (o.shapeType == 0)
         {
             glColor3f(o.r, o.g, o.b);
-            var hh = o.sx * 0.5;
-            if (o.sy > o.sx) hh = o.sy * 0.5;
-            if (o.sz > o.sx && o.sz > o.sy) hh = o.sz * 0.5;
-            drawCube(dx, dy, dz, hh);
+            drawBoxBody(o.body, o.sx * 0.5, o.sy * 0.5, o.sz * 0.5);
         }
         else
         {
@@ -346,7 +354,7 @@ while (Running())
     }
 
     glColor3f(0.35, 0.78, 1.0);
-    drawCube(bx, by, bz, cubeHalf);
+    drawBoxBody(body, cubeHalf, cubeHalf, cubeHalf);
 
     if (gifRec)
     {

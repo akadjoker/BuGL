@@ -36,6 +36,13 @@ namespace SDLBindings
         return 11;
     }
 
+    static int push_nil12(Interpreter *vm)
+    {
+        for (int i = 0; i < 12; ++i)
+            vm->pushNil();
+        return 12;
+    }
+
     static int read_pointer_arg(Value *args, int index, void **out, const char *fnName, const char *typeName)
     {
         if (!args[index].isPointer())
@@ -1382,7 +1389,9 @@ namespace SDLBindings
         if (!read_pointer_arg(args, 0, (void **)&j, "dJointSetHinge2Axis1", "joint"))
             return 0;
         dVector3 axis1 = {(dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber(), 0};
-        dJointSetHinge2Axes(j, axis1, nullptr);
+        dVector3 axis2 = {0, 0, 0, 0};
+        dJointGetHinge2Axis2(j, axis2);
+        dJointSetHinge2Axes(j, axis1, axis2);
         return 0;
     }
 
@@ -1396,8 +1405,10 @@ namespace SDLBindings
         dJointID j = nullptr;
         if (!read_pointer_arg(args, 0, (void **)&j, "dJointSetHinge2Axis2", "joint"))
             return 0;
+        dVector3 axis1 = {0, 0, 0, 0};
         dVector3 axis2 = {(dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber(), 0};
-        dJointSetHinge2Axes(j, nullptr, axis2);
+        dJointGetHinge2Axis1(j, axis1);
+        dJointSetHinge2Axes(j, axis1, axis2);
         return 0;
     }
 
@@ -2112,6 +2123,24 @@ namespace SDLBindings
         return 3;
     }
 
+    static int native_dBodyGetRotation(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetRotation expects (body)");
+            return push_nil12(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetRotation", "body"))
+            return push_nil12(vm);
+        const dReal *r = dBodyGetRotation(b);
+        if (!r)
+            return push_nil12(vm);
+        for (int i = 0; i < 12; ++i)
+            vm->pushDouble((double)r[i]);
+        return 12;
+    }
+
     static int native_dBodySetLinearVel(Interpreter *vm, int argc, Value *args)
     {
         if (argc != 4)
@@ -2804,6 +2833,7 @@ namespace SDLBindings
             .addFunction("dBodyDestroy", native_dBodyDestroy, 1)
             .addFunction("dBodySetPosition", native_dBodySetPosition, 4)
             .addFunction("dBodyGetPosition", native_dBodyGetPosition, 1)
+            .addFunction("dBodyGetRotation", native_dBodyGetRotation, 1)
             .addFunction("dBodySetLinearVel", native_dBodySetLinearVel, 4)
             .addFunction("dBodyGetLinearVel", native_dBodyGetLinearVel, 1)
             .addFunction("dBodySetAngularVel", native_dBodySetAngularVel, 4)

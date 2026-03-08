@@ -1,46 +1,227 @@
 # BuGL
 
-BuGL is a graphics runtime and learning platform for **BuLang**.
+> **Learn graphics programming with real APIs — without the C++ boilerplate.**
 
-It gives you a fast path to build visual demos with script code first, while still exposing real low-level APIs (OpenGL, buffers, shaders, textures, physics helpers).
+BuGL is a scripting-first graphics runtime built on [BuLang](https://github.com/akadjoker/BuLangVM).  
+Write OpenGL demos in minutes. From immediate mode triangles to ray tracers with reflections.
 
-Physics support in this repo includes:
+---
 
-- **Box2D** for 2D rigid-body workflows
-- **ODE** for 3D rigid-body workflows
+## Gallery
 
-In short:
+| Ray Tracer | Bloom + HDR | Particles |
+|:-:|:-:|:-:|
+| ![ray tracer](gif/demo_raytrace.gif) | ![bloom hdr](gif/bloom_hdr.gif) | ![particles](gif/particles.gif) |
+| Reflections · refraction · Fresnel · 8 bounces | 3-pass render pipeline · tone mapping | 50k particles · physics · additive blending |
 
-- **BuLang** = the language/runtime
-- **BuGL** = the graphics stack and bindings on top of BuLang
+| Ray Marching | Terrain | Box2D |
+|:-:|:-:|:-:|
+| ![raymarching](gif/raymarching.gif) | ![terrain](gif/terrain.gif) | ![box2d mouse joint](gif/box2d_mouse_joint.gif) |
+| SDF · smooth union · soft shadows · AO · fog | FBM heightmap · 32k triangles · fog | 2D rigid body · mouse joint drag |
 
-## What Is BuLang
+| ODE Car | ODE Fall 3D | Box2D Stack |
+|:-:|:-:|:-:|
+| ![ode car](gif/ode_car.gif) | ![ode fall 3d](gif/ode_fall3d.gif) | ![box2d stack](gif/box2d_stack.gif) |
+| Hinge2 joints · steering · suspension | 3D rigid body · collision contacts | 2D stacking · impulses · stability |
 
-BuLang is a lightweight scripting language designed for embedding and fast iteration.
+---
 
-Core BuLang VM/language development is here:
+## Quick Start
 
-- https://github.com/akadjoker/BuLangVM
+**Dependencies:**
+```bash
+# Ubuntu / Debian
+sudo apt install cmake libsdl2-dev libgl-dev
 
-BuGL uses BuLang as its scripting layer and focuses on graphics/gameplay workflows.
+# macOS
+brew install cmake sdl2
+```
 
-## Why BuGL
+**Build and run:**
+```bash
+git clone https://github.com/akadjoker/BuGL
+cd BuGL
+cmake -S . -B build && cmake --build build -j
+./bin/main scripts/tutor_1.bu
+```
 
-- Learn graphics with immediate visual feedback
-- Prototype quickly with scripts (no C++ rebuild for every tweak)
-- Move from legacy OpenGL to modern OpenGL in the same environment
-- Use low-copy data paths (`Buffer`, typed arrays) for real-time workloads
-- Keep everything in one stack: window/input + rendering + utilities + demos
+---
 
-## Current Status
+## Why BuGL?
 
-BuGL is actively evolving. Core rendering workflows are working and already useful for tutorials and demos.
+Opening a window with OpenGL in C++ takes 80+ lines before you see a single triangle.  
+In BuGL:
 
-## Project Docs
+```javascript
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+Init("Demo", 1280, 720, SDL_WINDOW_OPENGL);
 
-- [Contributing](CONTRIBUTING.md)
-- [Sponsorship](SPONSORS.md)
-- [License](LICENSE)
+while (Running())
+{
+    glClear(GL_COLOR_BUFFER_BIT);
+    // your code here
+    Flip();
+}
+```
+
+The focus stays on the **concepts** — shaders, buffers, matrices, physics — not fighting the compiler.
+
+---
+
+## Learning Path
+
+Follow the tutorials in order. Each one introduces a single new concept:
+
+| Script | What you learn |
+|--------|----------------|
+| `tutor_1.bu` | Legacy OpenGL · `glBegin/glEnd` · immediate mode |
+| `tutor_2.bu` | Client arrays · `glVertexPointer` · `glDrawArrays` |
+| `tutor_3.bu` | VBO · vertex shader · fragment shader |
+| `tutor_4.bu` | VAO · camera · MVP matrix · 3D grid |
+| `tutor_5.bu` | FPS camera · mouse look · WASD · GIF capture |
+| `tutor_6.bu` | 2D text · TrueType · texture atlas |
+
+---
+
+## Demos
+
+After the tutorials, explore the demos:
+
+| Demo | Concepts |
+|------|----------|
+| `demo_texture_quad.bu` | Textures · UV coords · sampler2D · `glTexImage2D` |
+| `demo_phong.bu` | Phong shading · normals · point light |
+| `demo_particles.bu` | 50k particles · `glBufferSubData` · additive blending |
+| `demo_terrain.bu` | FBM heightmap · fog · altitude-based colour |
+| `demo_bloom_hdr.bu` | FBO · MRT · Gaussian blur · HDR tone mapping |
+| `demo_raymarching.bu` | SDF · smooth union · soft shadows · AO |
+| `demo_raytrace.bu` | Ray tracing · reflection · refraction · Fresnel · 8 bounces |
+| `demo_shader_hotreload.bu` | Live shader hot reload |
+| `demo_box2d_stack.bu` | Box2D · rigid bodies · stacking |
+| `demo_box2d_mouse_joint.bu` | Box2D · mouse joint · interactive drag |
+| `demo_box2d_edge_chain.bu` | Box2D · edge chain · 2D terrain |
+| `demo_ode_fall3d.bu` | ODE · 3D physics · plane collision |
+| `demo_ode_car.bu` | ODE · hinge2 car · suspension |
+
+All demos support **F12** to record a GIF.
+
+---
+
+## Modules
+
+### `SDL` — window, input, GL context
+
+```javascript
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+Init("Title", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    var (mx, my) = GetMouseDelta();
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_F12)) SaveScreenshot("frame.png");
+    Flip();
+}
+```
+
+### `OpenGl` — the full OpenGL API
+
+```javascript
+GLDebug(true);
+var prog = LoadShaderProgram("vert.glsl", "frag.glsl"); // auto hot reload
+
+while (Running())
+{
+    glUseProgram(prog);   // reloads shader if file changed on disk
+    GLCheck("after draw");
+    Flip();
+}
+```
+
+Includes: core state · legacy fixed pipeline · VBO/VAO/EBO · textures · shaders · uniforms · instancing · UBO · render targets · queries.
+
+### `STB` — images, fonts, GIF
+
+```javascript
+var font = Font();
+font.load("assets/arial.ttf", 32);
+font.drawText("Hello BuGL", 10, 10, 1.0, 1.0, 1.0);
+
+var gif = Gif();
+gif.begin(640, 360);
+gif.addFrame(pixels, 4, 16, -width * 4);
+gif.save("output.gif");
+```
+
+### `Box2D` — 2D physics
+
+```javascript
+var world = b2CreateWorld(0.0, -9.8);
+var body  = b2CreateDynamicBody(world, x, y);
+b2AddCircle(body, radius, density, friction, restitution);
+b2WorldStep(world, dt, 8, 3);
+var (bx, by) = b2GetPosition(body);
+```
+
+### `ODE` — 3D physics
+
+```javascript
+dInitODE2(0);
+var world = dWorldCreate();
+var space = dSimpleSpaceCreate(nil);
+dWorldSetGravity(world, 0.0, -9.81, 0.0);
+var body = dBodyCreate(world);
+dGeomSetBody(dCreateBox(space, w, h, d), body);
+```
+
+---
+
+## Data Types for GPU Uploads
+
+Three ways to send data to OpenGL:
+
+```javascript
+// 1. Fixed-size buffer — good for static data
+var pixels = @(width * height * 4, 0);
+
+// 2. Typed array — good for dynamic geometry
+var verts = Float32Array(1000);
+verts.add(x, y, z,  r, g, b);
+glBufferData(GL_ARRAY_BUFFER, verts.byteLength(), verts, GL_STATIC_DRAW);
+
+// 3. Partial update — good for particles / skinning
+glBufferSubData(GL_ARRAY_BUFFER, 0, verts.byteLength(), verts);
+```
+
+Available types: `Uint8Array` · `Int16Array` · `Uint16Array` · `Int32Array` · `Uint32Array` · `Float32Array` · `Float64Array`
+
+---
+
+## Project Layout
+
+```
+BuGL/
+├── bin/                      compiled binary
+├── scripts/
+│   ├── tutor_1.bu            learning path
+│   ├── ...
+│   └── demo_raytrace.bu      advanced demos
+├── assets/
+│   ├── shaders/              .vert / .frag for hot reload
+│   ├── fonts/
+│   └── gifs/                 GIFs captured with F12
+└── main/src/
+    ├── imopengl.cpp          OpenGL core + matrix ops
+    ├── opengl_shader.cpp     shaders + uniforms + hot reload
+    ├── opengl_rendertarget.cpp
+    ├── stb_bindings.cpp      images + fonts + GIF
+    ├── box2d_bindings.cpp    2D physics
+    └── ode_bindings.cpp      3D physics
+```
+
+---
 
 ## Build
 
@@ -49,194 +230,15 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-Binary:
-
-- `bin/main`
-
-## Run
-
-Run a script directly:
-
 ```bash
-./bin/main scripts/tutor_6.bu
+./bin/main scripts/tutor_1.bu   # run a script directly
+./bin/main scripts/main.bu      # launcher with menu
 ```
 
-Or use the launcher script:
+---
 
-```bash
-./bin/main scripts/main.bu
-```
+## Links
 
-## Learning Path (Recommended)
-
-Start with the tutorial sequence:
-
-- `scripts/tutor_1.bu` - legacy triangle and client arrays
-- `scripts/tutor_2.bu` - transition concepts
-- `scripts/tutor_3.bu` - modern pipeline minimal shader + VBO/VAO
-- `scripts/tutor_4.bu` - camera + MVP + grid
-- `scripts/tutor_5.bu` - FPS controls + GIF capture
-- `scripts/tutor_6.bu` - 2D text rendering with `Font` + texture atlas
-
-Extra demos:
-
-- `scripts/demo_texture_quad.bu`
-- `scripts/demo_phong.bu`
-- `scripts/demo_shader_hotreload.bu`
-- `scripts/demo_box2d_stack.bu`
-- `scripts/demo_box2d_mouse_joint.bu`
-- `scripts/demo_box2d_edge_chain.bu`
-- `scripts/demo_ode_fall3d.bu`
-
-Many demos support GIF capture with `F12` toggle.
-
-## GIF Gallery
-
-Drop captured GIFs under `assets/gifs/` and wire them here:
-
-| Demo | Preview |
-|---|---|
-| `demo_box2d_mouse_joint.bu` | ![box2d mouse joint](gif/box2d_mouse_joint.gif) |
-| `demo_box2d_stack.bu` | ![box2d stack](gif/box2d_stack.gif) |
-| `demo_ode_fall3d.bu` | ![ode 3d fall](gif/ode_fall3d.gif) |
-| `demo_bloom_hdr.bu` | ![bloom hdr](gif/bloom_hdr.gif) |
-| `demo_particles.bu` | ![particles](gif/particles.gif) |
-| `demo_raymarching.bu` | ![raymarching](gif/raymarching.gif) |
-| `demo_raytrace.bu` | ![raytrace](gif/raytrace.gif) |
-
-## Module Overview
-
-### `SDL`
-
-Window creation, event/input access, and GL context attributes.
-
-Typical usage:
-
-```bu
-SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
-SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
-Init("Demo", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-```
-
-### `OpenGl`
-
-Includes:
-
-- Core state functions (`glEnable`, `glViewport`, `glClear`, ...)
-- Legacy fixed pipeline + client arrays
-- Vertex buffer API (`glBufferData`, `glBufferSubData`, ...)
-- Texture API (`glTexImage2D`, params, pixel store)
-- Shader/program API (compile/link/uniforms/attribs)
-- Modern extras split by file (`instancing`, `query`, `ubo`, `rendertarget`)
-- Productivity helpers:
-  - `LoadShaderProgram(vertexPath, fragmentPath[, watch])` (auto hot reload on file changes when used with `glUseProgram`)
-  - `ReloadShaderProgram(program)` (force reload now)
-  - `GLDebug(enabled)` / `GLCheck([label])`
-  - `SaveScreenshot(path[, flipY])`
-
-Quick example:
-
-```bu
-GLDebug(true);
-var prog = LoadShaderProgram("assets/shaders/basic.vert", "assets/shaders/basic.frag"); // watch = true by default
-
-while (Running())
-{
-    glUseProgram(prog); // auto reload if files changed
-    // draw...
-
-    if (IsKeyPressed(KEY_F12)) SaveScreenshot("frame.png");
-    Flip();
-}
-```
-
-### `STB`
-
-Includes:
-
-- `stbi_*` image loading/writing
-- resize helpers
-- perlin helpers
-- native classes:
-  - `Font` (truetype load, bake, quads)
-  - `RectPack`
-  - `Gif`
-- `CDT` (poly2tri)
-
-### `Box2D` and `ODE`
-
-Physics modules are exposed directly to script with API-first bindings:
-
-- `Box2D`: 2D world/body/shapes/joints/debug-draw and callbacks
-- `ODE`: 3D world/space/body/geom/joints and contact collision helpers
-
-## Data Types for Uploads
-
-BuGL supports three useful data paths for graphics uploads:
-
-1. **Bu arrays**: easiest, may require conversion
-2. **`Buffer` (`@(count, type)`)**: fixed-size native memory
-3. **Typed arrays** (`Uint8Array`, `Float32Array`, ...): dynamic container with `add/reserve/pack`
-
-Use `Buffer` or typed arrays for hot paths (meshes, textures, dynamic updates).
-
-### Typed Array API
-
-Available classes:
-
-- `Uint8Array`
-- `Int16Array`
-- `Uint16Array`
-- `Int32Array`
-- `Uint32Array`
-- `Float32Array`
-- `Float64Array`
-
-Shared methods:
-
-- constructor: `size | array | buffer | typedarray`
-- `add(...)`
-- `clear()`
-- `reserve(n)`
-- `pack()`
-- `get(i)` / `set(i, v)`
-- `toBuffer()`
-- `length()`, `capacity()`, `byteLength()`, `byteCapacity()`, `ptr()`
-
-## Architecture / Source Layout
-
-Main binding files:
-
-- `main/src/imopengl.cpp` - OpenGL core + immediate mode + matrix ops
-- `main/src/opengl_legacy.cpp` - legacy arrays and fixed-function helpers
-- `main/src/opengl_vertexbuffer.cpp`
-- `main/src/opengl_texture.cpp`
-- `main/src/opengl_shader.cpp`
-- `main/src/opengl_instancing.cpp`
-- `main/src/opengl_query.cpp`
-- `main/src/opengl_ubo.cpp`
-- `main/src/opengl_rendertarget.cpp`
-- `main/src/stb_bindings.cpp`
-- `main/src/stb_truetype.cpp`
-- `main/src/stb_rect_pack.cpp`
-- `main/src/msf_gif.cpp`
-- `main/src/poly2tri_binding.cpp`
-- `main/src/device_input_bindings.cpp`
-- `main/src/raymath.cpp`
-
-Module registration entry point:
-
-- `main/src/bindings.cpp`
-
-## Known Notes
-
-- Include path resolution currently tries multiple fallbacks; some "file not found" probes are expected before a successful include.
-- Typed arrays use capacity-growth semantics; constructor with numeric arg creates capacity, not pre-filled logical length.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-BuGL is distributed under the [MIT License](LICENSE).
+- **BuLang VM** — https://github.com/akadjoker/BuLangVM
+- **License** — MIT
+- **Contributing** — [CONTRIBUTING.md](CONTRIBUTING.md)

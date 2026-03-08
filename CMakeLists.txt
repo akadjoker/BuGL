@@ -21,6 +21,7 @@ endif()
 add_subdirectory(vendor/miniz)
 add_subdirectory(vendor/poly2tri)
 add_subdirectory(vendor/box2d)
+add_subdirectory(vendor/audio)
 
 # Embed ODE as a dependency only (skip upstream demos/tests targets).
 set(ODE_WITH_DEMOS OFF CACHE BOOL "Disable ODE demos in BuGL build" FORCE)
@@ -30,6 +31,9 @@ add_subdirectory(vendor/ODE)
 
 add_subdirectory(libbu)
 add_subdirectory(main)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/testAudio/CMakeLists.txt")
+    add_subdirectory(testAudio)
+endif()
  
  
 
