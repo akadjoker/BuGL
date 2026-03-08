@@ -67,5 +67,8 @@ namespace SDLBindings
         register_box2d(vm);
         register_box2d_joints(vm);
         register_ode(vm);
+
+        module = vm.addModule("Audio");
+        register_audio(module);
     }
 }

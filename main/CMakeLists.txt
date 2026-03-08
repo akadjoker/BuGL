@@ -57,7 +57,7 @@ endif()
    
 endif()
 
-target_link_libraries(main miniz poly2tri ODE  box2d libbu SDL2 GL)
+target_link_libraries(main miniz poly2tri ODE box2d bugl_audio libbu SDL2 GL)
 
 if (WIN32)
     target_link_libraries(main Winmm.lib )

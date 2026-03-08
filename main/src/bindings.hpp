@@ -33,6 +33,7 @@ namespace SDLBindings
     void register_box2d_joints(Interpreter &vm);
     void register_ode(Interpreter &vm);
     void register_raymath(Interpreter &vm);
+    void register_audio(ModuleBuilder &module);
  
 }
  

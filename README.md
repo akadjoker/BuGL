@@ -97,6 +97,7 @@ After the tutorials, explore the demos:
 | `demo_raymarching.bu` | SDF · smooth union · soft shadows · AO |
 | `demo_raytrace.bu` | Ray tracing · reflection · refraction · Fresnel · 8 bounces |
 | `demo_shader_hotreload.bu` | Live shader hot reload |
+| `demo_audio.bu` | Audio IDs · SFX playback · procedural waveforms |
 | `demo_box2d_stack.bu` | Box2D · rigid bodies · stacking |
 | `demo_box2d_mouse_joint.bu` | Box2D · mouse joint · interactive drag |
 | `demo_box2d_edge_chain.bu` | Box2D · edge chain · 2D terrain |
@@ -153,6 +154,19 @@ var gif = Gif();
 gif.begin(640, 360);
 gif.addFrame(pixels, 4, 16, -width * 4);
 gif.save("output.gif");
+```
+
+### `Audio` — music + SFX by integer ID
+
+```javascript
+import Audio;
+using Audio;
+
+AudioInit();
+var sfx = AudioLoadSfx("assets/audio/click.wav");
+AudioPlaySfx(sfx, 1.0, 1.0, 0.0);
+AudioUpdate();
+AudioClose();
 ```
 
 ### `Box2D` — 2D physics

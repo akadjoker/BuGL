@@ -1,0 +1,100 @@
+// ================================================================
+// BuGL Demo — Audio IDs (SFX oriented)
+// 1/2/3 -> play SFX
+// M     -> toggle auto "music" pattern (sequenced SFX)
+// -/+   -> master volume
+// ESC   -> quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import Audio;
+using Audio;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+if (!Init("BuGL  Audio ID Demo", 960, 540, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.05, 0.06, 0.08, 1.0);
+
+if (!AudioInit())
+{
+    print("AudioInit FAILED");
+    Close();
+    return;
+}
+
+var sfxUi = AudioCreateWaveform(AUDIO_WAVE_SINE, 0.22, 920.0);
+var sfxLaser = AudioCreateWaveform(AUDIO_WAVE_SAW, 0.18, 340.0);
+var sfxAlert = AudioCreateWaveform(AUDIO_WAVE_SQUARE, 0.10, 660.0);
+
+var noteC = AudioCreateWaveform(AUDIO_WAVE_TRIANGLE, 0.10, 261.63);
+var noteE = AudioCreateWaveform(AUDIO_WAVE_TRIANGLE, 0.10, 329.63);
+var noteG = AudioCreateWaveform(AUDIO_WAVE_TRIANGLE, 0.10, 392.00);
+
+print("Audio demo");
+print("SFX IDs: ui=" + sfxUi + " laser=" + sfxLaser + " alert=" + sfxAlert);
+print("1/2/3 play SFX | M auto music | -/+ volume | ESC quit");
+
+var masterVol = 1.0;
+var autoMusic = false;
+var beatT = 0.0;
+var beatStep = 0.20;
+var noteIndex = 0;
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_1)) AudioPlaySfx(sfxUi, 1.0, 1.0, -0.25);
+    if (IsKeyPressed(KEY_2)) AudioPlaySfx(sfxLaser, 0.85, 1.2, 0.20);
+    if (IsKeyPressed(KEY_3)) AudioPlaySfx(sfxAlert, 0.75, 1.0, 0.0);
+
+    if (IsKeyPressed(KEY_M))
+    {
+        autoMusic = !autoMusic;
+        if (autoMusic) print("Auto music ON");
+        else print("Auto music OFF");
+    }
+
+    if (IsKeyPressed(KEY_MINUS))
+    {
+        masterVol = masterVol - 0.10;
+        if (masterVol < 0.0) masterVol = 0.0;
+        AudioSetMasterVolume(masterVol);
+        print("Master volume " + masterVol);
+    }
+
+    if (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD))
+    {
+        masterVol = masterVol + 0.10;
+        if (masterVol > 2.0) masterVol = 2.0;
+        AudioSetMasterVolume(masterVol);
+        print("Master volume " + masterVol);
+    }
+
+    if (autoMusic)
+    {
+        beatT = beatT + GetDeltaTime();
+        if (beatT >= beatStep)
+        {
+            beatT = beatT - beatStep;
+            var nid = noteC;
+            if (noteIndex == 1) nid = noteE;
+            if (noteIndex == 2) nid = noteG;
+            AudioPlaySfx(nid, 0.55, 1.0, 0.0);
+            noteIndex = (noteIndex + 1) % 3;
+        }
+    }
+
+    AudioUpdate();
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+    glClear(GL_COLOR_BUFFER_BIT);
+    Flip();
+}
+
+AudioClose();
+Close();
