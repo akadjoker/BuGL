@@ -172,11 +172,30 @@ AudioClose();
 ### `Box2D` — 2D physics
 
 ```javascript
-var world = b2CreateWorld(0.0, -9.8);
-var body  = b2CreateDynamicBody(world, x, y);
-b2AddCircle(body, radius, density, friction, restitution);
-b2WorldStep(world, dt, 8, 3);
-var (bx, by) = b2GetPosition(body);
+// 1. Initialize the Box2D world with gravity
+var world = B2World(0.0, -20.0);
+
+// 2. Define and create a dynamic body
+var bd = B2BodyDef();
+bd.setType(B2_DYNAMIC_BODY);
+bd.setPosition(x, y);
+var body = world.createBody(bd);
+
+// 3. Define the shape and physical properties (Fixture)
+var shape = B2PolygonShape();
+shape.setAsBox(width, height);
+
+var fd = B2FixtureDef();
+fd.setShape(shape);
+fd.setDensity(1.0);
+fd.setFriction(0.35);
+body.createFixture(fd);
+
+// 4. Advance the simulation (Step)
+world.step(1.0 / 60.0, 8, 3);
+
+// 5. Get the new position using multiple assignment
+var (bx, by) = body.getPosition();
 ```
 
 ### `ODE` — 3D physics
