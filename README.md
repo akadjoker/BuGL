@@ -11,7 +11,7 @@ Write OpenGL demos in minutes. From immediate mode triangles to ray tracers with
 
 | Ray Tracer | Bloom + HDR | Particles |
 |:-:|:-:|:-:|
-| ![ray tracer](gif/demo_raytrace.gif) | ![bloom hdr](gif/bloom_hdr.gif) | ![particles](gif/particles.gif) |
+| ![ray tracer](gif/raytrace.gif) | ![bloom hdr](gif/bloom_hdr.gif) | ![particles](gif/particles.gif) |
 | Reflections · refraction · Fresnel · 8 bounces | 3-pass render pipeline · tone mapping | 50k particles · physics · additive blending |
 
 | Ray Marching | Terrain | Box2D |
