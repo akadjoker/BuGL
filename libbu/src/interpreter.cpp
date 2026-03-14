@@ -720,14 +720,31 @@ void Interpreter::runtimeError(const char *format, ...)
 
   if (!debugMode_)
   {
-    // Release mode: minimal output
+    // Release mode: message + innermost frame location
     OsPrintf("Runtime Error: ");
     va_list args;
     va_start(args, format);
     OsVPrintf(format, args);
     va_end(args);
-    if (currentProcess && currentProcess->name)
+
+    ProcessExec *exec = currentExec();
+    if (exec && exec->frameCount > 0)
+    {
+      CallFrame *top = &exec->frames[exec->frameCount - 1];
+      Function  *fn  = top->func;
+      if (fn && fn->chunk && fn->chunk->code && top->ip >= fn->chunk->code)
+      {
+        size_t instr = top->ip - fn->chunk->code;
+        if (instr > 0) instr--;
+        int line = fn->chunk->lines[instr];
+        const char *fname = fn->name ? fn->name->chars() : "<script>";
+        OsPrintf(" at %s() line %d", fname, line);
+      }
+    }
+    else if (currentProcess && currentProcess->name)
+    {
       OsPrintf(" in '%s'", currentProcess->name->chars());
+    }
     OsPrintf("\n");
     return;
   }

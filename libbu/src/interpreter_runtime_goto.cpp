@@ -51,13 +51,13 @@ extern size_t get_type_size(BufferType type);
 
 inline bool toNumberPair(const Value &a, const Value &b, double &da, double &db)
 {
-    if (!(a.isInt() || a.isDouble()))
+    if (!a.isNumber())
         return false;
-    if (!(b.isInt() || b.isDouble()))
+    if (!b.isNumber())
         return false;
 
-    da = a.isInt() ? static_cast<double>(a.asInt()) : a.asDouble();
-    db = b.isInt() ? static_cast<double>(b.asInt()) : b.asDouble();
+    da = a.asDouble();
+    db = b.asDouble();
     return true;
 }
 

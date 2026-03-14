@@ -86,7 +86,7 @@ using STB;
 
 //include "demo_opensteer_boids.bu";
 
-// include "demo_opensteer_path.bu";
+//include "demo_opensteer_path.bu";
 
  include "demo_opensteer_pedestrians.bu";
 
