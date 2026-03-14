@@ -13,7 +13,16 @@
 #include <cmath>
 #include <exception>
 #include <algorithm>
+#include <filesystem>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
  
  extern "C" const char *__lsan_default_suppressions()
 {
@@ -97,6 +106,58 @@ static bool hasSuffix(const char *str, const char *suffix)
 static bool isBytecodePath(const char *path)
 {
     return hasSuffix(path, ".buc") || hasSuffix(path, ".bubc") || hasSuffix(path, ".bytecode");
+}
+
+static std::string getExecutablePath(const char *argv0)
+{
+#if defined(_WIN32)
+    char buffer[1024] = {0};
+    DWORD len = GetModuleFileNameA(nullptr, buffer, (DWORD)sizeof(buffer));
+    if (len > 0 && len < sizeof(buffer))
+        return std::filesystem::path(buffer).lexically_normal().string();
+#elif defined(__linux__)
+    char buffer[1024] = {0};
+    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (len > 0)
+    {
+        buffer[len] = '\0';
+        return std::filesystem::path(buffer).lexically_normal().string();
+    }
+#elif defined(__APPLE__)
+    char buffer[1024] = {0};
+    uint32_t size = (uint32_t)sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) == 0)
+        return std::filesystem::path(buffer).lexically_normal().string();
+#endif
+
+    if (argv0 && *argv0)
+    {
+        std::error_code ec;
+        std::filesystem::path p = std::filesystem::absolute(argv0, ec);
+        if (!ec)
+            return p.lexically_normal().string();
+    }
+
+    return std::filesystem::current_path().string();
+}
+
+static void addUniqueVmPluginSearchPath(Interpreter &vm, std::vector<std::string> &paths, const std::filesystem::path &path)
+{
+    if (path.empty())
+        return;
+
+    const std::string normalized = path.lexically_normal().string();
+    if (normalized.empty())
+        return;
+
+    for (const std::string &existing : paths)
+    {
+        if (existing == normalized)
+            return;
+    }
+
+    paths.push_back(normalized);
+    vm.addPluginSearchPath(paths.back().c_str());
 }
 
 const char *multiPathFileLoader(const char *filename, size_t *outSize, void *userdata)
@@ -191,17 +252,21 @@ void showFatalScreen(const std::string &message)
 
 int main(int argc, char *argv[])
 {
- 
-
     Interpreter vm;
-
-   
-
     vm.registerAll();
- 
     SDLBindings::registerAll(vm);
-   
-   
+
+    std::vector<std::string> pluginSearchPaths;
+    const std::filesystem::path exePath = getExecutablePath(argc > 0 ? argv[0] : nullptr);
+    const std::filesystem::path exeDir = exePath.has_parent_path() ? exePath.parent_path() : std::filesystem::current_path();
+    const std::filesystem::path cwd = std::filesystem::current_path();
+
+    // Release layout: <bugl>/plugins. Development layout: <repo>/bin/modules.
+    addUniqueVmPluginSearchPath(vm, pluginSearchPaths, exeDir / "plugins");
+    addUniqueVmPluginSearchPath(vm, pluginSearchPaths, exeDir / "modules");
+    addUniqueVmPluginSearchPath(vm, pluginSearchPaths, cwd / "plugins");
+    addUniqueVmPluginSearchPath(vm, pluginSearchPaths, cwd / "modules");
+
     FileLoaderContext ctx{};
 
     enum class LaunchMode
@@ -218,59 +283,97 @@ int main(int argc, char *argv[])
 #endif
     const char *scriptFile = nullptr;
     const char *bytecodeOutFile = nullptr;
+    const char *dumpOutputFile = "main.dump";
+    bool dumpToFile = false;
     std::string code;
+    std::string resolvedScriptFile;
 
-    if (argc > 1)
+    for (int argi = 1; argi < argc; ++argi)
     {
+        const char *arg = argv[argi];
+        if (!arg)
+            continue;
+
+        if (std::strcmp(arg, "--dump") == 0 || std::strcmp(arg, "--dump-bytecode") == 0)
+        {
+            dumpToFile = true;
+            continue;
+        }
+
+        if (std::strcmp(arg, "--dump-file") == 0)
+        {
+            if (argi + 1 >= argc)
+            {
+                LogError("Usage: --dump-file <output.dump>");
+                return 1;
+            }
+
+            dumpToFile = true;
+            dumpOutputFile = argv[++argi];
+            continue;
+        }
+
 #ifdef BU_RUNNER_ONLY
-        if (std::strcmp(argv[1], "--compile-bc") == 0 || std::strcmp(argv[1], "--compile-bytecode") == 0)
+        if (std::strcmp(arg, "--compile-bc") == 0 || std::strcmp(arg, "--compile-bytecode") == 0)
         {
             std::string msg = "Runner build is bytecode-only. Use desktop main to compile .buc files.";
             LogError("%s", msg.c_str());
             return 1;
         }
 #endif
-        if (std::strcmp(argv[1], "--compile-bc") == 0 || std::strcmp(argv[1], "--compile-bytecode") == 0)
+
+        if (std::strcmp(arg, "--compile-bc") == 0 || std::strcmp(arg, "--compile-bytecode") == 0)
         {
             mode = LaunchMode::CompileBytecode;
-            if (argc < 4)
+            if (argi + 2 >= argc)
             {
-                std::string msg = "Usage: main --compile-bc <input.bu> <output.buc>";
+                std::string msg = "Usage: main --compile-bc <input.bu> <output.buc> [--dump] [--dump-file file]";
                 LogError("%s", msg.c_str());
-              
                 return 1;
             }
-            scriptFile = argv[2];
-            bytecodeOutFile = argv[3];
+            scriptFile = argv[++argi];
+            bytecodeOutFile = argv[++argi];
+            continue;
         }
-        else if (std::strcmp(argv[1], "--run-bc") == 0 || std::strcmp(argv[1], "--run-bytecode") == 0)
+
+        if (std::strcmp(arg, "--run-bc") == 0 || std::strcmp(arg, "--run-bytecode") == 0)
         {
             mode = LaunchMode::RunBytecode;
-            if (argc < 3)
+            if (argi + 1 >= argc)
             {
-                std::string msg = "Usage: main --run-bc <file.buc>";
+                std::string msg = "Usage: main --run-bc <file.buc> [--dump] [--dump-file file]";
                 LogError("%s", msg.c_str());
-              
                 return 1;
             }
-            scriptFile = argv[2];
+            scriptFile = argv[++argi];
+            continue;
         }
+
+        if (arg[0] == '-')
+        {
+            LogError("Unknown option: %s", arg);
+            return 1;
+        }
+
+        if (scriptFile != nullptr)
+        {
+            LogError("Unexpected extra argument: %s", arg);
+            return 1;
+        }
+
+        scriptFile = arg;
+        if (isBytecodePath(scriptFile))
+        {
+            mode = LaunchMode::RunBytecode;
+        }
+#ifdef BU_RUNNER_ONLY
         else
         {
-            scriptFile = argv[1];
-            if (isBytecodePath(scriptFile))
-            {
-                mode = LaunchMode::RunBytecode;
-            }
-#ifdef BU_RUNNER_ONLY
-            else
-            {
-                std::string msg = "Runner expects a bytecode file (.buc/.bubc/.bytecode).";
-                LogError("%s", msg.c_str());
-                return 1;
-            }
-#endif
+            std::string msg = "Runner expects a bytecode file (.buc/.bubc/.bytecode).";
+            LogError("%s", msg.c_str());
+            return 1;
         }
+#endif
     }
 
     if (mode == LaunchMode::RunBytecode)
@@ -278,7 +381,7 @@ int main(int argc, char *argv[])
         if (!scriptFile)
         {
 #ifdef BU_RUNNER_ONLY
-            std::string msg = "Usage: runner <file.buc> or runner --run-bc <file.buc>";
+            std::string msg = "Usage: runner <file.buc> [--dump] [--dump-file file] or runner --run-bc <file.buc> [--dump] [--dump-file file]";
             LogError("%s", msg.c_str());
             return 1;
 #else
@@ -307,23 +410,26 @@ int main(int argc, char *argv[])
 #ifndef BU_RUNNER_ONLY
     if (mode == LaunchMode::RunSource && code.empty())
     {
-        static const char *defaultCandidates[] = {
+        std::vector<std::string> defaultCandidates;
+        defaultCandidates.reserve(8);
 #ifdef __EMSCRIPTEN__
-            "/scripts/main.bu",
-            "/main.bu",
+        defaultCandidates.emplace_back("/scripts/main.bu");
+        defaultCandidates.emplace_back("/main.bu");
 #endif
-            "scripts/main.bu",
-            "./scripts/main.bu",
-            "main.bu",
-            "../scripts/main.bu",
-        };
+        defaultCandidates.emplace_back((exeDir / "scripts" / "main.bu").lexically_normal().string());
+        defaultCandidates.emplace_back((exeDir.parent_path() / "scripts" / "main.bu").lexically_normal().string());
+        defaultCandidates.emplace_back("scripts/main.bu");
+        defaultCandidates.emplace_back("./scripts/main.bu");
+        defaultCandidates.emplace_back("main.bu");
+        defaultCandidates.emplace_back("../scripts/main.bu");
 
-        for (const char *candidate : defaultCandidates)
+        for (const std::string &candidate : defaultCandidates)
         {
-            code = loadFile(candidate, true);
+            code = loadFile(candidate.c_str(), true);
             if (!code.empty())
             {
-                scriptFile = candidate;
+                resolvedScriptFile = candidate;
+                scriptFile = resolvedScriptFile.c_str();
                 break;
             }
         }
@@ -407,6 +513,9 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        if (dumpToFile)
+            vm.dumpToFile(dumpOutputFile);
+
         LogInfo( "Bytecode saved: %s", bytecodeOutFile ? bytecodeOutFile : "<none>");
         return 0;
     }
@@ -460,8 +569,11 @@ int main(int argc, char *argv[])
       
         LogError("%s", msg.c_str());
         return 1;
-    } 
-     
+    }
+
+    if (dumpToFile)
+        vm.dumpToFile(dumpOutputFile);
+
  
     return 0;
 }

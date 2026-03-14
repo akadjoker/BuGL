@@ -24,6 +24,11 @@ Write OpenGL demos in minutes. From immediate mode triangles to ray tracers with
 | ![ode car](gif/ode_car.gif) | ![ode fall 3d](gif/ode_fall3d.gif) | ![box2d stack](gif/box2d_stack.gif) |
 | Hinge2 joints · steering · suspension | 3D rigid body · collision contacts | 2D stacking · impulses · stability |
 
+| Jolt Vehicle | Jolt Motorcycle | Jolt Tank |
+|:-:|:-:|:-:|
+| ![jolt vehicle](gif/jolt_vehicle.gif) | ![jolt motorcycle](gif/jolt_motorcycle.gif) | ![jolt tank](gif/jolt_tank.gif) |
+| Wheeled vehicle · suspension · collision course | Motorcycle controller · follow camera · jumps | Tracked vehicle · turret aim · shell explosions |
+
 ---
 
 ## Quick Start
@@ -103,6 +108,9 @@ After the tutorials, explore the demos:
 | `demo_box2d_edge_chain.bu` | Box2D · edge chain · 2D terrain |
 | `demo_ode_fall3d.bu` | ODE · 3D physics · plane collision |
 | `demo_ode_car.bu` | ODE · hinge2 car · suspension |
+| `demo_jolt_vehicle_wheeled.bu` | Jolt · wheeled vehicle · suspension · obstacles |
+| `demo_jolt_motorcycle.bu` | Jolt · motorcycle controller · ramp · follow camera |
+| `demo_jolt_tank.bu` | Jolt · tracked vehicle · turret control · explosions |
 
 All demos support **F12** to record a GIF.
 

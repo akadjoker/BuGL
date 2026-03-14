@@ -1,7 +1,8 @@
 #pragma once
 #include "config.hpp"
 #include <SDL2/SDL.h> 
- 
+
+struct ImGuiContext;
 
 // ============================================================================
 // DEVICE (Singleton)
@@ -19,6 +20,7 @@ private:
     bool m_ready;
     bool m_initialized;
     bool m_resize;
+    bool m_imguiInitialized;
 
  
     // Timing
@@ -45,6 +47,9 @@ public:
     /// Shutdown everything
     void Close();
 
+    bool InitImGui();
+    void ShutdownImGui();
+
     /// Poll events, update delta time. Returns false if should quit.
     bool Running();
 
@@ -68,6 +73,8 @@ public:
     float GetDeltaTime() const { return m_deltaTime; }
     unsigned int GetFPS() const { return m_fps; }
     bool IsReady() const { return m_ready; }
+    bool HasImGui() const { return m_imguiInitialized; }
+    ImGuiContext *GetImGuiContext() const;
 
  
     void SetTitle(const char* title);

@@ -18,35 +18,23 @@ endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
-add_compile_options(
-        # Optimization level
-        -O3
-        
-       
-        
-        # Architecture specific
-        -march=native
-        -mtune=native
-        
-
-        
-        # Vectorization
-        -ftree-vectorize
-        
-        # Strip debug info
-        -DNDEBUG
-        
-        # Inline agressivo
-        -finline-functions
-        -funroll-loops
-
-)
-
-
-
 file(GLOB SOURCES CONFIGURE_DEPENDS "src/*.cpp")
-add_executable(main   ${SOURCES})
-target_include_directories(main PUBLIC include src)
+add_executable(main   ${SOURCES}
+    ${CMAKE_SOURCE_DIR}/main/src/imgui_impl_sdl2.cpp
+    ${CMAKE_SOURCE_DIR}/main/src/imgui_impl_opengl3.cpp
+)
+set_target_properties(main PROPERTIES ENABLE_EXPORTS ON)
+set_target_properties(main PROPERTIES OUTPUT_NAME "bugl")
+target_include_directories(main PUBLIC include src 
+    ${CMAKE_SOURCE_DIR}/vendor/imgui
+    ${CMAKE_SOURCE_DIR}/main/src
+)
+if (WIN32)
+    target_compile_definitions(main PRIVATE WINGDIAPI=)
+    if (NOT MSVC)
+        target_compile_options(main PRIVATE -U_DLL)
+    endif()
+endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
 
 if (UNIX)
@@ -54,16 +42,45 @@ target_compile_options(main PRIVATE -fsanitize=address -fsanitize=undefined -fsa
 target_link_options(main PRIVATE -fsanitize=address -fsanitize=undefined -fsanitize=leak -g  -D_DEBUG) 
 endif()
  
-   
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+    target_compile_options(main PRIVATE
+        -O3
+        -DNDEBUG
+        -ftree-vectorize
+        -finline-functions
+        -funroll-loops
+    )
+
+    if (NOT BUGL_PORTABLE_RELEASE)
+        target_compile_options(main PRIVATE -march=native -mtune=native)
+    endif()
+
+    if (BUGL_STRIP_RELEASE AND NOT MSVC)
+        target_link_options(main PRIVATE -s)
+    endif()
 endif()
 
-target_link_libraries(main miniz poly2tri ODE box2d bugl_audio libbu SDL2 GL)
+target_link_libraries(main PRIVATE miniz poly2tri ODE box2d bugl_audio libbu imgui SDL2::SDL2)
 
 if (WIN32)
-    target_link_libraries(main Winmm.lib )
+    target_link_libraries(main PRIVATE opengl32)
+else()
+    target_link_libraries(main PRIVATE GL)
+endif()
+
+if (WIN32 AND TARGET SDL2::SDL2main)
+    target_link_libraries(main PRIVATE SDL2::SDL2main)
+endif()
+
+if (WIN32)
+    if (MSVC)
+        target_link_libraries(main PRIVATE Winmm.lib)
+    else()
+        target_link_libraries(main PRIVATE winmm)
+    endif()
 endif()
 
 
 if (UNIX)
-    target_link_libraries(main  m )
+    target_link_libraries(main PRIVATE m)
 endif()

@@ -4,6 +4,19 @@
 
 namespace SDLBindings
 {
+    static void sync_imgui_context_global(Interpreter *vm)
+    {
+        if (!vm)
+            return;
+
+        Value contextValue = Device::Instance().HasImGui()
+                                 ? vm->makePointer(Device::Instance().GetImGuiContext())
+                                 : vm->makeNil();
+
+        if (!vm->setGlobal("__imgui_context", contextValue))
+            vm->addGlobal("__imgui_context", contextValue);
+    }
+
     static int native_Device_Init(Interpreter *vm, int argc, Value *args)
     {
         if (argc != 3 && argc != 4)
@@ -23,7 +36,50 @@ namespace SDLBindings
         const unsigned int flags = (argc == 4) ? (unsigned int)args[3].asNumber() : 0u;
 
         const bool ok = Device::Instance().Init(title, width, height, flags);
+        sync_imgui_context_global(vm);
         vm->pushBool(ok);
+        return 1;
+    }
+
+    static int native_Device_InitImGui(Interpreter *vm, int argc, Value *args)
+    {
+        (void)args;
+        if (argc != 0)
+        {
+            Error("Device_InitImGui expects 0 arguments");
+            return 0;
+        }
+
+        bool ok = Device::Instance().InitImGui();
+        sync_imgui_context_global(vm);
+        vm->pushBool(ok);
+        return 1;
+    }
+
+    static int native_Device_ShutdownImGui(Interpreter *vm, int argc, Value *args)
+    {
+        (void)args;
+        if (argc != 0)
+        {
+            Error("Device_ShutdownImGui expects 0 arguments");
+            return 0;
+        }
+
+        Device::Instance().ShutdownImGui();
+        sync_imgui_context_global(vm);
+        return 0;
+    }
+
+    static int native_Device_HasImGui(Interpreter *vm, int argc, Value *args)
+    {
+        (void)args;
+        if (argc != 0)
+        {
+            Error("Device_HasImGui expects 0 arguments");
+            return 0;
+        }
+
+        vm->pushBool(Device::Instance().HasImGui());
         return 1;
     }
 
@@ -85,6 +141,7 @@ namespace SDLBindings
             return 0;
         }
         Device::Instance().Close();
+        sync_imgui_context_global(vm);
         return 0;
     }
 
@@ -592,6 +649,8 @@ namespace SDLBindings
     void register_device_input(ModuleBuilder &module)
     {
         module.addFunction("Init", native_Device_Init, -1)
+            .addFunction("InitImGui", native_Device_InitImGui, 0)
+            .addFunction("ShutdownImGui", native_Device_ShutdownImGui, 0)
             .addFunction("SetGLAttribute", native_Device_SetGLAttribute, 2)
             .addFunction("SetGLVersion", native_Device_SetGLVersion, 3)
             .addFunction("Quit", native_Device_Quit, 0)
@@ -608,6 +667,7 @@ namespace SDLBindings
             .addFunction("GetFPS", native_Device_GetFPS, 0)
             .addFunction("IsReady", native_Device_IsReady, 0)
             .addFunction("IsResized", native_Device_IsResized, 0)
+            .addFunction("HasImGui", native_Device_HasImGui, 0)
 
             .addFunction("IsMousePressed", native_Input_IsMousePressed, 1)
             .addFunction("IsMouseDown", native_Input_IsMouseDown, 1)

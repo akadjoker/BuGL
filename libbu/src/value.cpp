@@ -326,24 +326,67 @@ void valueToBuffer(const Value &v, char *out, size_t size)
         snprintf(out, size, "{map}");
         break;
     case ValueType::STRUCT:
-        snprintf(out, size, "<struct>");
+        snprintf(out, size, "<struct %d>", v.asStructId());
+        break;
     case ValueType::STRUCTINSTANCE:
         snprintf(out, size, "<struct_instance>");
+        break;
     case ValueType::CLASS:
-        snprintf(out, size, "<class>");
+        snprintf(out, size, "<class %d>", v.asClassId());
+        break;
     case ValueType::CLASSINSTANCE:
         snprintf(out, size, "<class_instance>");
+        break;
+    case ValueType::FUNCTION:
+        snprintf(out, size, "<function %d>", v.asFunctionId());
+        break;
+    case ValueType::NATIVE:
+        snprintf(out, size, "<native>");
+        break;
+    case ValueType::NATIVEPROCESS:
+        snprintf(out, size, "<native_process>");
+        break;
+    case ValueType::PROCESS:
+        snprintf(out, size, "<process>");
+        break;
+    case ValueType::PROCESS_INSTANCE:
+        snprintf(out, size, "<process_instance>");
+        break;
     case ValueType::NATIVECLASSINSTANCE:
         snprintf(out, size, "<native_class_instance>");
+        break;
     case ValueType::NATIVESTRUCTINSTANCE:
         snprintf(out, size, "<native_struct_instance>");
+        break;
     case ValueType::POINTER:
-        snprintf(out, size, "<pointer>");
+        snprintf(out, size, "<pointer %p>", v.as.pointer);
+        break;
     case ValueType::MODULEREFERENCE:
-        snprintf(out, size, "<module_reference>");
+        snprintf(out, size, "<module_reference %u %u %u>",
+                 v.as.unsignedInteger >> 24,
+                 (v.as.unsignedInteger >> 12) & 0xFFF,
+                 v.as.unsignedInteger & 0xFFF);
+        break;
+    case ValueType::NATIVECLASS:
+        snprintf(out, size, "<native_class>");
+        break;
     case ValueType::NATIVESTRUCT:
         snprintf(out, size, "<native_struct>");
+        break;
+    case ValueType::CLOSURE:
+        snprintf(out, size, "<closure>");
+        break;
+    case ValueType::CHAR:
+        snprintf(out, size, "<char>");
+        break;
+    case ValueType::LONG:
+        snprintf(out, size, "<long>");
+        break;
+    case ValueType::ULONG:
+        snprintf(out, size, "<ulong>");
+        break;
     default:
         snprintf(out, size, "<object>");
+        break;
     }
 }

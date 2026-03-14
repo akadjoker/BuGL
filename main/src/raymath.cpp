@@ -57,7 +57,7 @@ namespace SDLBindings
         const int n = (argc < 16) ? argc : 16;
         for (int i = 0; i < n; i++)
         {
-            if (args[i].isNumber())
+          
                 dst[i] = (float)args[i].asNumber();
         }
     }

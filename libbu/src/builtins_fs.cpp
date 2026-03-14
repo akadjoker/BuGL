@@ -233,11 +233,13 @@ int native_fs_stat(Interpreter *vm, int argCount, Value *args)
     size.LowPart = fileInfo.nFileSizeLow;
     size.HighPart = fileInfo.nFileSizeHigh;
 
-    m->table.set(vm->makeString("size"), vm->makeInt((int)size.QuadPart));
-    m->table.set(vm->makeString("isdir"),
+    m->table.set(vm->makeString("size").asString(), vm->makeInt((int)size.QuadPart));
+    m->table.set(vm->makeString("isdir").asString(),
                  vm->makeBool(fileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY));
-    m->table.set(vm->makeString("isfile"),
+    m->table.set(vm->makeString("isfile").asString(),
                  vm->makeBool(!(fileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)));
+    m->table.set(vm->makeString("mode").asString(), vm->makeInt((int)fileInfo.dwFileAttributes));
+    m->table.set(vm->makeString("mtime").asString(), vm->makeInt(0));
 
 #else
     struct stat st;

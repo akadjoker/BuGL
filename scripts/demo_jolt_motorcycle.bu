@@ -1,0 +1,544 @@
+// ================================================================
+// BuGL Demo - Jolt Motorcycle
+// W/S -> throttle / reverse
+// A/D -> steer
+// Space -> brake
+// L -> toggle lean controller
+// K -> toggle lean steering limit
+// R -> reset
+// ESC -> quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+import math;
+using math;
+
+require "Jolt";
+import Jolt;
+using Jolt;
+
+include "recorder.bu";
+
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL Jolt Motorcycle", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.05, 0.07, 0.11, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+
+var PI = 3.141592653589793;
+var RAD2DEG = 57.29577951308232;
+var fixedStep = 1.0 / 60.0;
+var accumulator = 0.0;
+var reportedStepError = false;
+var viewBuf = MatrixToBuffer(MatrixIdentity());
+
+var world = nil;
+var chassis = nil;
+var bike = nil;
+var wheelRadius = 0.31;
+var wheelHalfWidth = 0.025;
+var chassisHalfWidth = 0.20;
+var chassisHalfHeight = 0.30;
+var chassisHalfLength = 0.40;
+var chassisVisualYOffset = 0.30;
+var leanEnabled = true;
+var leanLimitEnabled = true;
+var steerInput = 0.0;
+var throttleInput = 0.0;
+var previousForward = 1.0;
+var baseEngineTorque = 150.0;
+var wheelieEngineTorque = 260.0;
+var wheelieThrottleStart = 0.82;
+var sceneBodies = [];
+var camX = 0.0;
+var camY = 0.0;
+var camZ = 0.0;
+var camReady = false;
+
+struct BodyVis
+{
+    var body;
+    var sx;
+    var sy;
+    var sz;
+    var r;
+    var g;
+    var b;
+}
+
+def buildSuspensionDir(casterAngle)
+{
+    return Vector3(0.0, 0.0 - cos(casterAngle), sin(casterAngle));
+}
+
+def drawFloor()
+{
+    glColor3f(0.16, 0.18, 0.22);
+    glBegin(GL_QUADS);
+    glVertex3f(-40.0, 0.0, -40.0);
+    glVertex3f( 40.0, 0.0, -40.0);
+    glVertex3f( 40.0, 0.0,  40.0);
+    glVertex3f(-40.0, 0.0,  40.0);
+    glEnd();
+
+    glColor3f(0.24, 0.28, 0.33);
+    glBegin(GL_LINES);
+    for (var i = -40; i <= 40; i++)
+    {
+        glVertex3f(i, 0.002, -40.0);
+        glVertex3f(i, 0.002,  40.0);
+        glVertex3f(-40.0, 0.002, i);
+        glVertex3f( 40.0, 0.002, i);
+    }
+    glEnd();
+}
+
+def drawBoxLocal(hx, hy, hz)
+{
+    glBegin(GL_QUADS);
+    glVertex3f(-hx, -hy,  hz); glVertex3f( hx, -hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
+    glVertex3f( hx, -hy, -hz); glVertex3f(-hx, -hy, -hz); glVertex3f(-hx,  hy, -hz); glVertex3f( hx,  hy, -hz);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx, -hy,  hz); glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx,  hy, -hz); glVertex3f( hx,  hy,  hz);
+    glVertex3f(-hx,  hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f( hx,  hy, -hz); glVertex3f(-hx,  hy, -hz);
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx, -hy,  hz); glVertex3f(-hx, -hy,  hz);
+    glEnd();
+}
+
+def drawCylinderLocalY(radius, halfW)
+{
+    var segs = 20;
+
+    glBegin(GL_QUAD_STRIP);
+    for (var i = 0; i <= segs; i++)
+    {
+        var a = (i / segs) * 2.0 * PI;
+        var cx = cos(a) * radius;
+        var cz = sin(a) * radius;
+        glVertex3f(cx, -halfW, cz);
+        glVertex3f(cx,  halfW, cz);
+    }
+    glEnd();
+
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex3f(0.0, -halfW, 0.0);
+    for (var j = 0; j <= segs; j++)
+    {
+        var a2 = (j / segs) * 2.0 * PI;
+        glVertex3f(cos(a2) * radius, -halfW, sin(a2) * radius);
+    }
+    glEnd();
+
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex3f(0.0, halfW, 0.0);
+    for (var k = 0; k <= segs; k++)
+    {
+        var a3 = (k / segs) * -2.0 * PI;
+        glVertex3f(cos(a3) * radius, halfW, sin(a3) * radius);
+    }
+    glEnd();
+}
+
+def drawWheelLocal(radius, halfW)
+{
+    glColor3f(0.10, 0.11, 0.13);
+    drawCylinderLocalY(radius, halfW);
+
+    glColor3f(0.76, 0.78, 0.80);
+    glBegin(GL_LINES);
+    glVertex3f(-radius * 0.78, 0.0, 0.0);
+    glVertex3f( radius * 0.78, 0.0, 0.0);
+    glVertex3f(0.0, 0.0, -radius * 0.78);
+    glVertex3f(0.0, 0.0,  radius * 0.78);
+    glEnd();
+}
+
+def drawBike()
+{
+    if (chassis == nil || !chassis.isValid()) return;
+    var pos = chassis.getPosition();
+    var rot = chassis.getRotation();
+    var (axis, angle) = QuaternionToAxisAngle(rot);
+
+    glPushMatrix();
+    glTranslatef(pos.x, pos.y, pos.z);
+    glRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
+    glTranslatef(0.0, chassisVisualYOffset, 0.0);
+
+    glColor3f(0.28, 0.78, 0.96);
+    drawBoxLocal(chassisHalfWidth, chassisHalfHeight, chassisHalfLength);
+
+    glPushMatrix();
+    glTranslatef(0.0, 0.16, 0.10);
+    glColor3f(0.98, 0.74, 0.22);
+    drawBoxLocal(0.16, 0.16, 0.22);
+    glPopMatrix();
+
+    glPushMatrix();
+    glTranslatef(0.0, 0.20, -0.26);
+    glColor3f(0.14, 0.16, 0.20);
+    drawBoxLocal(0.03, 0.08, 0.18);
+    glPopMatrix();
+
+    glPushMatrix();
+    glTranslatef(0.0, 0.14, 0.46);
+    glColor3f(0.16, 0.18, 0.22);
+    drawBoxLocal(0.03, 0.12, 0.04);
+    glPopMatrix();
+
+    glPopMatrix();
+}
+
+def drawBody(item)
+{
+    if (item == nil || item.body == nil || !item.body.isValid()) return;
+    var pos = item.body.getPosition();
+    var rot = item.body.getRotation();
+    var (axis, angle) = QuaternionToAxisAngle(rot);
+
+    var shade = 1.0;
+    if (!item.body.isActive()) shade = 0.78;
+    glColor3f(item.r * shade, item.g * shade, item.b * shade);
+
+    glPushMatrix();
+    glTranslatef(pos.x, pos.y, pos.z);
+    glRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
+    drawBoxLocal(item.sx, item.sy, item.sz);
+    glPopMatrix();
+}
+
+def addSceneBox(body, hx, hy, hz, r, g, b)
+{
+    if (body == nil) return;
+    sceneBodies.push(BodyVis(body, hx, hy, hz, r, g, b));
+}
+
+def drawWheels()
+{
+    if (bike == nil || !bike.isValid()) return;
+    for (var i = 0; i < bike.getWheelCount(); i++)
+    {
+        var (pos, rot) = bike.getWheelWorldPose(i, Vector3(0.0, 1.0, 0.0), Vector3(1.0, 0.0, 0.0));
+        var (axis, angle) = QuaternionToAxisAngle(rot);
+        glPushMatrix();
+        glTranslatef(pos.x, pos.y, pos.z);
+        glRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
+        drawWheelLocal(wheelRadius, wheelHalfWidth);
+        glPopMatrix();
+    }
+}
+
+def buildWheel(px, py, pz, steer, suspensionDir, springFreq, brakeTorque)
+{
+    var w = JoltWheelSettingsWV();
+    w.setPosition(Vector3(px, py, pz));
+    w.setSuspensionDirection(suspensionDir);
+    if (steer) w.setSteeringAxis(Vector3(0.0 - suspensionDir.x, 0.0 - suspensionDir.y, 0.0 - suspensionDir.z));
+    w.setSuspensionMinLength(0.30);
+    w.setSuspensionMaxLength(0.50);
+    w.setSuspensionPreloadLength(0.00);
+    w.setSuspensionFrequency(springFreq);
+    w.setSuspensionDamping(0.50);
+    w.setRadius(wheelRadius);
+    w.setWidth(wheelHalfWidth * 2.0);
+    w.setEnableSuspensionForcePoint(false);
+    w.setInertia(0.20);
+    w.setAngularDamping(0.20);
+    if (steer) w.setMaxSteerAngle(30.0 * PI / 180.0);
+    else w.setMaxSteerAngle(0.0);
+    w.setMaxBrakeTorque(brakeTorque);
+    w.setMaxHandBrakeTorque(0.0);
+    return w;
+}
+
+def resetScene()
+{
+    if (world != nil) world.destroy();
+    world = JoltWorld(Vector3(0.0, -9.81, 0.0));
+    accumulator = 0.0;
+    reportedStepError = false;
+    leanEnabled = true;
+    leanLimitEnabled = true;
+    steerInput = 0.0;
+    throttleInput = 0.0;
+    previousForward = 1.0;
+    sceneBodies.clear();
+    camReady = false;
+
+    addSceneBox(world.createStaticBox(400.0, 0.40, 400.0, Vector3(0.0, -0.40, 0.0)), 400.0, 0.40, 400.0, 0.18, 0.20, 0.24);
+    var ramp = world.createStaticBox(2.8, 0.30, 6.0, Vector3(0.0, 1.10, 14.0));
+    ramp.setRotation(QuaternionFromAxisAngle(Vector3(1.0, 0.0, 0.0), -12.0 * PI / 180.0));
+    addSceneBox(ramp, 2.8, 0.30, 6.0, 0.22, 0.34, 0.48);
+
+    //addSceneBox(world.createStaticBox(2.4, 0.25, 5.0, Vector3(0.0, 2.60, 21.0)), 2.4, 0.25, 5.0, 0.20, 0.30, 0.44);
+    addSceneBox(world.createStaticBox(0.30, 0.90, 8.0, Vector3(-4.3, 0.90, 8.0)), 0.30, 0.90, 8.0, 0.48, 0.34, 0.16);
+    addSceneBox(world.createStaticBox(0.30, 0.90, 8.0, Vector3( 4.3, 0.90, 8.0)), 0.30, 0.90, 8.0, 0.48, 0.34, 0.16);
+    addSceneBox(world.createStaticBox(0.70, 0.70, 0.70, Vector3(-1.8, 0.70, 5.0)), 0.70, 0.70, 0.70, 0.62, 0.24, 0.18);
+    addSceneBox(world.createStaticBox(0.70, 0.70, 0.70, Vector3( 1.8, 0.70, 8.5)), 0.70, 0.70, 0.70, 0.62, 0.24, 0.18);
+    for (var i = 0; i < 5; i++)
+    {
+        var px = -1.2 + (i % 2) * 2.4;
+        var pz = 28.0 + i * 2.5;
+        var crate = world.createBox(0.45, 0.45, 0.45, Vector3(px, 0.55, pz));
+        crate.setFriction(0.70);
+        crate.setRestitution(0.05);
+        addSceneBox(crate, 0.45, 0.45, 0.45, 0.82, 0.58, 0.20);
+    }
+
+    chassis = world.createOffsetBox(
+        chassisHalfWidth,
+        chassisHalfHeight,
+        chassisHalfLength,
+        Vector3(0.0, 0.0 - chassisHalfHeight, 0.0),
+        Vector3(0.0, 2.0, -16.0),
+        240.0
+    );
+    chassis.setFriction(0.85);
+    chassis.setRestitution(0.02);
+
+    var casterAngle = 30.0 * PI / 180.0;
+    var frontSuspensionDir = buildSuspensionDir(casterAngle);
+    var rearSuspensionDir = Vector3(0.0, -1.0, 0.0);
+
+    var wheels = [];
+    wheels.push(buildWheel(0.0, -0.27,  0.75, true,  frontSuspensionDir, 1.5, 500.0));
+    wheels.push(buildWheel(0.0, -0.27, -0.75, false, rearSuspensionDir, 2.0, 250.0));
+
+    bike = world.createMotorcycle(chassis, wheels);
+    bike.setCollisionTesterCylinder(1.0);
+    bike.setMaxPitchRollAngle(60.0 * PI / 180.0);
+    bike.setEngineMaxTorque(baseEngineTorque);
+    bike.setEngineRPMRange(1000.0, 10000.0);
+    bike.setShiftRPM(2000.0, 8000.0);
+    bike.setGearRatios([2.27, 1.63, 1.30, 1.09, 0.96, 0.88]);
+    bike.setReverseGearRatios([-4.0]);
+    bike.setClutchStrength(2.0);
+    bike.clearDifferentials();
+    bike.addDifferential(-1, 1, 1.93 * 40.0 / 16.0);
+    bike.enableLeanController(true);
+    bike.enableLeanSteeringLimit(true);
+    bike.setLeanSpringConstant(4200.0);
+    chassis.activate();
+}
+
+print("Jolt motorcycle ready: W/S accel, hold W for wheelie, A/D steer, Space brake, L lean, K steer limit");
+resetScene();
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) resetScene();
+    if (IsKeyPressed(KEY_L)  )
+    {
+        leanEnabled = !leanEnabled;
+        bike.enableLeanController(leanEnabled);
+    }
+    if (IsKeyPressed(KEY_K)  )
+    {
+        leanLimitEnabled = !leanLimitEnabled;
+        bike.enableLeanSteeringLimit(leanLimitEnabled);
+    }
+
+    var dt = GetDeltaTime();
+    if (dt > 0.05) dt = 0.05;
+
+    var brake = 0.0;
+    if (IsKeyDown(KEY_SPACE)) brake = 10.0;
+
+    var throttleRise = 2.4;
+    var throttleFall = 3.6;
+    var reverseRise = 3.2;
+    if (IsKeyDown(KEY_W))
+        throttleInput = min(throttleInput + throttleRise * dt, 1.0);
+    else if (IsKeyDown(KEY_S))
+        throttleInput = max(throttleInput - reverseRise * dt, -1.0);
+    else if (throttleInput > 0.0)
+        throttleInput = max(throttleInput - throttleFall * dt, 0.0);
+    else if (throttleInput < 0.0)
+        throttleInput = min(throttleInput + throttleFall * dt, 0.0);
+
+    var forward = throttleInput * 10.0;
+
+    if (previousForward * forward < 0.0 && chassis != nil && chassis.isValid())
+    {
+        var rot = chassis.getRotation();
+        var vel = chassis.getLinearVelocity();
+        var forwardDir = Vector3RotateByQuaternion(Vector3(0.0, 0.0, 1.0), rot);
+        var speedAlongForward = Vector3DotProduct(vel, forwardDir);
+        if ((forward > 0.0 && speedAlongForward < -0.1) || (forward < 0.0 && speedAlongForward > 0.1))
+        {
+            forward = 0.0;
+            brake = 1.0;
+        }
+        else
+            previousForward = forward;
+    }
+    else if (forward != 0.0)
+        previousForward = forward;
+
+    var steerTarget = 0.0;
+    if (IsKeyDown(KEY_A)) steerTarget = -1.0;
+    else if (IsKeyDown(KEY_D)) steerTarget = 1.0;
+
+    if (brake > 0.0)
+    {
+        var rot2 = chassis.getRotation();
+        var worldUp = Vector3(0.0, 1.0, 0.0);
+        var up = Vector3RotateByQuaternion(Vector3(0.0, 1.0, 0.0), rot2);
+        var fwd = Vector3RotateByQuaternion(Vector3(0.0, 0.0, 1.0), rot2);
+        var sinLean = abs(Vector3DotProduct(Vector3CrossProduct(worldUp, up), fwd));
+        var brakeMultiplier = (1.0 - sinLean) * (1.0 - sinLean);
+        brake = brake * brakeMultiplier;
+    }
+
+    var steerSpeed = 4.0;
+    if (steerTarget > steerInput) steerInput = min(steerInput + steerSpeed * dt, steerTarget);
+    else if (steerTarget < steerInput) steerInput = max(steerInput - steerSpeed * dt, steerTarget);
+
+    var wheelieThrottle = 0.0;
+    if (throttleInput > wheelieThrottleStart)
+        wheelieThrottle = (throttleInput - wheelieThrottleStart) / (1.0 - wheelieThrottleStart);
+    if (wheelieThrottle > 1.0) wheelieThrottle = 1.0;
+
+    var rearContact = bike.hasWheelContact(1);
+    var frontContact = bike.hasWheelContact(0);
+    if (IsKeyDown(KEY_W) && rearContact && abs(steerInput) < 0.20 && wheelieThrottle > 0.0)
+        bike.setEngineMaxTorque(baseEngineTorque + (wheelieEngineTorque - baseEngineTorque) * wheelieThrottle);
+    else
+        bike.setEngineMaxTorque(baseEngineTorque);
+
+    if (chassis != nil && chassis.isValid())
+    {
+        var rot3 = chassis.getRotation();
+        var vel3 = chassis.getLinearVelocity();
+        var angVel = chassis.getAngularVelocity();
+        var rightDir = Vector3RotateByQuaternion(Vector3(1.0, 0.0, 0.0), rot3);
+        var forwardDir2 = Vector3RotateByQuaternion(Vector3(0.0, 0.0, 1.0), rot3);
+        var upDir2 = Vector3RotateByQuaternion(Vector3(0.0, 1.0, 0.0), rot3);
+        var speedForward2 = Vector3DotProduct(vel3, forwardDir2);
+        var uprightness = Vector3DotProduct(upDir2, Vector3(0.0, 1.0, 0.0));
+        var pitchRate = Vector3DotProduct(angVel, rightDir);
+
+        if (IsKeyDown(KEY_W) && rearContact && wheelieThrottle > 0.0 && abs(steerInput) < 0.20 && speedForward2 > 3.0 && uprightness > 0.55)
+        {
+            var targetPitchRate = 0.0 - (0.9 + 2.6 * wheelieThrottle);
+            if (pitchRate > targetPitchRate)
+            {
+                var pitchDelta = min(pitchRate - targetPitchRate, 3.0) * dt * 2.4;
+                angVel = Vector3(
+                    angVel.x - rightDir.x * pitchDelta,
+                    angVel.y - rightDir.y * pitchDelta,
+                    angVel.z - rightDir.z * pitchDelta
+                );
+                chassis.setAngularVelocity(angVel);
+                chassis.activate();
+            }
+        }
+        else if (!frontContact && pitchRate < -2.8)
+        {
+            var settleDelta = min(-2.8 - pitchRate, 2.2) * dt * 2.0;
+            angVel = Vector3(
+                angVel.x + rightDir.x * settleDelta,
+                angVel.y + rightDir.y * settleDelta,
+                angVel.z + rightDir.z * settleDelta
+            );
+            chassis.setAngularVelocity(angVel);
+        }
+    }
+
+    if ((steerInput != 0.0 || forward != 0.0 || brake != 0.0) && chassis != nil && chassis.isValid())
+        chassis.activate();
+
+    bike.setDriverInput(forward, steerInput, brake, 0.0);
+
+    accumulator = accumulator + dt;
+
+    while (accumulator >= fixedStep)
+    {
+        var updateError = world.step(fixedStep);
+        if (updateError != JOLT_UPDATE_NONE && !reportedStepError)
+        {
+            reportedStepError = true;
+            print("Jolt step warning: " + updateError);
+        }
+        accumulator = accumulator - fixedStep;
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    var h = GetHeight();
+    if (h <= 0) h = 1;
+    var aspect = GetWidth() / h;
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glFrustum(-0.08 * aspect, 0.08 * aspect, -0.08, 0.08, 0.1, 180.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    var eye = Vector3(0.0, 7.5, -26.0);
+    var tgt = Vector3(0.0, 1.2, -4.0);
+
+    if (chassis != nil && chassis.isValid())
+    {
+        var p = chassis.getPosition();
+        var rot3 = chassis.getRotation();
+        var vel2 = chassis.getLinearVelocity();
+        var forwardDir = Vector3RotateByQuaternion(Vector3(0.0, 0.0, 1.0), rot3);
+
+        var desiredCamX = p.x - forwardDir.x * 6.5;
+        var desiredCamY = p.y + 3.2;
+        var desiredCamZ = p.z - forwardDir.z * 6.5;
+
+        if (!camReady)
+        {
+            camReady = true;
+            camX = desiredCamX;
+            camY = desiredCamY;
+            camZ = desiredCamZ;
+        }
+        else
+        {
+            camX = camX + (desiredCamX - camX) * 0.12;
+            camY = camY + (desiredCamY - camY) * 0.12;
+            camZ = camZ + (desiredCamZ - camZ) * 0.12;
+        }
+
+        eye = Vector3(camX, camY, camZ);
+        tgt = Vector3(
+            p.x + forwardDir.x * 5.0 + vel2.x * 0.15,
+            p.y + 1.0,
+            p.z + forwardDir.z * 5.0 + vel2.z * 0.15
+        );
+    }
+
+    var upV = Vector3(0.0, 1.0, 0.0);
+    var view = MatrixLookAt(eye, tgt, upV);
+    MatrixWriteBuffer(view, viewBuf);
+    glLoadMatrixf(viewBuf);
+
+    drawFloor();
+    for (var i = 0; i < len(sceneBodies); i++)
+        drawBody(sceneBodies[i]);
+    drawBike();
+    drawWheels();
+
+
+    gifCaptureFrame("jolt_motorcycle.gif");
+    Flip();
+}
+
+if (world != nil) world.destroy();
+Close();

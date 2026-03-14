@@ -5,12 +5,89 @@
 #include "interpreter.hpp"
 #include "platform.hpp"
 #include "plugin.hpp"
+#include <cctype>
 #include <cstring>
+#include <cstdio>
+
+static char pathSeparator()
+{
+#if defined(_WIN32)
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
+static void joinPath(char *out, size_t outSize, const char *basePath, const char *name)
+{
+    if (!out || outSize == 0)
+        return;
+
+    out[0] = '\0';
+    if (!basePath || !*basePath)
+    {
+        snprintf(out, outSize, "%s", name ? name : "");
+        return;
+    }
+
+    const size_t len = strlen(basePath);
+    const char sep = pathSeparator();
+    if (basePath[len - 1] == '/' || basePath[len - 1] == '\\')
+        snprintf(out, outSize, "%s%s", basePath, name ? name : "");
+    else
+        snprintf(out, outSize, "%s%c%s", basePath, sep, name ? name : "");
+}
 
 static void setError(char* dest, size_t destSize, const char* msg)
 {
     strncpy(dest, msg, destSize - 1);
     dest[destSize - 1] = '\0';
+}
+
+static bool fileExists(const char *path)
+{
+    if (!path || !*path)
+        return false;
+
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return false;
+
+    fclose(f);
+    return true;
+}
+
+static void toLowerAscii(char *out, size_t outSize, const char *src)
+{
+    if (!out || outSize == 0)
+        return;
+
+    out[0] = '\0';
+    if (!src)
+        return;
+
+    size_t i = 0;
+    for (; src[i] != '\0' && i + 1 < outSize; ++i)
+    {
+        out[i] = (char)std::tolower((unsigned char)src[i]);
+    }
+    out[i] = '\0';
+}
+
+static bool tryLoadDefaultPluginLocations(Interpreter *vm, const char *filename, char *fullPath, size_t fullPathSize)
+{
+    if (vm->loadPlugin(filename))
+        return true;
+
+    joinPath(fullPath, fullPathSize, "plugins", filename);
+    if (vm->loadPlugin(fullPath))
+        return true;
+
+    joinPath(fullPath, fullPathSize, "modules", filename);
+    if (vm->loadPlugin(fullPath))
+        return true;
+
+    return false;
 }
 
 bool Interpreter::loadPlugin(const char *path)
@@ -82,38 +159,38 @@ bool Interpreter::loadPlugin(const char *path)
 
 bool Interpreter::loadPluginByName(const char *name)
 {
+    char lowercaseName[MAX_PATH_LEN];
     char filename[MAX_PATH_LEN];
     char fullPath[MAX_PATH_LEN];
+    char firstLoadError[MAX_PATH_LEN] = {0};
+    bool sawLoadFailure = false;
 
-    // Build filename: libbu_<name>.so (or .dll/.dylib)
-    snprintf(filename, sizeof(filename), "libbu_%s%s", name, OsGetLibraryExtension());
+    // Plugin files are always lowercase: libbu_<name>.so / .dll / .dylib
+    toLowerAscii(lowercaseName, sizeof(lowercaseName), name);
+    snprintf(filename, sizeof(filename), "libbu_%s%s", lowercaseName, OsGetLibraryExtension());
 
-    // Try current directory first
-    if (loadPlugin(filename))
+    if (tryLoadDefaultPluginLocations(this, filename, fullPath, sizeof(fullPath)))
         return true;
 
-    // Try ./modules/
-    snprintf(fullPath, sizeof(fullPath), "modules/%s", filename);
-    if (loadPlugin(fullPath))
-        return true;
-
-    // Try each search path
     for (int i = 0; i < pluginSearchPathCount; i++)
     {
-        const char* basePath = pluginSearchPaths[i];
-        size_t len = strlen(basePath);
-
-        if (len > 0 && basePath[len - 1] != '/' && basePath[len - 1] != '\\')
-            snprintf(fullPath, sizeof(fullPath), "%s/%s", basePath, filename);
-        else
-            snprintf(fullPath, sizeof(fullPath), "%s%s", basePath, filename);
-
+        const char *basePath = pluginSearchPaths[i];
+        joinPath(fullPath, sizeof(fullPath), basePath, filename);
         if (loadPlugin(fullPath))
             return true;
+        if (!sawLoadFailure && fileExists(fullPath) && lastPluginError[0] != '\0')
+        {
+            sawLoadFailure = true;
+            strncpy(firstLoadError, lastPluginError, sizeof(firstLoadError) - 1);
+            firstLoadError[sizeof(firstLoadError) - 1] = '\0';
+        }
     }
 
-    snprintf(lastPluginError, sizeof(lastPluginError),
-             "Could not find plugin '%s' (%s)", name, filename);
+    if (sawLoadFailure)
+        snprintf(lastPluginError, sizeof(lastPluginError), "%s", firstLoadError);
+    else
+        snprintf(lastPluginError, sizeof(lastPluginError),
+                 "Could not find plugin '%s' (%s)", name, filename);
     return false;
 }
 

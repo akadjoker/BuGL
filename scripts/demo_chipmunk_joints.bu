@@ -1,0 +1,567 @@
+// ================================================================
+// BuGL Demo — Chipmunk Joints Playground
+// LMB   -> spawn ball
+// RMB   -> spawn box
+// SPACE -> radial blast
+// J     -> toggle joint overlay
+// R     -> reset scene
+// ESC   -> quit
+// ================================================================
+
+require "Chip2D";
+import Chip2D;
+using Chip2D;
+
+import SDL;
+using SDL;
+
+import OpenGl;
+using OpenGl;
+
+import GLM;
+using GLM;
+
+include "recorder.bu";
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL  Chipmunk Joints Playground", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.05, 0.06, 0.09, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glDisable(GL_DEPTH_TEST);
+
+var PI = 3.141592653589793;
+var RAD2DEG = 57.29577951308232;
+var ppm = 42.0;
+
+var worldW = GetWidth() / ppm;
+var worldH = GetHeight() / ppm;
+var fixedStep = 1.0 / 60.0;
+var accumulator = 0.0;
+
+var space = nil;
+var staticBody = nil;
+var showJoints = true;
+
+var dynamicBodies = [];
+var shapes = [];
+var constraints = [];
+var bodyVisuals = [];
+var jointVisuals = [];
+var staticSegments = [];
+
+struct BodyVisual
+{
+    var body;
+    var shapeType; // 0 box, 1 circle
+    var hx;
+    var hy;
+    var radius;
+    var r;
+    var g;
+    var b;
+}
+
+struct JointVisual
+{
+    var joint;
+    var jointType; // 0 pin, 1 pivot, 2 spring
+    var r;
+    var g;
+    var b;
+}
+
+struct SegmentVisual
+{
+    var ax;
+    var ay;
+    var bx;
+    var by;
+    var r;
+    var g;
+    var b;
+}
+
+def screenToWorldX(px)
+{
+    return px / ppm;
+}
+
+def screenToWorldY(py)
+{
+    var out = (GetHeight() - py) / ppm;
+    return out;
+}
+
+def addStaticSegment(ax, ay, bx, by, radius, friction, elasticity, r, g, b)
+{
+    var shape = cpSegmentShapeNew(staticBody, Vector2(ax, ay), Vector2(bx, by), radius);
+    cpShapeSetFriction(shape, friction);
+    cpShapeSetElasticity(shape, elasticity);
+    cpSpaceAddShape(space, shape);
+    shapes.push(shape);
+    staticSegments.push(SegmentVisual(ax, ay, bx, by, r, g, b));
+    return shape;
+}
+
+def addBox(x, y, hx, hy, mass, friction, elasticity, r, g, b)
+{
+    var moment = cpMomentForBox(mass, hx * 2.0, hy * 2.0);
+    var body = cpBodyNew(mass, moment);
+    cpBodySetPosition(body, Vector2(x, y));
+    cpSpaceAddBody(space, body);
+
+    var shape = cpBoxShapeNew(body, hx * 2.0, hy * 2.0, 0.02);
+    cpShapeSetFriction(shape, friction);
+    cpShapeSetElasticity(shape, elasticity);
+    cpSpaceAddShape(space, shape);
+
+    dynamicBodies.push(body);
+    shapes.push(shape);
+    bodyVisuals.push(BodyVisual(body, 0, hx, hy, 0.0, r, g, b));
+    return body;
+}
+
+def addBall(x, y, radius, mass, friction, elasticity, r, g, b)
+{
+    var moment = cpMomentForCircle(mass, 0.0, radius, Vector2(0.0, 0.0));
+    var body = cpBodyNew(mass, moment);
+    cpBodySetPosition(body, Vector2(x, y));
+    cpSpaceAddBody(space, body);
+
+    var shape = cpCircleShapeNew(body, radius, Vector2(0.0, 0.0));
+    cpShapeSetFriction(shape, friction);
+    cpShapeSetElasticity(shape, elasticity);
+    cpSpaceAddShape(space, shape);
+
+    dynamicBodies.push(body);
+    shapes.push(shape);
+    bodyVisuals.push(BodyVisual(body, 1, 0.0, 0.0, radius, r, g, b));
+    return body;
+}
+
+def addJoint(joint, jointType, r, g, b)
+{
+    cpSpaceAddConstraint(space, joint);
+    constraints.push(joint);
+    jointVisuals.push(JointVisual(joint, jointType, r, g, b));
+    return joint;
+}
+
+def toWorldPoint(body, lx, ly)
+{
+    var (bx, by) = cpBodyGetPosition(body);
+    var a = cpBodyGetAngle(body);
+    var c = cos(a);
+    var s = sin(a);
+    var outX = bx + lx * c - ly * s;
+    var outY = by + lx * s + ly * c;
+    return Vector2(outX, outY);
+}
+
+def freeScene()
+{
+    if (space == nil) return;
+
+    for (var i = 0; i < len(constraints); i++)
+    {
+        var joint = constraints[i];
+        if (joint == nil) continue;
+        cpSpaceRemoveConstraint(space, joint);
+        cpConstraintFree(joint);
+    }
+
+    for (var j = 0; j < len(shapes); j++)
+    {
+        var shape = shapes[j];
+        if (shape == nil) continue;
+        cpSpaceRemoveShape(space, shape);
+        cpShapeFree(shape);
+    }
+
+    for (var k = 0; k < len(dynamicBodies); k++)
+    {
+        var body = dynamicBodies[k];
+        if (body == nil) continue;
+        cpSpaceRemoveBody(space, body);
+        cpBodyFree(body);
+    }
+
+    cpSpaceFree(space);
+
+    space = nil;
+    staticBody = nil;
+    dynamicBodies.clear();
+    shapes.clear();
+    constraints.clear();
+    bodyVisuals.clear();
+    jointVisuals.clear();
+    staticSegments.clear();
+}
+
+def buildBridge(x0, y0, plankCount)
+{
+    var hx = 0.34;
+    var hy = 0.10;
+    var span = hx * 2.0;
+    var prev = nil;
+
+    for (var i = 0; i < plankCount; i++)
+    {
+        var cx = x0 + hx + i * span;
+        var plank = addBox(cx, y0, hx, hy, 0.85, 0.95, 0.0, 0.82, 0.67, 0.28);
+
+        if (i == 0)
+        {
+            addJoint(cpPivotJointNew(staticBody, plank, Vector2(x0, y0)), 1, 1.0, 0.82, 0.32);
+        }
+        else
+        {
+            var px = x0 + i * span;
+            addJoint(cpPivotJointNew(prev, plank, Vector2(px, y0)), 1, 1.0, 0.82, 0.32);
+        }
+
+        prev = plank;
+    }
+
+    var rightX = x0 + plankCount * span;
+    addJoint(cpPivotJointNew(prev, staticBody, Vector2(rightX, y0)), 1, 1.0, 0.82, 0.32);
+}
+
+def buildChain(anchorX, anchorY, count)
+{
+    var hx = 0.10;
+    var hy = 0.22;
+    var prev = nil;
+
+    for (var i = 0; i < count; i++)
+    {
+        var cy = anchorY - 0.55 - i * 0.50;
+        var link = addBox(anchorX, cy, hx, hy, 0.45, 0.75, 0.0, 0.46, 0.88, 1.0);
+
+        if (i == 0)
+        {
+            addJoint(cpPivotJointNew(staticBody, link, Vector2(anchorX, anchorY)), 1, 0.55, 0.95, 1.0);
+        }
+        else
+        {
+            addJoint(cpPinJointNew(prev, link, Vector2(0.0, -hy), Vector2(0.0, hy)), 0, 0.55, 0.95, 1.0);
+        }
+
+        prev = link;
+    }
+}
+
+def buildSpringRig()
+{
+    var topY = worldH - 1.8;
+    var leftX = worldW * 0.72;
+    var rightX = leftX + 2.0;
+    var ballY = topY - 2.3;
+
+    var leftBall = addBall(leftX, ballY, 0.32, 1.3, 0.85, 0.08, 0.98, 0.48, 0.40);
+    var rightBall = addBall(rightX, ballY, 0.32, 1.3, 0.85, 0.08, 0.96, 0.78, 0.30);
+
+    addJoint(cpPivotJointNew(staticBody, leftBall, Vector2(leftX, topY)), 1, 1.0, 0.78, 0.30);
+    addJoint(cpPivotJointNew(staticBody, rightBall, Vector2(rightX, topY)), 1, 1.0, 0.78, 0.30);
+    addJoint(cpDampedSpringNew(leftBall, rightBall, Vector2(0.0, 0.0), Vector2(0.0, 0.0), 2.0, 95.0, 4.5), 2, 1.0, 0.45, 0.45);
+}
+
+def resetScene()
+{
+    freeScene();
+
+    space = cpSpaceNew();
+    cpSpaceSetIterations(space, 18);
+    cpSpaceSetGravity(space, Vector2(0.0, -22.0));
+    cpSpaceSetDamping(space, 0.997);
+    staticBody = cpSpaceGetStaticBody(space);
+
+    addStaticSegment(0.7, 0.8, worldW - 0.7, 0.8, 0.06, 1.0, 0.0, 0.28, 0.31, 0.37);
+    addStaticSegment(0.7, 0.8, 0.7, worldH - 0.7, 0.06, 1.0, 0.0, 0.18, 0.20, 0.25);
+    addStaticSegment(worldW - 0.7, 0.8, worldW - 0.7, worldH - 0.7, 0.06, 1.0, 0.0, 0.18, 0.20, 0.25);
+
+    buildBridge(worldW * 0.30, worldH * 0.38, 10);
+    buildChain(worldW * 0.18, worldH - 1.3, 8);
+    buildSpringRig();
+
+    for (var i = 0; i < 5; i++)
+    {
+        var x = worldW * 0.44 + (i % 2) * 0.35;
+        var y = worldH * 0.72 + i * 0.60;
+        addBox(x, y, 0.24, 0.24, 1.0, 0.78, 0.02, 0.75, 0.86, 1.0);
+    }
+}
+
+def drawBox(hx, hy)
+{
+    glBegin(GL_QUADS);
+    glVertex2f(-hx, -hy);
+    glVertex2f( hx, -hy);
+    glVertex2f( hx,  hy);
+    glVertex2f(-hx,  hy);
+    glEnd();
+
+    glColor3f(0.08, 0.09, 0.11);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(-hx, -hy);
+    glVertex2f( hx, -hy);
+    glVertex2f( hx,  hy);
+    glVertex2f(-hx,  hy);
+    glEnd();
+}
+
+def drawCircle(radius)
+{
+    var segs = 24;
+
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(0.0, 0.0);
+    for (var i = 0; i <= segs; i++)
+    {
+        var a = (i / segs) * PI * 2.0;
+        glVertex2f(cos(a) * radius, sin(a) * radius);
+    }
+    glEnd();
+
+    glColor3f(0.08, 0.09, 0.11);
+    glBegin(GL_LINE_LOOP);
+    for (var j = 0; j < segs; j++)
+    {
+        var a2 = (j / segs) * PI * 2.0;
+        glVertex2f(cos(a2) * radius, sin(a2) * radius);
+    }
+    glEnd();
+}
+
+def drawGrid()
+{
+    glLineWidth(1.0);
+    glColor3f(0.10, 0.11, 0.14);
+    glBegin(GL_LINES);
+    for (var gx = 0; gx <= int(worldW); gx++)
+    {
+        glVertex2f(gx, 0.0);
+        glVertex2f(gx, worldH);
+    }
+    for (var gy = 0; gy <= int(worldH); gy++)
+    {
+        glVertex2f(0.0, gy);
+        glVertex2f(worldW, gy);
+    }
+    glEnd();
+}
+
+def drawStaticSegments()
+{
+    glLineWidth(4.0);
+    glBegin(GL_LINES);
+    for (var i = 0; i < len(staticSegments); i++)
+    {
+        var s = staticSegments[i];
+        glColor3f(s.r, s.g, s.b);
+        glVertex2f(s.ax, s.ay);
+        glVertex2f(s.bx, s.by);
+    }
+    glEnd();
+}
+
+def drawSpringLine(x1, y1, x2, y2, r, g, b)
+{
+    var dx = x2 - x1;
+    var dy = y2 - y1;
+    var dist = sqrt(dx * dx + dy * dy);
+    if (dist < 0.0001)
+    {
+        glColor3f(r, g, b);
+        glBegin(GL_LINES);
+        glVertex2f(x1, y1);
+        glVertex2f(x2, y2);
+        glEnd();
+        return;
+    }
+
+    var nx = -dy / dist;
+    var ny = dx / dist;
+    var amp = 0.10;
+    var segs = 10;
+
+    glLineWidth(2.0);
+    glColor3f(r, g, b);
+    glBegin(GL_LINE_STRIP);
+    glVertex2f(x1, y1);
+    for (var i = 1; i < segs; i++)
+    {
+        var t = i / segs;
+        var px = x1 + dx * t;
+        var py = y1 + dy * t;
+        var side = amp;
+        if ((i % 2) == 0) side = -amp;
+        glVertex2f(px + nx * side, py + ny * side);
+    }
+    glVertex2f(x2, y2);
+    glEnd();
+}
+
+def drawJointsOverlay()
+{
+    if (!showJoints) return;
+
+    for (var i = 0; i < len(jointVisuals); i++)
+    {
+        var item = jointVisuals[i];
+        var joint = item.joint;
+        var bodyA = cpConstraintGetBodyA(joint);
+        var bodyB = cpConstraintGetBodyB(joint);
+
+        var ax = 0.0;
+        var ay = 0.0;
+        var bx = 0.0;
+        var by = 0.0;
+
+        if (item.jointType == 0)
+        {
+            var (lax, lay) = cpPinJointGetAnchorA(joint);
+            var (lbx, lby) = cpPinJointGetAnchorB(joint);
+            var wa = toWorldPoint(bodyA, lax, lay);
+            var wb = toWorldPoint(bodyB, lbx, lby);
+            ax = wa.x; ay = wa.y; bx = wb.x; by = wb.y;
+        }
+        else if (item.jointType == 1)
+        {
+            var (lax2, lay2) = cpPivotJointGetAnchorA(joint);
+            var (lbx2, lby2) = cpPivotJointGetAnchorB(joint);
+            var wa2 = toWorldPoint(bodyA, lax2, lay2);
+            var wb2 = toWorldPoint(bodyB, lbx2, lby2);
+            ax = wa2.x; ay = wa2.y; bx = wb2.x; by = wb2.y;
+        }
+        else
+        {
+            var (lax3, lay3) = cpDampedSpringGetAnchorA(joint);
+            var (lbx3, lby3) = cpDampedSpringGetAnchorB(joint);
+            var wa3 = toWorldPoint(bodyA, lax3, lay3);
+            var wb3 = toWorldPoint(bodyB, lbx3, lby3);
+            ax = wa3.x; ay = wa3.y; bx = wb3.x; by = wb3.y;
+        }
+
+        if (item.jointType == 2) drawSpringLine(ax, ay, bx, by, item.r, item.g, item.b);
+        else
+        {
+            glLineWidth(2.0);
+            glColor3f(item.r, item.g, item.b);
+            glBegin(GL_LINES);
+            glVertex2f(ax, ay);
+            glVertex2f(bx, by);
+            glEnd();
+        }
+
+        glPointSize(5.0);
+        glColor3f(1.0, 0.95, 0.75);
+        glBegin(GL_POINTS);
+        glVertex2f(ax, ay);
+        glVertex2f(bx, by);
+        glEnd();
+    }
+}
+
+def applyBlast(cx, cy)
+{
+    for (var i = 0; i < len(dynamicBodies); i++)
+    {
+        var body = dynamicBodies[i];
+        var (px, py) = cpBodyGetPosition(body);
+        var dx = px - cx;
+        var dy = py - cy;
+        var dist = sqrt(dx * dx + dy * dy) + 0.0001;
+        var strength = 14.0 / (0.35 + dist);
+        var ix = (dx / dist) * strength;
+        var iy = (dy / dist) * strength;
+        cpBodyApplyImpulseAtWorldPoint(body, Vector2(ix, iy), Vector2(px, py));
+    }
+}
+
+resetScene();
+print("Chipmunk demo ready: LMB ball | RMB box | Space blast | J joints | R reset");
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt > 0.05) dt = 0.05;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) resetScene();
+    if (IsKeyPressed(KEY_J)) showJoints = !showJoints;
+
+    if (IsResized())
+    {
+        glViewport(0, 0, GetWidth(), GetHeight());
+        worldW = GetWidth() / ppm;
+        worldH = GetHeight() / ppm;
+        resetScene();
+    }
+
+    if (IsMousePressed(MOUSE_LEFT))
+    {
+        var wx = screenToWorldX(GetMouseX());
+        var wy = screenToWorldY(GetMouseY());
+        addBall(wx, wy, 0.24, 0.95, 0.85, 0.18, 0.96, 0.52, 0.34);
+    }
+
+    if (IsMousePressed(MOUSE_RIGHT))
+    {
+        var wx2 = screenToWorldX(GetMouseX());
+        var wy2 = screenToWorldY(GetMouseY());
+        addBox(wx2, wy2, 0.22, 0.22, 0.95, 0.82, 0.05, 0.46, 0.72, 1.0);
+    }
+
+    if (IsKeyPressed(KEY_SPACE))
+    {
+        var cx = screenToWorldX(GetMouseX());
+        var cy = screenToWorldY(GetMouseY());
+        applyBlast(cx, cy);
+    }
+
+    accumulator = accumulator + dt;
+    while (accumulator >= fixedStep)
+    {
+        cpSpaceStep(space, fixedStep);
+        accumulator = accumulator - fixedStep;
+    }
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, worldW, 0.0, worldH, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    drawGrid();
+    drawStaticSegments();
+    drawJointsOverlay();
+
+    for (var i = 0; i < len(bodyVisuals); i++)
+    {
+        var item = bodyVisuals[i];
+        var (x, y) = cpBodyGetPosition(item.body);
+        var a = cpBodyGetAngle(item.body);
+
+        glPushMatrix();
+        glTranslatef(x, y, 0.0);
+        glRotatef(a * RAD2DEG, 0.0, 0.0, 1.0);
+        glColor3f(item.r, item.g, item.b);
+
+        if (item.shapeType == 0) drawBox(item.hx, item.hy);
+        else drawCircle(item.radius);
+
+        glPopMatrix();
+    }
+     gifCaptureFrame("chipmunk_joints.gif");
+    Flip();
+}
+
+freeScene();
+Close();

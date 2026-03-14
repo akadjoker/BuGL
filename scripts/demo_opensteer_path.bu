@@ -1,0 +1,403 @@
+// ================================================================
+// BuGL Demo - OpenSteer Path Follow
+// SPACE -> burst
+// V     -> view toggle
+// R     -> reset
+// ESC   -> quit
+// ================================================================
+
+require "OpenSteer";
+import OpenSteer;
+using OpenSteer;
+
+import SDL;
+using SDL;
+
+import OpenGl;
+using OpenGl;
+
+import GLM;
+using GLM;
+
+import math;
+using math;
+
+include "recorder.bu";
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL OpenSteer Path Follow", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.05, 0.06, 0.09, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+var PI = 3.141592653589793;
+var RAD2DEG = 57.29577951308232;
+var pathRadius = 1.4;
+var pathPoints = [];
+var walkers = [];
+var allAgents = [];
+var obstacles = [];
+var camOrbit = 0.0;
+var topView = true;
+
+struct Walker
+{
+    var agent;
+    var waypoint;
+    var speedBias;
+    var r;
+    var g;
+    var b;
+}
+
+def randRange(a, b)
+{
+    return a + rand() * (b - a);
+}
+
+def drawGround(size, step)
+{
+    glColor3f(0.14, 0.17, 0.20);
+    glBegin(GL_LINES);
+    for (var i = -size; i <= size; i = i + step)
+    {
+        glVertex3f(i, 0.0, -size);
+        glVertex3f(i, 0.0, size);
+        glVertex3f(-size, 0.0, i);
+        glVertex3f(size, 0.0, i);
+    }
+    glEnd();
+}
+
+def drawPathRibbon(width)
+{
+    var leftEdge = [];
+    var rightEdge = [];
+
+    for (var i = 0; i < len(pathPoints); i++)
+    {
+        var prev = pathPoints[(i + len(pathPoints) - 1) % len(pathPoints)];
+        var curr = pathPoints[i];
+        var next = pathPoints[(i + 1) % len(pathPoints)];
+
+        var d1 = Vector3Normalize(Vector3(curr.x - prev.x, 0.0, curr.z - prev.z));
+        var d2 = Vector3Normalize(Vector3(next.x - curr.x, 0.0, next.z - curr.z));
+        var tangent = Vector3Add(d1, d2);
+        if (Vector3Length(tangent) < 0.001) tangent = d2;
+        tangent = Vector3Normalize(tangent);
+
+        var normal = Vector3Normalize(Vector3(0.0 - tangent.z, 0.0, tangent.x));
+        leftEdge.push(Vector3(curr.x + normal.x * width, 0.04, curr.z + normal.z * width));
+        rightEdge.push(Vector3(curr.x - normal.x * width, 0.04, curr.z - normal.z * width));
+    }
+
+    glColor4f(0.10, 0.42, 0.36, 0.28);
+    glBegin(GL_QUAD_STRIP);
+    for (var j = 0; j <= len(leftEdge); j++)
+    {
+        var idx = j % len(leftEdge);
+        var l = leftEdge[idx];
+        var r = rightEdge[idx];
+        glVertex3f(l.x, l.y, l.z);
+        glVertex3f(r.x, r.y, r.z);
+    }
+    glEnd();
+
+    glColor4f(0.12, 0.70, 0.54, 0.38);
+    glBegin(GL_LINE_LOOP);
+    for (var k = 0; k < len(leftEdge); k++)
+    {
+        var p = leftEdge[k];
+        glVertex3f(p.x, p.y + 0.01, p.z);
+    }
+    glEnd();
+
+    glBegin(GL_LINE_LOOP);
+    for (var m = 0; m < len(rightEdge); m++)
+    {
+        var p2 = rightEdge[m];
+        glVertex3f(p2.x, p2.y + 0.01, p2.z);
+    }
+    glEnd();
+}
+
+def drawRingXZ(radius, segs)
+{
+    glBegin(GL_LINE_LOOP);
+    for (var i = 0; i < segs; i++)
+    {
+        var a = (i / segs) * 2.0 * PI;
+        glVertex3f(cos(a) * radius, 0.0, sin(a) * radius);
+    }
+    glEnd();
+}
+
+def drawSphereWire(radius, rings, slices)
+{
+    for (var i = 0; i <= rings; i++)
+    {
+        var v = i / rings;
+        var phi = (v - 0.5) * PI;
+        var y = sin(phi) * radius;
+        var r = cos(phi) * radius;
+
+        glBegin(GL_LINE_LOOP);
+        for (var j = 0; j < slices; j++)
+        {
+            var a = (j / slices) * 2.0 * PI;
+            glVertex3f(cos(a) * r, y, sin(a) * r);
+        }
+        glEnd();
+    }
+}
+
+def drawAgent(agent, cr, cg, cb)
+{
+    var pos = agent.getPosition();
+    var fwd = agent.getForward();
+    var yaw = atan2(fwd.x, fwd.z) * RAD2DEG;
+
+    glPushMatrix();
+    glTranslatef(pos.x, pos.y, pos.z);
+    glRotatef(yaw, 0.0, 1.0, 0.0);
+
+    glColor3f(cr, cg, cb);
+    glBegin(GL_TRIANGLES);
+    glVertex3f(0.0, 0.25, 0.95);
+    glVertex3f(-0.42, 0.0, -0.55);
+    glVertex3f(0.42, 0.0, -0.55);
+    glEnd();
+
+    glColor3f(0.95, 0.84, 0.22);
+    glBegin(GL_LINES);
+    glVertex3f(0.0, 0.15, 0.85);
+    glVertex3f(0.0, 0.15, 1.35);
+    glEnd();
+    glPopMatrix();
+}
+
+def drawAgentGuide(agent, target)
+{
+    var pos = agent.getPosition();
+    var vel = agent.getVelocity();
+    var look = Vector3Add(pos, Vector3Scale(agent.getForward(), 1.8));
+    var future = Vector3Add(pos, Vector3Scale(vel, 0.28));
+
+    glColor4f(0.96, 0.86, 0.32, 0.45);
+    glBegin(GL_LINES);
+    glVertex3f(pos.x, pos.y + 0.02, pos.z);
+    glVertex3f(target.x, target.y + 0.02, target.z);
+    glEnd();
+
+    glColor4f(0.34, 0.86, 0.98, 0.70);
+    glBegin(GL_LINES);
+    glVertex3f(pos.x, pos.y + 0.10, pos.z);
+    glVertex3f(look.x, look.y + 0.10, look.z);
+    glEnd();
+
+    glColor4f(0.98, 0.46, 0.22, 0.55);
+    glBegin(GL_LINES);
+    glVertex3f(pos.x, pos.y + 0.06, pos.z);
+    glVertex3f(future.x, future.y + 0.06, future.z);
+    glEnd();
+}
+
+def drawPath()
+{
+    drawPathRibbon(pathRadius * 0.92);
+
+    glColor3f(0.88, 0.72, 0.18);
+    glBegin(GL_LINE_LOOP);
+    for (var i = 0; i < len(pathPoints); i++)
+    {
+        var p = pathPoints[i];
+        glVertex3f(p.x, p.y, p.z);
+    }
+    glEnd();
+
+    for (var j = 0; j < len(pathPoints); j++)
+    {
+        var node = pathPoints[j];
+        glPushMatrix();
+        glTranslatef(node.x, node.y + 0.02, node.z);
+        glColor3f(0.98, 0.82, 0.30);
+        drawRingXZ(pathRadius, 24);
+        glColor3f(0.20, 0.92, 0.86);
+        drawRingXZ(pathRadius * 0.32, 16);
+        glPopMatrix();
+    }
+}
+
+def setupPath()
+{
+    pathPoints.clear();
+    pathPoints.push(Vector3(-14.0, 0.6, -2.0));
+    pathPoints.push(Vector3(-10.0, 0.6,  8.0));
+    pathPoints.push(Vector3( -2.0, 0.6, 12.0));
+    pathPoints.push(Vector3(  8.0, 0.6, 10.0));
+    pathPoints.push(Vector3( 14.0, 0.6,  2.0));
+    pathPoints.push(Vector3( 12.0, 0.6, -8.0));
+    pathPoints.push(Vector3(  3.0, 0.6,-12.0));
+    pathPoints.push(Vector3( -8.0, 0.6,-10.0));
+}
+
+def resetScene()
+{
+    setupPath();
+    walkers.clear();
+    allAgents.clear();
+    obstacles.clear();
+
+    obstacles.push(SteerSphereObstacle(2.6, Vector3(0.0, 1.8, 0.0)));
+    obstacles.push(SteerSphereObstacle(2.1, Vector3(-5.5, 1.6, 3.0)));
+    obstacles.push(SteerSphereObstacle(2.3, Vector3(6.5, 1.7, -3.5)));
+
+    for (var i = 0; i < 24; i++)
+    {
+        var wp = i % len(pathPoints);
+        var base = pathPoints[wp];
+        var agent = SteerAgent(Vector3(
+            base.x + randRange(-0.7, 0.7),
+            0.6,
+            base.z + randRange(-0.7, 0.7)
+        ));
+        agent.setMass(1.0);
+        agent.setRadius(0.55);
+        agent.setMaxForce(22.0);
+        agent.setMaxSpeed(7.5);
+        agent.setSpeed(randRange(2.4, 4.2));
+        agent.randomizeHeadingXZ();
+
+        var tint = i / 20.0;
+        walkers.push(Walker(agent, (wp + 1) % len(pathPoints), randRange(-0.6, 0.8), 0.25 + tint * 0.45, 0.82, 0.92 - tint * 0.28));
+        allAgents.push(agent);
+    }
+}
+
+print("OpenSteer path demo ready: space burst, V view, R reset");
+resetScene();
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) resetScene();
+    if (IsKeyPressed(KEY_V)) topView = !topView;
+
+    var dt = GetDeltaTime();
+    if (dt > 0.05) dt = 0.05;
+
+    if (IsKeyPressed(KEY_SPACE))
+    {
+        for (var s = 0; s < len(walkers); s++)
+        {
+            var a = walkers[s].agent;
+            var burst = Vector3(
+                randRange(-22.0, 22.0),
+                0.0,
+                randRange(-22.0, 22.0)
+            );
+            a.applySteeringForce(burst, 0.18);
+        }
+    }
+
+    for (var i = 0; i < len(walkers); i++)
+    {
+        var w = walkers[i];
+        var agent = w.agent;
+        var target = pathPoints[w.waypoint];
+        var pos = agent.getPosition();
+        var dx = target.x - pos.x;
+        var dz = target.z - pos.z;
+        var dist = sqrt(dx * dx + dz * dz);
+        if (dist < pathRadius)
+        {
+            w.waypoint = w.waypoint + 1;
+            if (w.waypoint >= len(pathPoints)) w.waypoint = 0;
+            walkers[i] = w;
+            target = pathPoints[w.waypoint];
+        }
+
+        var pathSteer = agent.arrive(target, 6.0);
+        var separate = agent.separation(4.8, -0.55, allAgents);
+        var align = agent.alignment(7.5, 0.65, allAgents);
+        var cohesion = agent.cohesion(8.5, -0.20, allAgents);
+        var avoidAgents = agent.avoidNeighbors(0.85, allAgents);
+        var keepSpeed = agent.targetSpeed(4.6 + w.speedBias);
+        var wander = agent.wander(dt * 0.9);
+
+        var steer = Vector3(0.0, 0.0, 0.0);
+        steer = Vector3Add(steer, Vector3Scale(pathSteer, 1.60));
+        steer = Vector3Add(steer, Vector3Scale(separate, 10.0));
+        steer = Vector3Add(steer, Vector3Scale(align, 5.5));
+        steer = Vector3Add(steer, Vector3Scale(cohesion, 4.0));
+        steer = Vector3Add(steer, Vector3Scale(avoidAgents, 12.0));
+        steer = Vector3Add(steer, Vector3Scale(keepSpeed, 0.55));
+        steer = Vector3Add(steer, Vector3Scale(wander, 0.20));
+
+        for (var o = 0; o < len(obstacles); o++)
+        {
+            var obsAvoid = agent.avoidSphere(1.1, obstacles[o]);
+            if (Vector3Length(obsAvoid) > 0.001)
+                steer = Vector3Add(steer, Vector3Scale(obsAvoid, 18.0));
+        }
+
+        agent.applySteeringForce(steer, dt);
+    }
+
+    camOrbit = camOrbit + dt * 0.22;
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    var h = GetHeight();
+    if (h <= 0) h = 1;
+    var aspect = GetWidth() / h;
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glFrustum(-0.09 * aspect, 0.09 * aspect, -0.09, 0.09, 0.1, 260.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    var eye = Vector3(cos(camOrbit) * 26.0, 24.0, sin(camOrbit) * 26.0);
+    var center = Vector3(0.0, 0.0, 0.0);
+    if (topView)
+    {
+        eye = Vector3(0.0, 34.0, 0.01);
+        center = Vector3(0.0, 0.0, 0.0);
+    }
+    glLoadMatrixf(MatrixToBuffer(MatrixLookAt(eye, center, Vector3(0.0, 1.0, 0.0))));
+
+    drawGround(28, 2);
+    drawPath();
+
+    for (var k = 0; k < len(obstacles); k++)
+    {
+        var obstacle = obstacles[k];
+        var c = obstacle.getCenter();
+        glPushMatrix();
+        glTranslatef(c.x, c.y, c.z);
+        glColor3f(0.78, 0.28, 0.20);
+        drawSphereWire(obstacle.getRadius(), 8, 14);
+        glPopMatrix();
+    }
+
+    for (var j = 0; j < len(walkers); j++)
+    {
+        var walker = walkers[j];
+        drawAgentGuide(walker.agent, pathPoints[walker.waypoint]);
+        drawAgent(walker.agent, walker.r, walker.g, walker.b);
+    }
+
+    gifCaptureFrame("opensteer_path.gif");
+    Flip();
+}
+
+Close();

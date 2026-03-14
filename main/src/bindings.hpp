@@ -29,12 +29,17 @@ namespace SDLBindings
     void register_stb_truetype(ModuleBuilder &module, Interpreter &vm);
     void register_msf_gif(Interpreter &vm);
     void register_poly2tri(Interpreter &vm);
-    void register_box2d(Interpreter &vm);
-    void register_box2d_joints(Interpreter &vm);
-    void register_ode(Interpreter &vm);
+    // void register_box2d(Interpreter &vm);
+    // void register_box2d_joints(Interpreter &vm);
+    //void register_ode(Interpreter &vm);
     void register_raymath(Interpreter &vm);
     void register_audio(ModuleBuilder &module);
     void register_shapes(ModuleBuilder &module);
  
+}
+
+namespace ImGuiBindings
+{
+    void registerAll(Interpreter &vm);
 }
  

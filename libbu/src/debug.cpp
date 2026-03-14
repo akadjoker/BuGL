@@ -7,6 +7,21 @@
 // Global names para disassembly
 static const char** g_globalNames = nullptr;
 static int g_globalNamesCount = 0;
+static FILE *g_debugOutput = stdout;
+
+static FILE *debugOut()
+{
+  return g_debugOutput ? g_debugOutput : stdout;
+}
+
+static void printDebugValue(const Value &value)
+{
+  char buffer[512];
+  valueToBuffer(value, buffer, sizeof(buffer));
+  std::fprintf(debugOut(), "%s", buffer);
+}
+
+#define printf(...) std::fprintf(debugOut(), __VA_ARGS__)
 
 void Debug::setGlobalNames(const char** names, int count)
 {
@@ -18,6 +33,11 @@ void Debug::clearGlobalNames()
 {
   g_globalNames = nullptr;
   g_globalNamesCount = 0;
+}
+
+void Debug::setOutput(FILE *output)
+{
+  g_debugOutput = output ? output : stdout;
 }
 
 void Debug::disassembleChunk(const Code &chunk, const char *name)
@@ -64,7 +84,7 @@ size_t Debug::disassembleInstruction(const Code &chunk, size_t offset)
     }
     uint16_t constant = (uint16_t)(chunk.code[offset + 1] << 8) | chunk.code[offset + 2];
     printf("%-20s %4d '", "OP_CONSTANT", constant);
-    printValue(chunk.constants[constant]);
+    printDebugValue(chunk.constants[constant]);
     printf("'\n");
     return offset + 3;
   }
@@ -181,7 +201,7 @@ size_t Debug::disassembleInstruction(const Code &chunk, size_t offset)
     uint16 constant = (uint16)(chunk.code[offset] << 8) | chunk.code[offset + 1];
     offset += 2;
     printf("%-20s %4d '", "OP_CLOSURE", constant);
-    printValue(chunk.constants[constant]);
+    printDebugValue(chunk.constants[constant]);
     printf("'\n");
 
     // Lê upvalue info
@@ -393,7 +413,7 @@ size_t Debug::constantInstruction(const char *name, const Code &chunk,
 
   uint16 constantIdx = (uint16)(chunk.code[offset + 1] << 8) | chunk.code[offset + 2];
   printf("%-20s %4u '", name, (unsigned)constantIdx);
-  printValue(chunk.constants[constantIdx]);
+  printDebugValue(chunk.constants[constantIdx]);
   printf("'\n");
   return offset + 3;
 }
@@ -503,7 +523,7 @@ void Debug::dumpFunction(const Function *func)
     for (size_t i = 0; i < func->chunk->constants.size(); i++)
     {
       printf("  [%4zu] = ", i);
-      printValue(func->chunk->constants[i]);
+      printDebugValue(func->chunk->constants[i]);
       printf("\n");
     }
     printf("\n");

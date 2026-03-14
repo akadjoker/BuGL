@@ -253,7 +253,7 @@ void Interpreter::reset()
 
 Interpreter::~Interpreter()
 {
-  dumpToFile("main.dump");
+  //dumpToFile("main.dump");
   Info("VM shutdown");
   Info("Memory allocated : %s", formatBytes(totalAllocated));
   Info("Classes          : %zu", getTotalClasses());
@@ -265,15 +265,21 @@ Interpreter::~Interpreter()
   Info("Buffers          : %zu", totalBuffers);
   Info("Processes        : %zu", aliveProcesses.size());
   Info("Globals          : %zu", globalsArray.size());
-  
-  unloadAllPlugins();
+
+  freeInstances();
+  freeRunningProcesses();
+  freeFunctions();
+  // globals.destroy();  // OPTIMIZATION: HashMap globals removed
+  clearAllGCObjects();  // Must be called before freeBlueprints() so native destructors can access ClassDef/NativeClassDef
+  freeBlueprints();
+
   for (size_t i = 0; i < modules.size(); i++)
   {
     ModuleDef *mod = modules[i];
     delete mod;
   }
-
   modules.clear();
+
 #if !BU_RUNTIME_ONLY
   if (compiler)
   {
@@ -282,12 +288,7 @@ Interpreter::~Interpreter()
   }
 #endif
 
-  freeInstances();
-  freeRunningProcesses();
-  freeFunctions();
-  // globals.destroy();  // OPTIMIZATION: HashMap globals removed
-  clearAllGCObjects();  // Must be called before freeBlueprints() so native destructors can access ClassDef/NativeClassDef
-  freeBlueprints();
+  unloadAllPlugins();
 
   openUpvalues = nullptr;
   // Info("Heap stats:");
@@ -1553,11 +1554,9 @@ void Interpreter::dumpAllFunctions(FILE *f)
         for (size_t offset = 0; offset < func->chunk->count;) {
             fprintf(f, "    ");
             
-            // Salva stdout, redireciona para file temporariamente
-            FILE* old_stdout = stdout;
-            stdout = f;
+            Debug::setOutput(f);
             offset = Debug::disassembleInstruction(*func->chunk, offset);
-            stdout = old_stdout;
+            Debug::setOutput(stdout);
         }
         
         fprintf(f, "\n"); });
@@ -1618,10 +1617,9 @@ void Interpreter::dumpAllClasses(FILE *f)
             for (size_t offset = 0; offset < klass->constructor->chunk->count;) {
                 fprintf(f, "        ");
                 
-                FILE* old_stdout = stdout;
-                stdout = f;
+                Debug::setOutput(f);
                 offset = Debug::disassembleInstruction(*klass->constructor->chunk, offset);
-                stdout = old_stdout;
+                Debug::setOutput(stdout);
             }
         }
         
@@ -1656,10 +1654,9 @@ void Interpreter::dumpAllClasses(FILE *f)
             for (size_t offset = 0; offset < method->chunk->count;) {
                 fprintf(f, "        ");
                 
-                FILE* old_stdout = stdout;
-                stdout = f;
+                Debug::setOutput(f);
                 offset = Debug::disassembleInstruction(*method->chunk, offset);
-                stdout = old_stdout;
+                Debug::setOutput(stdout);
             }
             fprintf(f, "\n");
         });

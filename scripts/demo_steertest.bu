@@ -1,0 +1,452 @@
+// ================================================================
+// BuGL Demo – SteerTest 0.1  (OpenSteer Pedestrians replica)
+//
+// TAB   -> cycle selected pedestrian
+// F     -> toggle follow-cam
+// 1 / 2 -> speed  down / up
+// 3 / 4 -> cam dist  in / out
+// R     -> reset
+// ESC   -> quit
+// ================================================================
+
+require "OpenSteer";
+import OpenSteer;
+using OpenSteer;
+
+import ImGui;
+using ImGui;
+
+import SDL;
+using SDL;
+
+import OpenGl;
+using OpenGl;
+
+import GLM;
+using GLM;
+
+import math;
+using math;
+
+include "recorder.bu";
+
+// ── Init ─────────────────────────────────────────────────────────
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!SDL.Init("SteerTest 0.1", 671, 479, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsClassic();
+
+glClearColor(0.30, 0.30, 0.30, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+var PI     = 3.141592653589793;
+var TWO_PI = 6.283185307179586;
+
+// ── Scene state ───────────────────────────────────────────────────
+var allAgents   = [];
+var waypoints   = [];
+var pathPoints  = [];
+
+var pathRx     = 10.0;
+var pathRz     = 6.5;
+var pathN      = 40;
+var pathRadius = 2.0;
+
+var speedScale  = 1.0;
+var camDist     = 14.0;
+var selectedIdx = 0;
+var followCam   = false;
+var fpsSmooth   = 0.0;
+
+// ── Helpers ───────────────────────────────────────────────────────
+def randRange(a, b)
+{
+    return a + rand() * (b - a);
+}
+
+def buildOvalPath(N, rx, rz)
+{
+    pathPoints.clear();
+    for (var i = 0; i < N; i++)
+    {
+        var a = (i / N) * TWO_PI;
+        pathPoints.push(Vector3(cos(a) * rx, 0.0, sin(a) * rz));
+    }
+}
+
+def closestWaypoint(pos)
+{
+    var best  = 0;
+    var bestD = 999999.0;
+    for (var i = 0; i < len(pathPoints); i++)
+    {
+        var p  = pathPoints[i];
+        var dx = p.x - pos.x;
+        var dz = p.z - pos.z;
+        var d  = sqrt(dx * dx + dz * dz);
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+}
+
+def resetScene()
+{
+    allAgents.clear();
+    waypoints.clear();
+    buildOvalPath(pathN, pathRx, pathRz);
+
+    for (var i = 0; i < 25; i++)
+    {
+        var t  = (i / 25.0) * TWO_PI;
+        var ox = randRange(-pathRadius * 0.5, pathRadius * 0.5);
+        var oz = randRange(-pathRadius * 0.5, pathRadius * 0.5);
+        var px = cos(t) * pathRx + ox;
+        var pz = sin(t) * pathRz + oz;
+
+        var a = SteerAgent(Vector3(px, 0.0, pz));
+        a.setMass(1.0);
+        a.setRadius(0.5);
+        a.setMaxForce(22.0);
+        a.setMaxSpeed(4.2);
+        a.setSpeed(randRange(1.4, 2.8));
+        a.randomizeHeadingXZ();
+
+        allAgents.push(a);
+        waypoints.push(closestWaypoint(Vector3(px, 0.0, pz)));
+    }
+
+    selectedIdx = 0;
+}
+
+// ── Draw: checker ground ──────────────────────────────────────────
+def drawChecker(half, cell)
+{
+    var steps = int(half / cell);
+    glBegin(GL_QUADS);
+    for (var row = -steps; row < steps; row++)
+    {
+        for (var col = -steps; col < steps; col++)
+        {
+            if ((row + col) % 2 == 0)
+                glColor3f(0.20, 0.20, 0.20);
+            else
+                glColor3f(0.27, 0.27, 0.27);
+
+            var x0 = col * cell;
+            var z0 = row * cell;
+            glVertex3f(x0,        -0.02, z0);
+            glVertex3f(x0 + cell, -0.02, z0);
+            glVertex3f(x0 + cell, -0.02, z0 + cell);
+            glVertex3f(x0,        -0.02, z0 + cell);
+        }
+    }
+    glEnd();
+}
+
+// ── Draw: dashed oval path ────────────────────────────────────────
+def drawDashedPath()
+{
+    var dash = 0.42;
+    var N    = len(pathPoints);
+    glColor3f(0.88, 0.14, 0.14);
+    for (var i = 0; i < N; i++)
+    {
+        var A  = pathPoints[i];
+        var B  = pathPoints[(i + 1) % N];
+        var dx = B.x - A.x;
+        var dz = B.z - A.z;
+        var segLen = sqrt(dx * dx + dz * dz);
+        if (segLen < 0.001) continue;
+
+        var nx = dx / segLen;
+        var nz = dz / segLen;
+        var t  = 0.0;
+        var on = true;
+
+        while (t < segLen)
+        {
+            var t2 = t + dash;
+            if (t2 > segLen) t2 = segLen;
+            if (on)
+            {
+                glBegin(GL_LINES);
+                glVertex3f(A.x + nx * t,  0.03, A.z + nz * t);
+                glVertex3f(A.x + nx * t2, 0.03, A.z + nz * t2);
+                glEnd();
+            }
+            t  = t2;
+            on = !on;
+        }
+    }
+}
+
+// ── Draw: look-ahead velocity line ───────────────────────────────
+def drawLookahead(agent)
+{
+    var pos = agent.getPosition();
+    var vel = agent.getVelocity();
+    var spd = Vector3Length(vel);
+    if (spd < 0.05) return;
+
+    var scale = 2.0 / spd;
+    var tip   = Vector3Add(pos, Vector3Scale(vel, scale));
+
+    glColor4f(0.96, 0.86, 0.0, 0.60);
+    glBegin(GL_LINES);
+    glVertex3f(pos.x, 0.06, pos.z);
+    glVertex3f(tip.x, 0.06, tip.z);
+    glEnd();
+}
+
+// ── Draw: agent-to-waypoint guidance line ────────────────────────
+def drawWaypointLine(agent, wpIdx)
+{
+    var pos    = agent.getPosition();
+    var target = pathPoints[wpIdx];
+
+    glColor4f(0.96, 0.86, 0.0, 0.20);
+    glBegin(GL_LINES);
+    glVertex3f(pos.x,    0.04, pos.z);
+    glVertex3f(target.x, 0.04, target.z);
+    glEnd();
+}
+
+// ── Draw: single pedestrian disc ─────────────────────────────────
+def drawPed(agent, isSelected)
+{
+    var pos  = agent.getPosition();
+    var fwd  = agent.getForward();
+    var r    = 0.50;
+    var segs = 20;
+
+    // Shadow
+    glPushMatrix();
+    glTranslatef(pos.x, -0.01, pos.z);
+    glColor4f(0.0, 0.0, 0.0, 0.30);
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex3f(0.0, 0.0, 0.0);
+    for (var i = 0; i <= segs; i++)
+    {
+        var a = (i / segs) * TWO_PI;
+        glVertex3f(cos(a) * r * 1.15, 0.0, sin(a) * r * 1.15);
+    }
+    glEnd();
+    glPopMatrix();
+
+    glPushMatrix();
+    glTranslatef(pos.x, 0.03, pos.z);
+
+    // Filled disc
+    if (isSelected)
+        glColor4f(1.00, 0.90, 0.25, 0.90);
+    else
+        glColor4f(0.78, 0.82, 0.88, 0.85);
+
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex3f(0.0, 0.0, 0.0);
+    for (var i = 0; i <= segs; i++)
+    {
+        var a = (i / segs) * TWO_PI;
+        glVertex3f(cos(a) * r, 0.0, sin(a) * r);
+    }
+    glEnd();
+
+    // Outline ring
+    if (isSelected)
+        glColor3f(1.0, 0.75, 0.0);
+    else
+        glColor3f(0.95, 0.95, 0.98);
+
+    glBegin(GL_LINE_LOOP);
+    for (var i = 0; i < segs; i++)
+    {
+        var a = (i / segs) * TWO_PI;
+        glVertex3f(cos(a) * r, 0.001, sin(a) * r);
+    }
+    glEnd();
+
+    // Inner direction pointer
+    glColor3f(0.15, 0.15, 0.15);
+    glBegin(GL_LINES);
+    glVertex3f(0.0, 0.002, 0.0);
+    glVertex3f(fwd.x * r * 0.82, 0.002, fwd.z * r * 0.82);
+    glEnd();
+
+    glPopMatrix();
+
+    // Vertical red pole
+    glColor4f(0.85, 0.18, 0.18, 0.70);
+    glBegin(GL_LINES);
+    glVertex3f(pos.x, 0.0,  pos.z);
+    glVertex3f(pos.x, 2.2,  pos.z);
+    glEnd();
+}
+
+// ── Setup & run ───────────────────────────────────────────────────
+print("SteerTest Pedestrians – TAB select, F follow, 1/2 speed, 3/4 cam, R reset, ESC quit");
+resetScene();
+
+while (Running())
+{
+    // ── Input ─────────────────────────────────────────────────────
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_R))
+        resetScene();
+
+    if (IsKeyPressed(KEY_TAB))
+        selectedIdx = (selectedIdx + 1) % len(allAgents);
+
+    if (IsKeyPressed(KEY_F))
+        followCam = !followCam;
+
+    if (IsKeyDown(KEY_1)) speedScale = max(0.1, speedScale - 0.02);
+    if (IsKeyDown(KEY_2)) speedScale = min(5.0, speedScale + 0.02);
+    if (IsKeyDown(KEY_3)) camDist    = max(4.0,  camDist - 0.2);
+    if (IsKeyDown(KEY_4)) camDist    = min(60.0, camDist + 0.2);
+
+    var dt = GetDeltaTime();
+    if (dt > 0.05) dt = 0.05;
+
+    var instFPS = 1.0 / max(0.001, dt);
+    if (fpsSmooth <= 0.0) fpsSmooth = instFPS;
+    else fpsSmooth = fpsSmooth + (instFPS - fpsSmooth) * min(1.0, dt * 6.0);
+
+    // ── Steering update ───────────────────────────────────────────
+    for (var i = 0; i < len(allAgents); i++)
+    {
+        var agent  = allAgents[i];
+        var wp     = waypoints[i];
+        var target = pathPoints[wp];
+        var pos    = agent.getPosition();
+        var dx     = target.x - pos.x;
+        var dz     = target.z - pos.z;
+        var dist   = sqrt(dx * dx + dz * dz);
+
+        if (dist < pathRadius)
+        {
+            wp = (wp + 1) % len(pathPoints);
+            waypoints[i] = wp;
+            target = pathPoints[wp];
+        }
+
+        var seekPath   = agent.arrive(target, 5.0);
+        var separate   = agent.separation(3.2, -0.4, allAgents);
+        var keepSpeed  = agent.targetSpeed(2.0 * speedScale);
+        var avoidNeigh = agent.avoidNeighbors(0.9, allAgents);
+        var wander     = agent.wander(dt * 0.4);
+
+        var steer = Vector3(0.0, 0.0, 0.0);
+        steer = Vector3Add(steer, Vector3Scale(seekPath,   2.0));
+        steer = Vector3Add(steer, Vector3Scale(separate,   9.0));
+        steer = Vector3Add(steer, Vector3Scale(keepSpeed,  0.6));
+        steer = Vector3Add(steer, Vector3Scale(avoidNeigh, 11.0));
+        steer = Vector3Add(steer, Vector3Scale(wander,     0.18));
+
+        agent.applySteeringForce(steer, dt);
+
+        // Lock Y to ground
+        var p2 = agent.getPosition();
+        agent.setPosition(Vector3(p2.x, 0.0, p2.z));
+    }
+
+    // ── Camera ────────────────────────────────────────────────────
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    var W = GetWidth();
+    var H = GetHeight();
+    if (H <= 0) H = 1;
+    var aspect = W / H;
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glFrustum(-0.072 * aspect, 0.072 * aspect, -0.072, 0.072, 0.1, 200.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    var eye    = Vector3(0.0, camDist * 0.70, camDist);
+    var center = Vector3(0.0, 0.0, 0.0);
+    var up     = Vector3(0.0, 1.0, 0.0);
+
+    if (followCam && len(allAgents) > 0)
+    {
+        var sp = allAgents[selectedIdx].getPosition();
+        var sf = allAgents[selectedIdx].getForward();
+        eye    = Vector3(sp.x - sf.x * camDist * 0.6,
+                         camDist * 0.55,
+                         sp.z - sf.z * camDist * 0.6);
+        center = Vector3(sp.x, 0.0, sp.z);
+    }
+
+    glLoadMatrixf(MatrixToBuffer(MatrixLookAt(eye, center, up)));
+
+    // ── 3D scene ──────────────────────────────────────────────────
+    drawChecker(26.0, 1.0);
+    drawDashedPath();
+
+    for (var i = 0; i < len(allAgents); i++)
+    {
+        drawWaypointLine(allAgents[i], waypoints[i]);
+        drawLookahead(allAgents[i]);
+    }
+
+    for (var i = 0; i < len(allAgents); i++)
+        drawPed(allAgents[i], i == selectedIdx);
+
+    // ── ImGui HUD ─────────────────────────────────────────────────
+    var noDecor = ImGui.WindowFlags_NoTitleBar    |
+                  ImGui.WindowFlags_NoResize      |
+                  ImGui.WindowFlags_NoMove        |
+                  ImGui.WindowFlags_NoScrollbar   |
+                  ImGui.WindowFlags_AlwaysAutoResize |
+                  ImGui.WindowFlags_NoSavedSettings;
+
+    // ── top-left: demo name ───────────────────────────────────────
+    var pTitle = ImGui.Begin("##st_title", noDecor);
+    if (pTitle != nil && pTitle)
+    {
+        ImGui.TextColored(1.0, 1.0, 1.0, 1.0, "Pedestrians");
+    }
+    ImGui.End();
+
+    // ── top-right ish: param list ─────────────────────────────────
+    var pParams = ImGui.Begin("##st_params", noDecor);
+    if (pParams != nil && pParams)
+    {
+        ImGui.Text("1: speed: " + speedScale);
+        ImGui.Text("2: speed +");
+        ImGui.Text("3: cam dist: " + camDist);
+        ImGui.Text("4: cam dist +");
+        ImGui.Separator();
+        ImGui.Text("TAB: agent #" + selectedIdx);
+        ImGui.Text("F:   follow cam");
+    }
+    ImGui.End();
+
+    // ── bottom-left: fps + camera mode ────────────────────────────
+    var pInfo = ImGui.Begin("##st_info", noDecor);
+    if (pInfo != nil && pInfo)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        if (followCam)
+            ImGui.Text("Camera: follow agent #" + selectedIdx);
+        else
+            ImGui.Text("Camera: fixed distance offset");
+    }
+    ImGui.End();
+
+    gifCaptureFrame("steertest.gif");
+    Flip();
+}
+
+Close();

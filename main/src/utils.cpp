@@ -218,8 +218,27 @@ namespace Utils
 
     char *GetWorkingDirectory()
     {
+        static char basePath[1024];
+        static bool initialized = false;
 
-        return SDL_GetBasePath();
+        if (!initialized)
+        {
+            char *sdlBasePath = SDL_GetBasePath();
+            if (sdlBasePath && sdlBasePath[0] != '\0')
+            {
+                std::snprintf(basePath, sizeof(basePath), "%s", sdlBasePath);
+                SDL_free(sdlBasePath);
+            }
+            else if (GETCWD(basePath, sizeof(basePath)) == NULL)
+            {
+                basePath[0] = '.';
+                basePath[1] = '\0';
+            }
+
+            initialized = true;
+        }
+
+        return basePath;
     }
 
     char *GetApplicationDirectory()

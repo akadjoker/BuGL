@@ -64,14 +64,16 @@ namespace SDLBindings
         register_msf_gif(vm);
         register_poly2tri(vm);
         register_raymath(vm);
-        register_box2d(vm);
-        register_box2d_joints(vm);
-        register_ode(vm);
+        // register_box2d(vm);
+        // register_box2d_joints(vm);
+        // register_ode(vm);
 
         module = vm.addModule("Audio");
         register_audio(module);
 
         module = vm.addModule("Shapes");
         register_shapes(module);
+
+        ImGuiBindings::registerAll(vm);
     }
 }

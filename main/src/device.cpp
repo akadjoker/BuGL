@@ -5,12 +5,15 @@
 #define GL_GLEXT_PROTOTYPES
 #include <SDL2/SDL_opengl.h>
 #include <SDL2/SDL_opengl_glext.h>
+#include "imgui.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_opengl3.h"
 // ============================================================================
 // DEVICE
 // ============================================================================
 
 Device::Device()
-    : m_window(nullptr), m_context(nullptr), m_width(0), m_height(0), m_running(false), m_ready(false), m_lastTick(0), m_deltaTime(0.0f), m_fps(0), m_frameCount(0), m_fpsTimer(0), m_initialized(false), m_resize(false)
+    : m_window(nullptr), m_context(nullptr), m_width(0), m_height(0), m_running(false), m_ready(false), m_lastTick(0), m_deltaTime(0.0f), m_fps(0), m_frameCount(0), m_fpsTimer(0), m_initialized(false), m_resize(false), m_imguiInitialized(false)
 {
 }
 
@@ -104,6 +107,7 @@ void Device::Close()
         return;
     
     m_initialized = false;  
+    ShutdownImGui();
 
     Input::Shutdown();
 
@@ -124,6 +128,51 @@ void Device::Close()
     m_running = false;
     m_ready = false;
  
+}
+
+bool Device::InitImGui()
+{
+    if (!m_ready)
+    {
+        LogError(" InitImGui - Device is not initialized");
+        return false;
+    }
+
+    if (m_imguiInitialized)
+        return true;
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+
+    if (!ImGui_ImplSDL2_InitForOpenGL(m_window, m_context))
+    {
+        LogError(" InitImGui - ImGui SDL backend init failed");
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    if (!ImGui_ImplOpenGL3_Init("#version 330"))
+    {
+        LogError(" InitImGui - ImGui OpenGL backend init failed");
+        ImGui_ImplSDL2_Shutdown();
+        ImGui::DestroyContext();
+        return false;
+    }
+
+    m_imguiInitialized = true;
+    return true;
+}
+
+void Device::ShutdownImGui()
+{
+    if (!m_imguiInitialized)
+        return;
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplSDL2_Shutdown();
+    ImGui::DestroyContext();
+    m_imguiInitialized = false;
 }
 
 bool Device::Running()
@@ -152,6 +201,13 @@ bool Device::Running()
     Input::Update();
     ProcessEvents();
 
+    if (m_imguiInitialized)
+    {
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplSDL2_NewFrame();
+        ImGui::NewFrame();
+    }
+
     return m_running;
 }
 
@@ -160,6 +216,9 @@ void Device::ProcessEvents()
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
+        if (m_imguiInitialized)
+            ImGui_ImplSDL2_ProcessEvent(&event);
+
         switch (event.type)
         {
         case SDL_QUIT:
@@ -246,8 +305,19 @@ void Device::ProcessEvents()
 
 void Device::Flip()
 {
+    if (m_imguiInitialized)
+    {
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    }
+
     SDL_GL_SwapWindow(m_window);
     m_resize = false;
+}
+
+ImGuiContext *Device::GetImGuiContext() const
+{
+    return m_imguiInitialized ? ImGui::GetCurrentContext() : nullptr;
 }
 
 void Device::Quit()
