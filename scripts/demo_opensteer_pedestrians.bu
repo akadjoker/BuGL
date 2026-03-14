@@ -281,6 +281,7 @@ def resetScene()
 // ── main ─────────────────────────────────────────────────────
 resetScene();
 print("Pedestrians: SPACE scatter | D debug | V top-view | R reset | ESC quit");
+var agents = [];
 
 while (Running())
 {
@@ -305,15 +306,21 @@ while (Running())
             ), 0.14);
         }
     }
-
+    agents.clear();
     // ── update ───────────────────────────────────────────────
-    var agents = [];
     for (var i = 0; i < len(pedestrians); i++)
+    {
         agents.push(pedestrians[i].agent);
+    }
 
     for (var i = 0; i < len(pedestrians); i++)
     {
         var agent = pedestrians[i].agent;
+        if (agent == nil) 
+        {
+            print("agent nil");
+            continue;
+        }
 
         var separate = agent.separation(4.2,  -0.707, agents);
         var align    = agent.alignment(6.0,    0.65,  agents);
@@ -329,11 +336,11 @@ while (Running())
         steer = Vector3Add(steer, Vector3Scale(wander,     1.4));
         steer = Vector3Add(steer, Vector3Scale(contain,    9.0));
 
-        if (Vector3Length(avoid) > 0.001)
-            steer = Vector3Add(steer, Vector3Scale(avoid, 20.0));
+        // if (Vector3Length(avoid) > 0.001)
+        //     steer = Vector3Add(steer, Vector3Scale(avoid, 20.0));
 
-        agent.applySteeringForce(steer, dt);
-        wrapInPlaza(agent);
+        // agent.applySteeringForce(steer, dt);
+        // wrapInPlaza(agent);
     }
 
     camOrbit = camOrbit + dt * 0.18;
@@ -365,7 +372,7 @@ while (Running())
     glLoadMatrixf(MatrixToBuffer(MatrixLookAt(eye, center, up)));
 
     // chão
-    drawGround();
+   drawGround();
 
     // obstáculo central
     var oc = obstacle.getCenter();
@@ -378,7 +385,7 @@ while (Running())
     drawCircleXZ(0.0, 0.05, 0.0, obstacle.getRadius() + 1.1, 32);
     glPopMatrix();
 
-    // debug por baixo (círculos de raio) — antes dos peões
+   
     if (debugDraw)
     {
         glDisable(GL_DEPTH_TEST);
@@ -387,7 +394,7 @@ while (Running())
         glEnable(GL_DEPTH_TEST);
     }
 
-    // peões
+ 
     for (var j = 0; j < len(pedestrians); j++)
         drawPed(pedestrians[j]);
 

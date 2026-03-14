@@ -42,10 +42,7 @@ var followTarget = Vector3(0.0, 2.0, 0.0);
 var worldRadius = 28.0;
 var camOrbit = 0.0;
 
-def randRange(a, b)
-{
-    return a + rand() * (b - a);
-}
+ 
 
 def drawGround(size, step)
 {
@@ -146,15 +143,15 @@ def resetScene()
     for (var i = 0; i < 36; i++)
     {
         var agent = SteerAgent(Vector3(
-            randRange(-12.0, 12.0),
-            randRange(1.5, 6.5),
-            randRange(-12.0, 12.0)
+            rand(-12.0, 12.0),
+            rand(1.5, 6.5),
+            rand(-12.0, 12.0)
         ));
         agent.setMass(1.0);
         agent.setRadius(0.55);
         agent.setMaxForce(27.0);
         agent.setMaxSpeed(9.0);
-        agent.setSpeed(randRange(2.0, 4.5));
+        agent.setSpeed(rand(2.0, 4.5));
         agent.randomizeHeadingXZ();
         flock.push(agent);
     }
@@ -190,9 +187,9 @@ while (Running())
         {
             var a = flock[s];
             var burst = Vector3Normalize(Vector3(
-                randRange(-1.0, 1.0),
-                randRange(-0.35, 0.8),
-                randRange(-1.0, 1.0)
+                rand(-1.0, 1.0),
+                rand(-0.35, 0.8),
+                rand(-1.0, 1.0)
             ));
             a.applySteeringForce(Vector3Scale(burst, 40.0), 0.16);
         }

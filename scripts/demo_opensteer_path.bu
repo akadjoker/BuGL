@@ -56,11 +56,7 @@ struct Walker
     var b;
 }
 
-def randRange(a, b)
-{
-    return a + rand() * (b - a);
-}
-
+ 
 def drawGround(size, step)
 {
     glColor3f(0.14, 0.17, 0.20);
@@ -263,19 +259,19 @@ def resetScene()
         var wp = i % len(pathPoints);
         var base = pathPoints[wp];
         var agent = SteerAgent(Vector3(
-            base.x + randRange(-0.7, 0.7),
+            base.x + rand(-0.7, 0.7),
             0.6,
-            base.z + randRange(-0.7, 0.7)
+            base.z + rand(-0.7, 0.7)
         ));
         agent.setMass(1.0);
         agent.setRadius(0.55);
         agent.setMaxForce(22.0);
         agent.setMaxSpeed(7.5);
-        agent.setSpeed(randRange(2.4, 4.2));
+        agent.setSpeed(rand(2.4, 4.2));
         agent.randomizeHeadingXZ();
 
         var tint = i / 20.0;
-        walkers.push(Walker(agent, (wp + 1) % len(pathPoints), randRange(-0.6, 0.8), 0.25 + tint * 0.45, 0.82, 0.92 - tint * 0.28));
+        walkers.push(Walker(agent, (wp + 1) % len(pathPoints), rand(-0.6, 0.8), 0.25 + tint * 0.45, 0.82, 0.92 - tint * 0.28));
         allAgents.push(agent);
     }
 }
@@ -298,9 +294,9 @@ while (Running())
         {
             var a = walkers[s].agent;
             var burst = Vector3(
-                randRange(-22.0, 22.0),
+                rand(-22.0, 22.0),
                 0.0,
-                randRange(-22.0, 22.0)
+                rand(-22.0, 22.0)
             );
             a.applySteeringForce(burst, 0.18);
         }
