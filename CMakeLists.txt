@@ -65,6 +65,16 @@ set(ODE_WITH_DEMOS OFF CACHE BOOL "Disable ODE demos in BuGL build" FORCE)
 set(ODE_WITH_TESTS OFF CACHE BOOL "Disable ODE tests in BuGL build" FORCE)
 add_subdirectory(vendor/ODE)
 
+# Assimp - import only, no tools/tests/exporter
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+add_subdirectory(vendor/assimp)
+
 #Configurar o SDL2 para compilar apenas de forma estática
 set(SDL2_DISABLE_INSTALL ON CACHE BOOL "Disable SDL2 install rules in BuGL build" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "Disable SDL shared library" FORCE)
@@ -95,6 +105,8 @@ add_subdirectory(BuBox2d)
 add_subdirectory(BuJolt)
 add_subdirectory(BuChipmunk)
 add_subdirectory(BuOpenSteer)
+add_subdirectory(BuRecast)
+add_subdirectory(BuAssimp)
  
 
  

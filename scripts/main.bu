@@ -81,13 +81,13 @@ using STB;
 
 //include "demo_jolt_tank.bu";
 
-//include "demo_chipmunk_joints.bu";
+include "demo_chipmunk_joints.bu";
 
 
 //include "demo_opensteer_boids.bu";
 
 //include "demo_opensteer_path.bu";
 
- include "demo_opensteer_pedestrians.bu";
+ //include "demo_opensteer_pedestrians.bu";
 
 //include "demo_steertest.bu";
