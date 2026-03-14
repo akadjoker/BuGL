@@ -1,0 +1,82 @@
+site_name: BuGL Documentation
+site_description: BuGL - Scripting Language for Games
+site_author: akadjoker
+repo_url: https://github.com/akadjoker/BuGL
+repo_name: akadjoker/BuGL
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+    accent: purple
+  features:
+    - content.code.copy
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - toc.integrate
+    - search.highlight
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.inlinehilite
+  - admonition
+  - pymdownx.details
+  - pymdownx.emoji
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - with-pdf:
+      author: akadjoker
+      cover_title: BuGL Language Reference
+      cover_subtitle: Game Scripting Made Simple
+      output_path: ../bugl_docs.pdf
+
+nav:
+  - Home: index.md
+  - Quick Start: quickstart.md
+  - Language:
+    - Variables & Types: language/variables.md
+    - Operators: language/operators.md
+    - Functions: language/functions.md
+    - Classes: language/classes.md
+    - Structs: language/structs.md
+    - Control Flow: language/control_flow.md
+    - Loops: language/loops.md
+    - Switch: language/switch.md
+    - Processes: language/processes.md
+    - Error Handling: language/error_handling.md
+    - Math: language/math.md
+    - Goto & Gosub: language/goto.md
+  - Standard Library:
+    - Arrays: stdlib/arrays.md
+    - Strings: stdlib/strings.md
+    - Maps: stdlib/maps.md
+    - Buffers: stdlib/buffers.md
+  - BuGL API:
+    - Window & Device: api/window.md
+    - Input: api/input.md
+    - Graphics (OpenGL): api/graphics.md
+    - Audio: api/audio.md
+    - Shapes: api/shapes.md
+    - Physics 2D (Box2D): api/physics2d.md
+    - Physics 3D (ODE): api/physics3d.md
+    - OS Module: api/os.md
+  - Tutorials:
+    - 01 - Hello World: tutorials/01_hello_world.md
+    - 02 - Game Loop: tutorials/02_game_loop.md
+    - 03 - Processes: tutorials/03_processes.md
+    - 04 - Classes & Structs: tutorials/04_classes.md
+    - 05 - Input: tutorials/05_input.md
+    - 06 - Sprites & Drawing: tutorials/06_sprites.md
