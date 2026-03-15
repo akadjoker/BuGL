@@ -1,0 +1,61 @@
+import GLM;
+using GLM;
+
+class ScriptWidget
+{
+    var value;
+
+    def init(value)
+    {
+        self.value = value;
+    }
+}
+
+def identity(T, marker)
+{
+    return T;
+}
+
+class Holder
+{
+    def init()
+    {
+    }
+
+    def method(T)
+    {
+        return T;
+    }
+}
+
+var holder = Holder();
+
+var scriptCtorFn = identity<ScriptWidget>(0);
+var scriptCtorMethod = holder.method<ScriptWidget>();
+var nativeCtorFn = identity<Vector3>(0);
+var nativeCtorMethod = holder.method<Vector3>();
+
+var a = scriptCtorFn(42);
+var b = scriptCtorMethod(99);
+var c = nativeCtorFn(1.0, 2.0, 3.0);
+var d = nativeCtorMethod(4.0, 5.0, 6.0);
+
+var ok = true;
+if (classname(a) != "ScriptWidget") ok = false;
+if (classname(b) != "ScriptWidget") ok = false;
+if (a.value != 42) ok = false;
+if (b.value != 99) ok = false;
+if (c.x != 1.0 || c.y != 2.0 || c.z != 3.0) ok = false;
+if (d.x != 4.0 || d.y != 5.0 || d.z != 6.0) ok = false;
+if (typeid(ScriptWidget) != typeid(a)) ok = false;
+if (typeid(ScriptWidget) != typeid(b)) ok = false;
+if (typeid(Vector3) != typeid(c)) ok = false;
+if (typeid(Vector3) != typeid(d)) ok = false;
+
+// Regression check: comparisons must keep working normally.
+if (!(1 < 2 && 2 < 3)) ok = false;
+
+if (ok)
+    print("GENERIC_TYPES_PASS");
+else
+    print("GENERIC_TYPES_FAIL");

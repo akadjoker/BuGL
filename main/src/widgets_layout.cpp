@@ -131,6 +131,47 @@ namespace ImGuiBindings
         return 0;
     }
 
+    int SetNextItemWidth(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.SetNextItemWidth()"))
+            return 0;
+
+        if (argCount != 1 || !args[0].isNumber())
+        {
+            vm->runtimeError("ImGui.SetNextItemWidth expects (width)");
+            return 0;
+        }
+
+        ImGui::SetNextItemWidth((float)args[0].asNumber());
+        return 0;
+    }
+
+    int PushItemWidth(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.PushItemWidth()"))
+            return 0;
+
+        if (argCount != 1 || !args[0].isNumber())
+        {
+            vm->runtimeError("ImGui.PushItemWidth expects (width)");
+            return 0;
+        }
+
+        ImGui::PushItemWidth((float)args[0].asNumber());
+        return 0;
+    }
+
+    int PopItemWidth(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)argCount;
+        (void)args;
+        if (!ensure_context(vm, "ImGui.PopItemWidth()"))
+            return 0;
+
+        ImGui::PopItemWidth();
+        return 0;
+    }
+
     void register_layout(ModuleBuilder &module)
     {
         module.addFunction("SameLine", SameLine, -1);
@@ -142,5 +183,8 @@ namespace ImGuiBindings
         module.addFunction("Unindent", Unindent, -1);
         module.addFunction("BeginGroup", BeginGroup, 0);
         module.addFunction("EndGroup", EndGroup, 0);
+        module.addFunction("SetNextItemWidth", SetNextItemWidth, 1);
+        module.addFunction("PushItemWidth", PushItemWidth, 1);
+        module.addFunction("PopItemWidth", PopItemWidth, 0);
     }
 }

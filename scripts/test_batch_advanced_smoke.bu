@@ -1,0 +1,109 @@
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+SDL.SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SDL.SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SDL.SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("Batch Advanced Smoke", 960, 540, SDL_WINDOW_OPENGL)) return;
+
+glDisable(GL_DEPTH_TEST);
+glClearColor(0.09, 0.10, 0.13, 1.0);
+
+var batch = Batch(1, 32768);
+batch.setMatrix(MatrixOrtho(0.0, SDL.GetWidth(), SDL.GetHeight(), 0.0, -1.0, 1.0));
+
+var p1 = Vector2(420.0, 120.0);
+var p2 = Vector2(560.0, 130.0);
+var p3 = Vector2(540.0, 240.0);
+var p4 = Vector2(400.0, 230.0);
+
+var t1 = Vector2(700.0, 120.0);
+var t2 = Vector2(820.0, 170.0);
+var t3 = Vector2(730.0, 260.0);
+var polyPoints = [
+    Vector2(100.0, 370.0),
+    Vector2(160.0, 330.0),
+    Vector2(225.0, 360.0),
+    Vector2(205.0, 430.0),
+    Vector2(120.0, 445.0)
+];
+var polyUv = [
+    [100.0, 370.0, 0.0, 0.0],
+    [160.0, 330.0, 1.0, 0.0],
+    [225.0, 360.0, 1.0, 0.5],
+    [205.0, 430.0, 0.7, 1.0],
+    [120.0, 445.0, 0.1, 1.0]
+];
+var splinePoints = [
+    Vector2(300.0, 420.0),
+    Vector2(360.0, 360.0),
+    Vector2(450.0, 430.0),
+    Vector2(520.0, 350.0),
+    Vector2(610.0, 410.0)
+];
+var hermitePoints = [
+    [650.0, 430.0, 80.0, -120.0],
+    [790.0, 400.0, 110.0, 80.0]
+];
+
+var frames = 0;
+while (SDL.Running())
+{
+    frames = frames + 1;
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    batch.setColor(0.95, 0.35, 0.20, 1.0);
+    batch.ellipse(110, 110, 70, 36, false);
+
+    batch.setColor(0.20, 0.82, 0.95, 0.85);
+    batch.polygon(260, 120, 6, 55.0, 20.0, true);
+
+    batch.setColor(0.95, 0.80, 0.24, 1.0);
+    batch.roundedRectangle(60, 180, 180, 110, 18.0, 10, true);
+
+    batch.setColor(0.25, 0.95, 0.55, 1.0);
+    batch.circleSector(300, 240, 70.0, -30.0, 210.0, 20, false);
+
+    batch.setColor(1.0, 1.0, 1.0, 1.0);
+    batch.drawQuad(360.0, 280.0, 500.0, 390.0, 0.0, 0.0, 1.0, 1.0);
+    batch.quadClip(0, 0.0, 0.0, 1.0, 1.0, 510.0, 280.0, 80.0, 80.0, 1.0, 1.0);
+    batch.texturedQuad(p1, p2, p3, p4, 0);
+    batch.texturedTriangle(t1, t2, t3, 0);
+
+    batch.setColor(1.0, 0.4, 0.9, 1.0);
+    batch.bezierQuadratic(Vector2(560.0, 320.0), Vector2(660.0, 210.0), Vector2(760.0, 340.0), 24);
+
+    batch.setColor(0.9, 0.9, 1.0, 1.0);
+    batch.bezierCubic(Vector2(560.0, 380.0), Vector2(610.0, 300.0), Vector2(710.0, 450.0), Vector2(820.0, 360.0), 28);
+
+    batch.setColor(1.0, 1.0, 1.0, 0.65);
+    batch.texturedPolygon(polyPoints, 0);
+    batch.texturedPolygonUV(polyUv, 0);
+
+    batch.setColor(0.85, 0.85, 0.85, 1.0);
+    batch.polyline(splinePoints, false);
+
+    batch.setColor(0.40, 0.92, 0.95, 1.0);
+    batch.catmullRomSpline(splinePoints, 18);
+
+    batch.setColor(1.0, 0.65, 0.25, 1.0);
+    batch.bspline(splinePoints, 18, 3);
+
+    batch.setColor(0.55, 1.0, 0.55, 1.0);
+    batch.hermiteSpline(hermitePoints, 20);
+
+    batch.setColor(0.95, 0.25, 0.25, 0.65);
+    batch.thickSpline(splinePoints, 10.0, 18);
+
+    batch.render();
+    SDL.Flip();
+ 
+}
+
+SDL.Close();
+print("BATCH_ADVANCED_SMOKE_PASS");

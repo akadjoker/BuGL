@@ -1,0 +1,45 @@
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+SDL.SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SDL.SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SDL.SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("Batch Smoke", 960, 540, SDL_WINDOW_OPENGL)) return;
+
+glClearColor(0.08, 0.10, 0.14, 1.0);
+glDisable(GL_DEPTH_TEST);
+
+var batch = Batch(1, 4096);
+var projection = MatrixOrtho(0, SDL.GetWidth(), SDL.GetHeight(), 0, -1.0, 1.0);
+batch.setMatrix(projection);
+
+var frames = 0;
+while (SDL.Running())
+{
+    frames = frames + 1;
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    batch.setColor(1.0, 1.0, 1.0, 1.0);
+    batch.line2D(0, 0,  SDL.GetWidth(), SDL.GetHeight());
+
+    batch.setColor(0.15, 0.75, 0.95, 1.0);
+    batch.rectangle(60, 150, 180, 100, false);
+
+    batch.setColor(0.95, 0.80, 0.20, 0.85);
+    batch.circle(380, 210, 60, true);
+
+    batch.setColorBytes(180, 255, 180, 255);
+    batch.quad(520, 120, 160, 110);
+
+    batch.render();
+    SDL.Flip();
+   
+}
+
+SDL.Close();
+print("BATCH_SMOKE_PASS");

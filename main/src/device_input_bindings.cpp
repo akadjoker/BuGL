@@ -170,6 +170,58 @@ namespace SDLBindings
         return 0;
     }
 
+    static int native_Device_StartGifCapture(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc > 1 || (argc == 1 && !args[0].isString()))
+        {
+            Error("Device_StartGifCapture expects ([path])");
+            return 0;
+        }
+
+        const char *path = (argc == 1) ? args[0].asStringChars() : nullptr;
+        vm->pushBool(Device::Instance().StartGifCapture(path));
+        return 1;
+    }
+
+    static int native_Device_StopGifCapture(Interpreter *vm, int argc, Value *args)
+    {
+        (void)args;
+        if (argc != 0)
+        {
+            Error("Device_StopGifCapture expects 0 arguments");
+            return 0;
+        }
+
+        vm->pushBool(Device::Instance().StopGifCapture());
+        return 1;
+    }
+
+    static int native_Device_ToggleGifCapture(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc > 1 || (argc == 1 && !args[0].isString()))
+        {
+            Error("Device_ToggleGifCapture expects ([path])");
+            return 0;
+        }
+
+        const char *path = (argc == 1) ? args[0].asStringChars() : nullptr;
+        vm->pushBool(Device::Instance().ToggleGifCapture(path));
+        return 1;
+    }
+
+    static int native_Device_IsGifRecording(Interpreter *vm, int argc, Value *args)
+    {
+        (void)args;
+        if (argc != 0)
+        {
+            Error("Device_IsGifRecording expects 0 arguments");
+            return 0;
+        }
+
+        vm->pushBool(Device::Instance().IsGifRecording());
+        return 1;
+    }
+
     static int native_Device_Quit(Interpreter *vm, int argc, Value *args)
     {
         (void)vm;
@@ -656,6 +708,10 @@ namespace SDLBindings
             .addFunction("Quit", native_Device_Quit, 0)
             .addFunction("Running", native_Device_Running, 0)
             .addFunction("Flip", native_Device_Flip, 0)
+            .addFunction("StartGifCapture", native_Device_StartGifCapture, -1)
+            .addFunction("StopGifCapture", native_Device_StopGifCapture, 0)
+            .addFunction("ToggleGifCapture", native_Device_ToggleGifCapture, -1)
+            .addFunction("IsGifRecording", native_Device_IsGifRecording, 0)
             .addFunction("Close", native_Device_Close, 0)
             .addFunction("SetTitle", native_Device_SetTitle, 1)
             .addFunction("SetSize", native_Device_SetSize, 2)

@@ -146,6 +146,96 @@ namespace ImGuiBindings
         return 0;
     }
 
+    int BeginTabBar(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.BeginTabBar()"))
+            return push_nil(vm);
+
+        if ((argCount != 1 && argCount != 2) || !args[0].isString() || (argCount == 2 && !args[1].isNumber()))
+        {
+            vm->runtimeError("ImGui.BeginTabBar expects (id[, flags])");
+            return push_nil(vm);
+        }
+
+        ImGuiTabBarFlags flags = (argCount == 2) ? (ImGuiTabBarFlags)(int)args[1].asNumber() : ImGuiTabBarFlags_None;
+        vm->pushBool(ImGui::BeginTabBar(args[0].asStringChars(), flags));
+        return 1;
+    }
+
+    int EndTabBar(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)argCount;
+        (void)args;
+        if (!ensure_context(vm, "ImGui.EndTabBar()"))
+            return 0;
+
+        ImGui::EndTabBar();
+        return 0;
+    }
+
+    int BeginTabItem(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.BeginTabItem()"))
+            return push_nil(vm);
+
+        if ((argCount != 1 && argCount != 2) || !args[0].isString() || (argCount == 2 && !args[1].isNumber()))
+        {
+            vm->runtimeError("ImGui.BeginTabItem expects (label[, flags])");
+            return push_nil(vm);
+        }
+
+        ImGuiTabItemFlags flags = (argCount == 2) ? (ImGuiTabItemFlags)(int)args[1].asNumber() : ImGuiTabItemFlags_None;
+        vm->pushBool(ImGui::BeginTabItem(args[0].asStringChars(), nullptr, flags));
+        return 1;
+    }
+
+    int EndTabItem(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)argCount;
+        (void)args;
+        if (!ensure_context(vm, "ImGui.EndTabItem()"))
+            return 0;
+
+        ImGui::EndTabItem();
+        return 0;
+    }
+
+    int BeginDisabled(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.BeginDisabled()"))
+            return 0;
+
+        bool disabled = true;
+        if (argCount == 1)
+        {
+            if (!args[0].isBool())
+            {
+                vm->runtimeError("ImGui.BeginDisabled expects () or (disabled)");
+                return 0;
+            }
+            disabled = args[0].asBool();
+        }
+        else if (argCount != 0)
+        {
+            vm->runtimeError("ImGui.BeginDisabled expects () or (disabled)");
+            return 0;
+        }
+
+        ImGui::BeginDisabled(disabled);
+        return 0;
+    }
+
+    int EndDisabled(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)argCount;
+        (void)args;
+        if (!ensure_context(vm, "ImGui.EndDisabled()"))
+            return 0;
+
+        ImGui::EndDisabled();
+        return 0;
+    }
+
     void register_core(ModuleBuilder &module)
     {
         module.addFunction("Init", Init, 0);
@@ -154,6 +244,12 @@ namespace ImGuiBindings
         module.addFunction("BeginChild", BeginChild, -1);
         module.addFunction("SetNextWindowPos", SetNextWindowPos, -1);
         module.addFunction("SetNextWindowSize", SetNextWindowSize, -1);
+        module.addFunction("BeginTabBar", BeginTabBar, -1);
+        module.addFunction("EndTabBar", EndTabBar, 0);
+        module.addFunction("BeginTabItem", BeginTabItem, -1);
+        module.addFunction("EndTabItem", EndTabItem, 0);
+        module.addFunction("BeginDisabled", BeginDisabled, -1);
+        module.addFunction("EndDisabled", EndDisabled, 0);
         module.addFunction("End", End, 0);
         module.addFunction("EndChild", EndChild, 0);
         module.addFunction("ShowDemoWindow", ShowDemoWindow, 0);
@@ -184,6 +280,16 @@ namespace ImGuiBindings
               .addInt("ChildFlags_AutoResizeY", (int)ImGuiChildFlags_AutoResizeY)
               .addInt("ChildFlags_AlwaysAutoResize", (int)ImGuiChildFlags_AlwaysAutoResize)
               .addInt("ChildFlags_FrameStyle", (int)ImGuiChildFlags_FrameStyle)
-              .addInt("ChildFlags_NavFlattened", (int)ImGuiChildFlags_NavFlattened);
+              .addInt("ChildFlags_NavFlattened", (int)ImGuiChildFlags_NavFlattened)
+              .addInt("TabBarFlags_None", (int)ImGuiTabBarFlags_None)
+              .addInt("TabBarFlags_Reorderable", (int)ImGuiTabBarFlags_Reorderable)
+              .addInt("TabBarFlags_AutoSelectNewTabs", (int)ImGuiTabBarFlags_AutoSelectNewTabs)
+              .addInt("TabBarFlags_FittingPolicyResizeDown", (int)ImGuiTabBarFlags_FittingPolicyResizeDown)
+              .addInt("TabBarFlags_FittingPolicyScroll", (int)ImGuiTabBarFlags_FittingPolicyScroll)
+              .addInt("TabItemFlags_None", (int)ImGuiTabItemFlags_None)
+              .addInt("TabItemFlags_UnsavedDocument", (int)ImGuiTabItemFlags_UnsavedDocument)
+              .addInt("TabItemFlags_SetSelected", (int)ImGuiTabItemFlags_SetSelected)
+              .addInt("TabItemFlags_NoCloseWithMiddleMouseButton", (int)ImGuiTabItemFlags_NoCloseWithMiddleMouseButton)
+              .addInt("TabItemFlags_NoTooltip", (int)ImGuiTabItemFlags_NoTooltip);
     }
 }

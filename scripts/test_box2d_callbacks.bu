@@ -1,3 +1,5 @@
+require "Box2D";
+
 import Box2D;
 using Box2D;
 

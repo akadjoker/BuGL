@@ -1,0 +1,47 @@
+require "Jolt";
+
+import GLM;
+using GLM;
+
+import Jolt;
+using Jolt;
+
+var world = JoltWorld(Vector3(0.0, -9.81, 0.0));
+
+if (world == nil || !world.isValid())
+{
+    print("JOLT_SMOKE_FAIL world");
+    return;
+}
+
+var groundBody = world.createStaticBox(10.0, 1.0, 10.0, Vector3(0.0, -1.0, 0.0));
+var ball = world.createSphere(0.5, Vector3(0.0, 5.0, 0.0));
+
+if (groundBody == nil || ball == nil || !groundBody.isValid() || !ball.isValid())
+{
+    print("JOLT_SMOKE_FAIL create");
+    world.destroy();
+    return;
+}
+
+var startPos = ball.getPosition();
+for (var i = 0; i < 120; i = i + 1)
+{
+    var err = world.step(1.0 / 60.0);
+    if (err != JOLT_UPDATE_NONE)
+    {
+        print("JOLT_SMOKE_FAIL step=" + err);
+        world.destroy();
+        return;
+    }
+}
+
+var endPos = ball.getPosition();
+print(format("JOLT_SMOKE startY={} endY={} bodies={}", startPos.y, endPos.y, world.getBodyCount()));
+
+if (endPos.y < startPos.y && world.getBodyCount() >= 2)
+    print("JOLT_SMOKE_PASS");
+else
+    print("JOLT_SMOKE_FAIL");
+
+world.destroy();

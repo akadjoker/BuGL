@@ -56,6 +56,7 @@ namespace SDLBindings
         register_opengl_instancing(module);
         register_opengl_query(module);
         register_opengl_ubo(module);
+        register_batch(vm, module);
 
         module = vm.addModule("STB");
         register_stb(module);

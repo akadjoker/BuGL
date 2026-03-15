@@ -420,8 +420,8 @@ void Compiler::variable(bool canAssign)
 
         if (m.isFunction)
         {
-            // É função! Deve ser chamada
-            if (!match(TOKEN_LPAREN))
+            // É função! Deve ser chamada (normal ou generic).
+            if (!check(TOKEN_LPAREN) && !checkGenericCallSyntax())
             {
                 error("Module functions must be called");
                 return;
@@ -431,8 +431,13 @@ void Compiler::variable(bool canAssign)
             Value ref = vm_->makeModuleRef(m.moduleId, m.id);
             emitConstant(ref);
 
-            // Compila argumentos e CALL
-            call(false);
+            uint8 argCount = 0;
+            if (match(TOKEN_LPAREN))
+                argCount = argumentList();
+            else
+                argCount = genericArgumentList();
+
+            emitBytes(OP_CALL, argCount);
             return;
         }
         else
@@ -478,8 +483,8 @@ void Compiler::variable(bool canAssign)
             uint16 funcId;
             if (mod->getFunctionId(member.lexeme.c_str(), &funcId))
             {
-                // É função! Deve ser chamada
-                if (!match(TOKEN_LPAREN))
+                // É função! Deve ser chamada (normal ou generic).
+                if (!check(TOKEN_LPAREN) && !checkGenericCallSyntax())
                 {
                     error("Module functions must be called");
                     return;
@@ -489,8 +494,13 @@ void Compiler::variable(bool canAssign)
                 Value ref = vm_->makeModuleRef(moduleId, funcId);
                 emitConstant(ref);
 
-                // Compila argumentos e CALL
-                call(false);
+                uint8 argCount = 0;
+                if (match(TOKEN_LPAREN))
+                    argCount = argumentList();
+                else
+                    argCount = genericArgumentList();
+
+                emitBytes(OP_CALL, argCount);
                 return; //  Sucesso!
             }
 
@@ -1471,6 +1481,54 @@ uint8 Compiler::argumentList()
     return argCount;
 }
 
+bool Compiler::checkGenericCallSyntax()
+{
+    return check(TOKEN_LESS)
+        && (peek(0).type == TOKEN_IDENTIFIER || isKeywordToken(peek(0).type))
+        && peek(1).type == TOKEN_GREATER
+        && peek(2).type == TOKEN_LPAREN;
+}
+
+uint8 Compiler::genericArgumentList()
+{
+    if (check(TOKEN_LESS))
+    {
+        consume(TOKEN_LESS, "Expect '<' before generic type");
+    }
+    else if (previous.type != TOKEN_LESS)
+    {
+        error("Expect '<' before generic type");
+        return 0;
+    }
+
+    consumeIdentifierLike("Expect type name after '<'");
+
+    // Emit the real type value as the implicit first argument.
+    variable(false);
+
+    consume(TOKEN_GREATER, "Expect '>' after type name");
+    consume(TOKEN_LPAREN, "Expect '(' after generic type");
+
+    uint8 argCount = 1;
+    if (!check(TOKEN_RPAREN))
+    {
+        do
+        {
+            if (hadError)
+                break;
+            expression();
+            if (argCount == 255)
+            {
+                error("Can't have more than 255 arguments");
+            }
+            argCount++;
+        } while (match(TOKEN_COMMA));
+    }
+
+    consume(TOKEN_RPAREN, "Expect ')' after arguments");
+    return argCount;
+}
+
 void Compiler::call(bool canAssign)
 {
     (void)canAssign;
@@ -2311,48 +2369,14 @@ void Compiler::dot(bool canAssign)
 
     uint16_t nameIdx = identifierConstant(propName);
 
-    // Generic call: obj.method<TypeName>(args...)
-    // Disambiguate from comparison: only treat as generic when pattern is
-    // <identifier> ( — i.e. peek(0)=ident, peek(1)=>, peek(2)=(
-    bool hasGenericArg = false;
-    std::string genericTypeName;
-    if (check(TOKEN_LESS)
-        && (peek(0).type == TOKEN_IDENTIFIER || isKeywordToken(peek(0).type))
-        && peek(1).type == TOKEN_GREATER
-        && peek(2).type == TOKEN_LPAREN)
-    {
-        advance(); // consume <
-        consumeIdentifierLike("Expect type name after '<'");
-        genericTypeName = previous.lexeme;
-        consume(TOKEN_GREATER, "Expect '>' after type name");
-        hasGenericArg = true;
-    }
-
     //  METHOD CALL
-    if (match(TOKEN_LPAREN))
+    if (check(TOKEN_LPAREN) || checkGenericCallSyntax())
     {
         uint8_t argCount = 0;
-        if (hasGenericArg)
-        {
-            // Type name becomes the implicit first argument (string)
-            emitConstant(vm_->makeString(genericTypeName.c_str()));
-            argCount = 1;
-            if (!check(TOKEN_RPAREN))
-            {
-                do
-                {
-                    expression();
-                    if (argCount == 255)
-                        error("Can't have more than 255 arguments");
-                    argCount++;
-                } while (match(TOKEN_COMMA));
-            }
-            consume(TOKEN_RPAREN, "Expect ')' after arguments");
-        }
-        else
-        {
+        if (match(TOKEN_LPAREN))
             argCount = argumentList();
-        }
+        else
+            argCount = genericArgumentList();
         if (propName.lexeme == "push" && argCount == 1)
         {
             emitByte(OP_ARRAY_PUSH);

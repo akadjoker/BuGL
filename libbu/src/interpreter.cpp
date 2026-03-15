@@ -215,6 +215,7 @@ void Interpreter::reset()
   clearAllGCObjects();
 
   gcObjects = nullptr;
+  persistentObjects = nullptr;
   totalAllocated = 0;
   totalArrays = 0;
   totalStructs = 0;
@@ -1127,6 +1128,32 @@ bool Interpreter::tryGetNativeClassDef(const char *name, NativeClassDef **out)
 {
   String *pName = createString(name);
   return nativeClassesMap.get(pName, out);
+}
+
+bool Interpreter::tryGetNativeStructDef(const char *name, NativeStructDef **out)
+{
+  if (!out)
+    return false;
+
+  *out = nullptr;
+  if (!name)
+    return false;
+
+  for (int i = 0; i < nativeStructs.size(); ++i)
+  {
+    NativeStructDef *def = nativeStructs[i];
+    if (!def || !def->name)
+      continue;
+
+    const char *chars = def->name->chars();
+    if (chars && std::strcmp(chars, name) == 0)
+    {
+      *out = def;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 Value Interpreter::createClassInstance(const char *className, int argCount, Value *args)

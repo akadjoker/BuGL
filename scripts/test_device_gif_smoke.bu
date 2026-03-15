@@ -1,0 +1,51 @@
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+
+SDL.SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SDL.SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
+if (!SDL.Init("Device GIF Smoke", 320, 240, SDL_WINDOW_OPENGL)) return;
+
+glClearColor(0.18, 0.20, 0.24, 1.0);
+
+var outputPath = "gif/test_device_gif_smoke.gif";
+if (!SDL.StartGifCapture(outputPath))
+{
+    SDL.Close();
+    print("DEVICE_GIF_SMOKE_FAIL_START");
+    return;
+}
+
+if (!SDL.IsGifRecording())
+{
+    SDL.Close();
+    print("DEVICE_GIF_SMOKE_FAIL_STATE");
+    return;
+}
+
+var frames = 0;
+while (SDL.Running())
+{
+    frames = frames + 1;
+
+    glClearColor(0.18 + frames * 0.05, 0.20, 0.24, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    SDL.Flip();
+
+    if (frames >= 4)
+        SDL.Quit();
+}
+
+var stopped = SDL.StopGifCapture();
+SDL.Close();
+
+if (!stopped || SDL.IsGifRecording())
+{
+    print("DEVICE_GIF_SMOKE_FAIL_STOP");
+    return;
+}
+
+print(outputPath);
+print("DEVICE_GIF_SMOKE_PASS");

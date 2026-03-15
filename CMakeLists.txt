@@ -95,11 +95,6 @@ add_subdirectory(vendor/SDL)
 
 add_subdirectory(libbu)
 add_subdirectory(main)
-# if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/testAudio/CMakeLists.txt")
-#     add_subdirectory(testAudio)
-# endif()
- 
- 
 add_subdirectory(BuOde)
 add_subdirectory(BuBox2d)
 add_subdirectory(BuJolt)

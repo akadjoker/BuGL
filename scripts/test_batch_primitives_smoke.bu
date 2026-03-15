@@ -1,0 +1,86 @@
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+SDL.SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SDL.SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SDL.SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("Batch Primitives Smoke", 960, 540, SDL_WINDOW_OPENGL)) return;
+
+var batch = Batch(1, 32768);
+var ortho = MatrixOrtho(0.0, SDL.GetWidth(), SDL.GetHeight(), 0.0, -10.0, 10.0);
+
+var aspect = SDL.GetWidth() / SDL.GetHeight();
+var eye = Vector3(5.5, 4.0, 6.5);
+var target = Vector3(0.0, 0.9, 0.0);
+var up = Vector3(0.0, 1.0, 0.0);
+var view = MatrixLookAt(eye, target, up);
+var deg2rad = 3.141592653589793 / 180.0;
+var proj = MatrixPerspective(60.0 * deg2rad, aspect, 0.1, 100.0);
+var vp = MatrixMultiply(view, proj);
+
+var frames = 0;
+while (SDL.Running())
+{
+    frames = frames + 1;
+    var t = frames / 60.0;
+
+    glViewport(0, 0, SDL.GetWidth(), SDL.GetHeight());
+    glClearColor(0.06, 0.08, 0.11, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glDisable(GL_DEPTH_TEST);
+    batch.setMatrix(ortho);
+
+    batch.setColor(0.95, 0.35, 0.22, 1.0);
+    batch.line2D(30, 30, 250, 110);
+
+    batch.setColor(0.18, 0.76, 0.96, 1.0);
+    batch.rectangle(60, 140, 180, 90, false);
+
+    batch.setColor(0.95, 0.82, 0.25, 0.85);
+    batch.circle(370, 200, 54, true);
+
+    batch.setColorBytes(210, 255, 210, 255);
+    batch.quad(500, 120, 170, 110);
+
+    batch.setColor(0.80, 0.90, 1.00, 1.0);
+    batch.rectangle(720, 80, 140, 120, true);
+
+    glEnable(GL_DEPTH_TEST);
+    batch.setMatrix(vp);
+
+    batch.setColor(0.42, 0.42, 0.46, 1.0);
+    batch.grid(16, 1.0, true);
+
+    batch.setColor(0.95, 0.55, 0.28, 1.0);
+    batch.cube(Vector3(-1.4, 0.7, 0.2), 1.1, 1.1, 1.1, false);
+
+    batch.setColor(0.20, 0.92, 0.58, 1.0);
+    batch.sphere(Vector3(1.6, 0.9, -0.8), 0.75, 10, 14, true);
+
+    batch.setColor(0.35, 0.70, 0.98, 1.0);
+    batch.cylinder(Vector3(0.0, 0.9, 2.2), 0.45, 1.8, 18, false);
+
+    batch.setColor(1.00, 0.90, 0.35, 1.0);
+    batch.cone(Vector3(2.7, 0.8, 1.6), 0.55, 1.5, 18, true);
+
+    var spin = MatrixRotateY(t * 1.6);
+    var move = MatrixTranslate(-2.7, 1.1, -1.8);
+    var model = MatrixMultiply(spin, move);
+    batch.beginTransform(model);
+    batch.setColor(1.0, 0.35, 0.90, 1.0);
+    batch.triangle(Vector3(-0.7, 0.0, 0.0), Vector3(0.7, 0.0, 0.0), Vector3(0.0, 1.1, 0.0));
+    batch.endTransform();
+
+    batch.render();
+    SDL.Flip();
+ 
+}
+
+SDL.Close();
+print("BATCH_PRIMITIVES_SMOKE_PASS");

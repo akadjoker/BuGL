@@ -6,20 +6,35 @@ require "Assimp";
 import Assimp; using Assimp;
 
 var scene = AssimpScene();
-var flags = Triangulate | GenSmoothNormals | JoinIdenticalVertices | FlipUVs;
+var importFlags = Triangulate | GenSmoothNormals | JoinIdenticalVertices | FlipUVs;
 
-var modelPath = "assets/WusonBlitz.b3d";
-if (!scene.load(modelPath, flags))
+var candidatePaths = [
+    "vendor/assimp/test/models-nonbsd/B3D/dwarf2.b3d",
+    "../vendor/assimp/test/models-nonbsd/B3D/dwarf2.b3d",
+    "vendor/assimp/test/models-nonbsd/B3D/turtle1.b3d",
+    "../vendor/assimp/test/models-nonbsd/B3D/turtle1.b3d",
+    "assets/WusonBlitz.b3d",
+    "../assets/WusonBlitz.b3d"
+];
+
+var modelPath = "";
+for (var i = 0; i < candidatePaths.length(); i = i + 1)
 {
-    modelPath = "../assets/WusonBlitz.b3d";
-    if (!scene.load(modelPath, flags))
+    if (scene.load(candidatePaths[i], importFlags))
     {
-        print("load failed: " + scene.getError());
-        return;
+        modelPath = candidatePaths[i];
+        break;
     }
 }
 
+if (modelPath == "")
+{
+    print("load failed: " + scene.getError());
+    return;
+}
+
 print("Assimp animation demo");
+print("path=" + modelPath);
 print("meshes=" + scene.getMeshCount() + " mats=" + scene.getMaterialCount());
 
 // Bones per mesh

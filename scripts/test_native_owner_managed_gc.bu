@@ -1,0 +1,52 @@
+def fail(msg)
+{
+    print("NATIVE_OWNER_MANAGED_GC_FAIL", msg);
+}
+
+def expect(cond, msg)
+{
+    if (!cond)
+    {
+        fail(msg);
+        return false;
+    }
+    return true;
+}
+
+def expectEq(actual, expected, msg)
+{
+    if (actual != expected)
+    {
+        fail(format("{} expected={} actual={}", msg, expected, actual));
+        return false;
+    }
+    return true;
+}
+
+_gcProbeReset();
+
+var ephemeral = GcEphemeralProbe(21);
+if (!expect(ephemeral.isPayloadAlive(), "ephemeral payload starts alive")) return;
+ephemeral = nil;
+_gc();
+
+if (!expectEq(_gcProbeEphemeralDtorCount(), 1, "ephemeral wrapper destroyed by gc")) return;
+if (!expectEq(_gcProbeEphemeralAutoPayloadCount(), 1, "ephemeral payload auto-destroyed by gc")) return;
+if (!expectEq(_gcProbeEphemeralManualPayloadCount(), 0, "ephemeral payload not manually destroyed")) return;
+
+var persistent = GcPersistentProbe(77);
+if (!expect(persistent.isPayloadAlive(), "persistent payload starts alive")) return;
+if (!expect(persistent.destroyPayload(), "persistent payload manual destroy returns true")) return;
+if (!expect(!persistent.isPayloadAlive(), "persistent payload marked dead after manual destroy")) return;
+if (!expectEq(_gcProbePersistentManualPayloadCount(), 1, "persistent payload manual destroy count")) return;
+if (!expectEq(_gcProbePersistentAutoPayloadCount(), 0, "persistent payload auto destroy still zero")) return;
+
+_gc();
+persistent = nil;
+_gc();
+_gc();
+
+if (!expectEq(_gcProbePersistentDtorCount(), 0, "persistent wrapper untouched by gc")) return;
+if (!expectEq(_gcProbePersistentAutoPayloadCount(), 0, "persistent payload not auto-destroyed by gc")) return;
+
+print("NATIVE_OWNER_MANAGED_GC_PASS");

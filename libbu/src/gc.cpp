@@ -387,13 +387,18 @@ size_t Interpreter::countObjects() const
         count++;
         obj = obj->next;
     }
+    obj = persistentObjects;
+    while (obj)
+    {
+        count++;
+        obj = obj->next;
+    }
     return count;
 }
 
 void Interpreter::clearAllGCObjects()
 {
-
-    if (!gcObjects)
+    if (!gcObjects && !persistentObjects)
         return;
 
     size_t freed = 0;
@@ -402,6 +407,15 @@ void Interpreter::clearAllGCObjects()
     {
         GCObject *toFree = gcObjects;
         gcObjects = gcObjects->next;
+
+        freeObject(toFree);
+        freed++;
+    }
+
+    while (persistentObjects)
+    {
+        GCObject *toFree = persistentObjects;
+        persistentObjects = persistentObjects->next;
 
         freeObject(toFree);
         freed++;

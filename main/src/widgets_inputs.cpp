@@ -25,13 +25,18 @@ namespace ImGuiBindings
         if (!ensure_context(vm, "ImGui.Button()"))
             return push_nil(vm);
 
-        if (argCount != 1 || !args[0].isString())
+        if ((argCount != 1 && argCount != 3) || !args[0].isString() ||
+            (argCount == 3 && (!args[1].isNumber() || !args[2].isNumber())))
         {
-            vm->runtimeError("ImGui.Button expects (label)");
+            vm->runtimeError("ImGui.Button expects (label) or (label, width, height)");
             return push_nil(vm);
         }
 
-        vm->pushBool(ImGui::Button(args[0].asStringChars()));
+        ImVec2 size = ImVec2(0.0f, 0.0f);
+        if (argCount == 3)
+            size = ImVec2((float)args[1].asNumber(), (float)args[2].asNumber());
+
+        vm->pushBool(ImGui::Button(args[0].asStringChars(), size));
         return 1;
     }
 
@@ -177,6 +182,39 @@ namespace ImGuiBindings
         return 2;
     }
 
+    int DragInt(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.DragInt()"))
+            return push_nils(vm, 2);
+
+        if (argCount < 2 || argCount > 7 || !args[0].isString() || !args[1].isNumber())
+        {
+            vm->runtimeError("ImGui.DragInt expects (label, value[, speed[, min[, max[, format[, flags]]]]])");
+            return push_nils(vm, 2);
+        }
+
+        int value = (int)args[1].asNumber();
+        float speed = 1.0f;
+        int minValue = 0;
+        int maxValue = 0;
+        const char *format = "%d";
+        int flags = 0;
+        if (!optional_number_arg(args, 2, argCount, 1.0f, &speed) ||
+            !optional_int_arg(args, 3, argCount, 0, &minValue) ||
+            !optional_int_arg(args, 4, argCount, 0, &maxValue) ||
+            !optional_string_arg(args, 5, argCount, "%d", &format) ||
+            !optional_int_arg(args, 6, argCount, 0, &flags))
+        {
+            vm->runtimeError("ImGui.DragInt expects (label, value[, speed[, min[, max[, format[, flags]]]]])");
+            return push_nils(vm, 2);
+        }
+
+        const bool changed = ImGui::DragInt(args[0].asStringChars(), &value, speed, minValue, maxValue, format, (ImGuiSliderFlags)flags);
+        vm->pushBool(changed);
+        vm->pushInt(value);
+        return 2;
+    }
+
     int InputFloat(Interpreter *vm, int argCount, Value *args)
     {
         if (!ensure_context(vm, "ImGui.InputFloat()"))
@@ -275,6 +313,52 @@ namespace ImGuiBindings
         return 2;
     }
 
+    int InputTextMultiline(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.InputTextMultiline()"))
+            return push_nils(vm, 2);
+
+        if (argCount < 2 || argCount > 6 || !args[0].isString() || !args[1].isString())
+        {
+            vm->runtimeError("ImGui.InputTextMultiline expects (label, value[, width[, height[, maxChars[, flags]]]])");
+            return push_nils(vm, 2);
+        }
+
+        float width = 0.0f;
+        float height = 0.0f;
+        int maxChars = 512;
+        int flags = 0;
+        if (!optional_number_arg(args, 2, argCount, 0.0f, &width) ||
+            !optional_number_arg(args, 3, argCount, 0.0f, &height) ||
+            !optional_int_arg(args, 4, argCount, 512, &maxChars) ||
+            !optional_int_arg(args, 5, argCount, 0, &flags))
+        {
+            vm->runtimeError("ImGui.InputTextMultiline expects (label, value[, width[, height[, maxChars[, flags]]]])");
+            return push_nils(vm, 2);
+        }
+
+        if (maxChars < 1)
+            maxChars = 1;
+
+        std::string text = args[1].asStringChars();
+        if ((int)text.size() > maxChars)
+            text.resize((size_t)maxChars);
+
+        std::vector<char> buffer((size_t)maxChars + 1, '\0');
+        for (size_t i = 0; i < text.size(); ++i)
+            buffer[i] = text[i];
+
+        const bool changed = ImGui::InputTextMultiline(args[0].asStringChars(),
+                                                       buffer.data(),
+                                                       buffer.size(),
+                                                       ImVec2(width, height),
+                                                       (ImGuiInputTextFlags)flags);
+
+        vm->pushBool(changed);
+        vm->push(vm->makeString(buffer.data()));
+        return 2;
+    }
+
     int Combo(Interpreter *vm, int argCount, Value *args)
     {
         if (!ensure_context(vm, "ImGui.Combo()"))
@@ -364,19 +448,100 @@ namespace ImGuiBindings
         return 5;
     }
 
+    int CollapsingHeader(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.CollapsingHeader()"))
+            return push_nil(vm);
+
+        if (argCount < 1 || argCount > 2 || !args[0].isString() || (argCount == 2 && !args[1].isNumber()))
+        {
+            vm->runtimeError("ImGui.CollapsingHeader expects (label[, flags])");
+            return push_nil(vm);
+        }
+
+        ImGuiTreeNodeFlags flags = (argCount == 2) ? (ImGuiTreeNodeFlags)(int)args[1].asNumber() : ImGuiTreeNodeFlags_None;
+        vm->pushBool(ImGui::CollapsingHeader(args[0].asStringChars(), flags));
+        return 1;
+    }
+
+    int TreeNode(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.TreeNode()"))
+            return push_nil(vm);
+
+        if (argCount != 1 || !args[0].isString())
+        {
+            vm->runtimeError("ImGui.TreeNode expects (label)");
+            return push_nil(vm);
+        }
+
+        vm->pushBool(ImGui::TreeNode(args[0].asStringChars()));
+        return 1;
+    }
+
+    int TreePop(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)args;
+        if (!ensure_context(vm, "ImGui.TreePop()"))
+            return 0;
+
+        if (argCount != 0)
+        {
+            vm->runtimeError("ImGui.TreePop expects ()");
+            return 0;
+        }
+
+        ImGui::TreePop();
+        return 0;
+    }
+
+    int ProgressBar(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.ProgressBar()"))
+            return 0;
+
+        if (argCount < 1 || argCount > 4 || !args[0].isNumber())
+        {
+            vm->runtimeError("ImGui.ProgressBar expects (fraction[, width[, height[, overlay]]])");
+            return 0;
+        }
+
+        float fraction = (float)args[0].asNumber();
+        float width = -FLT_MIN;
+        float height = 0.0f;
+        const char *overlay = nullptr;
+
+        if (!optional_number_arg(args, 1, argCount, -FLT_MIN, &width) ||
+            !optional_number_arg(args, 2, argCount, 0.0f, &height) ||
+            !optional_string_arg(args, 3, argCount, nullptr, &overlay))
+        {
+            vm->runtimeError("ImGui.ProgressBar expects (fraction[, width[, height[, overlay]]])");
+            return 0;
+        }
+
+        ImGui::ProgressBar(fraction, ImVec2(width, height), overlay);
+        return 0;
+    }
+
     void register_inputs(ModuleBuilder &module)
     {
-        module.addFunction("Button", Button, 1)
+        module.addFunction("Button", Button, -1)
               .addFunction("SmallButton", SmallButton, 1)
+              .addFunction("CollapsingHeader", CollapsingHeader, -1)
+              .addFunction("TreeNode", TreeNode, 1)
+              .addFunction("TreePop", TreePop, 0)
+              .addFunction("ProgressBar", ProgressBar, -1)
               .addFunction("Selectable", Selectable, -1)
               .addFunction("RadioButton", RadioButton, 2)
               .addFunction("Checkbox", Checkbox, 2)
               .addFunction("DragFloat", DragFloat, -1)
+              .addFunction("DragInt", DragInt, -1)
               .addFunction("SliderFloat", SliderFloat, -1)
               .addFunction("SliderInt", SliderInt, -1)
               .addFunction("InputFloat", InputFloat, -1)
               .addFunction("InputInt", InputInt, -1)
               .addFunction("InputText", InputText, -1)
+              .addFunction("InputTextMultiline", InputTextMultiline, -1)
               .addFunction("Combo", Combo, -1)
               .addFunction("ColorEdit3", ColorEdit3, -1)
               .addFunction("ColorEdit4", ColorEdit4, -1)

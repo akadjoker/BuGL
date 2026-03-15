@@ -112,6 +112,17 @@ namespace ImGuiBindings
         return 0;
     }
 
+    int Bullet(Interpreter *vm, int argCount, Value *args)
+    {
+        (void)argCount;
+        (void)args;
+        if (!ensure_context(vm, "ImGui.Bullet()"))
+            return 0;
+
+        ImGui::Bullet();
+        return 0;
+    }
+
     void register_text(ModuleBuilder &module)
     {
         module.addFunction("Text", Text, 1);
@@ -119,6 +130,7 @@ namespace ImGuiBindings
         module.addFunction("TextDisabled", TextDisabled, 1);
         module.addFunction("TextWrapped", TextWrapped, 1);
         module.addFunction("BulletText", BulletText, 1);
+        module.addFunction("Bullet", Bullet, 0);
         module.addFunction("SeparatorText", SeparatorText, 1);
     }
 }

@@ -343,6 +343,19 @@ void Compiler::binary(bool canAssign)
 {
     (void)canAssign;
     TokenType operatorType = previous.type;
+
+    // Generic call: callee<Type>(args...)
+    // Disambiguate from comparison by requiring the exact pattern <Type>(.
+    if (operatorType == TOKEN_LESS
+        && (check(TOKEN_IDENTIFIER) || isKeywordToken(current.type))
+        && peek(0).type == TOKEN_GREATER
+        && peek(1).type == TOKEN_LPAREN)
+    {
+        uint8 argCount = genericArgumentList();
+        emitBytes(OP_CALL, argCount);
+        return;
+    }
+
     ParseRule *rule = getRule(operatorType);
 
     parsePrecedence((Precedence)(rule->prec + 1));
