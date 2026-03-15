@@ -102,9 +102,4 @@ using STB;
 
 
 //include "demo_micropather.bu";
-//include "demo_entt_basic.bu";
-//include "demo_entt_transform3d.bu";
-include "demo_entt_stress3d.bu";
-//include "demo_entt_swarm.bu";
-
 //include "demo_recast_tilecache.bu";

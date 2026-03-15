@@ -108,7 +108,6 @@ add_subdirectory(BuOpenSteer)
 add_subdirectory(BuRecast)
 add_subdirectory(BuMicroPather)
 add_subdirectory(BuAssimp)
-add_subdirectory(BuEnTT)
  
 
  
