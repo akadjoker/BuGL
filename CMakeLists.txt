@@ -24,12 +24,6 @@ if(BUGL_ENABLE_COMPILER_CACHE)
 endif()
 
 # Embutir as bibliotecas C/C++ padrão no executável Windows para evitar missing DLLs
-if(MINGW)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -static-libgcc")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libgcc -static-libstdc++")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc -static-libstdc++")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -static -lpthread")
-endif()
 
 find_program(CLANG_TIDY_EXE NAMES clang-tidy)
 

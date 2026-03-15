@@ -18,7 +18,7 @@ file(GLOB SOURCES "src/*.cpp")
 # ============================================
 # Targets
 # ============================================
-add_library(libbu STATIC ${SOURCES})
+add_library(libbu SHARED ${SOURCES})
 
 set(BUGL_VERSION_STRING "${CMAKE_PROJECT_VERSION}")
 if(NOT BUGL_VERSION_STRING)
@@ -47,8 +47,22 @@ target_compile_definitions(libbu PUBLIC
     BUGL_VERSION_GIT=\"${BUGL_VERSION_GIT}\"
 )
 
-# Enable PIC so libbu can be linked into shared libraries (plugins)
-set_target_properties(libbu PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# Build libbu as the shared runtime used by the host and plugins.
+set_target_properties(libbu PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    DEBUG_POSTFIX ""
+    PREFIX ""
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+if(WIN32)
+    set_target_properties(libbu PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
+if(MINGW)
+    target_link_options(libbu PRIVATE -shared-libgcc)
+endif()
 
 target_include_directories(libbu PUBLIC include src ${CMAKE_SOURCE_DIR}/vendor/miniz/include)
 

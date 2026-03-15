@@ -87,6 +87,28 @@ if (WIN32)
     endif()
 endif()
 
+if (MINGW)
+    get_filename_component(BUGL_MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(BUGL_MINGW_RUNTIME_DLLS
+        libstdc++-6.dll
+        libwinpthread-1.dll
+        libgcc_s_seh-1.dll
+        libgcc_s_dw2-1.dll
+        libgcc_s_sjlj-1.dll
+    )
+
+    foreach(BUGL_RUNTIME_DLL IN LISTS BUGL_MINGW_RUNTIME_DLLS)
+        if(EXISTS "${BUGL_MINGW_BIN_DIR}/${BUGL_RUNTIME_DLL}")
+            add_custom_command(TARGET main POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${BUGL_MINGW_BIN_DIR}/${BUGL_RUNTIME_DLL}"
+                    "$<TARGET_FILE_DIR:main>/${BUGL_RUNTIME_DLL}"
+                COMMENT "Copying ${BUGL_RUNTIME_DLL} to output directory"
+            )
+        endif()
+    endforeach()
+endif()
+
 
 if (UNIX)
     target_link_libraries(main PRIVATE m)

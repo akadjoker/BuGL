@@ -5,6 +5,9 @@
 // R         -> reset world
 // ESC       -> quit
 // ================================================================
+require "Box2D";
+import Box2D;
+using Box2D;
 
 SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
