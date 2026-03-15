@@ -1,0 +1,245 @@
+// ================================================================
+// BuGL Demo — MicroPather Grid Pathfinder
+// LMB     -> toggle wall
+// RMB     -> move goal
+// S       -> move start to mouse
+// D       -> toggle diagonal movement
+// SPACE   -> recompute path
+// C       -> reset map
+// ESC     -> quit
+// ================================================================
+
+require "MicroPather";
+
+import SDL; using SDL;
+import OpenGl; using OpenGl;
+import math; using math;
+import MicroPather; using MicroPather;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+if (!Init("MicroPather Grid Demo", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glDisable(GL_DEPTH_TEST);
+glClearColor(0.06, 0.07, 0.10, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+
+var cols = 46;
+var rows = 28;
+var diagonal = true;
+
+var startX = 3;
+var startY = 3;
+var goalX = cols - 4;
+var goalY = rows - 4;
+
+var pf = GridPathfinder(cols, rows, diagonal);
+if (!pf.isValid())
+{
+    print("GridPathfinder init falhou.");
+    Close();
+    return;
+}
+
+var pathFlat = [];
+var lastInfo = "";
+
+def mouseCellX()
+{
+    var x = int((GetMouseX() * cols) / GetWidth());
+    return x;
+}
+
+def mouseCellY()
+{
+    var yy = int(((GetHeight() - GetMouseY()) * rows) / GetHeight());
+    return yy;
+}
+
+def drawCell(x, y, r, g, b, a)
+{
+    glColor4f(r, g, b, a);
+    glBegin(GL_QUADS);
+    glVertex2f(x, y);
+    glVertex2f(x + 1.0, y);
+    glVertex2f(x + 1.0, y + 1.0);
+    glVertex2f(x, y + 1.0);
+    glEnd();
+}
+
+def solvePath()
+{
+    var out = pf.solve(startX, startY, goalX, goalY);
+    if (out == nil)
+    {
+        pathFlat = [];
+        lastInfo = format("NO PATH status={} cost={}", pf.getLastStatus(), pf.getLastCost());
+        print(lastInfo);
+        return;
+    }
+
+    pathFlat = out;
+    lastInfo = format("Path nodes={} cost={} status={}",
+        len(pathFlat) / 2,
+        pf.getLastCost(),
+        pf.getLastStatus());
+    print(lastInfo);
+}
+
+def buildLevel()
+{
+    pf.clear(false);
+
+    // Borders
+    pf.setRectBlocked(0, 0, cols, 1, true);
+    pf.setRectBlocked(0, rows - 1, cols, 1, true);
+    pf.setRectBlocked(0, 0, 1, rows, true);
+    pf.setRectBlocked(cols - 1, 0, 1, rows, true);
+
+    // Obstacle bands with gaps
+    for (var x = 4; x < cols - 4; x = x + 1)
+    {
+        if (x != 12 && x != 13 && x != 34) pf.setBlocked(x, 8, true);
+        if (x != 22 && x != 23 && x != 24) pf.setBlocked(x, 18, true);
+    }
+    for (var y = 3; y < rows - 3; y = y + 1)
+    {
+        if (y != 6 && y != 7 && y != 15) pf.setBlocked(18, y, true);
+        if (y != 11 && y != 12 && y != 13) pf.setBlocked(30, y, true);
+    }
+
+    // Keep start and goal always free
+    pf.setBlocked(startX, startY, false);
+    pf.setBlocked(goalX, goalY, false);
+}
+
+buildLevel();
+solvePath();
+
+while (Running())
+{
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_D))
+    {
+        diagonal = !diagonal;
+        pf.setDiagonal(diagonal);
+        solvePath();
+    }
+
+    if (IsKeyPressed(KEY_C))
+    {
+        buildLevel();
+        solvePath();
+    }
+
+    if (IsKeyPressed(KEY_SPACE))
+    {
+        solvePath();
+    }
+
+    if (IsMousePressed(MOUSE_LEFT))
+    {
+        var cx = mouseCellX();
+        var cy = mouseCellY();
+        if (pf.inBounds(cx, cy))
+        {
+            if (!((cx == startX && cy == startY) || (cx == goalX && cy == goalY)))
+            {
+                var blockedNow = pf.isBlocked(cx, cy);
+                pf.setBlocked(cx, cy, !blockedNow);
+                solvePath();
+            }
+        }
+    }
+
+    if (IsMousePressed(MOUSE_RIGHT))
+    {
+        var gx = mouseCellX();
+        var gy = mouseCellY();
+        if (pf.inBounds(gx, gy) && !pf.isBlocked(gx, gy))
+        {
+            goalX = gx;
+            goalY = gy;
+            solvePath();
+        }
+    }
+
+    if (IsKeyPressed(KEY_S))
+    {
+        var sx = mouseCellX();
+        var sy = mouseCellY();
+        if (pf.inBounds(sx, sy) && !pf.isBlocked(sx, sy))
+        {
+            startX = sx;
+            startY = sy;
+            solvePath();
+        }
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0, cols, 0.0, rows, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Cell fill
+    for (var y = 0; y < rows; y = y + 1)
+    {
+        for (var x = 0; x < cols; x = x + 1)
+        {
+            if (pf.isBlocked(x, y))
+                drawCell(x, y, 0.23, 0.20, 0.20, 0.95);
+            else
+                drawCell(x, y, 0.12, 0.18, 0.28, 0.55);
+        }
+    }
+
+    // Grid lines
+    glLineWidth(1.0);
+    glColor4f(0.15, 0.22, 0.33, 0.7);
+    glBegin(GL_LINES);
+    for (var gx = 0; gx <= cols; gx = gx + 1)
+    {
+        glVertex2f(gx, 0.0);
+        glVertex2f(gx, rows);
+    }
+    for (var gy = 0; gy <= rows; gy = gy + 1)
+    {
+        glVertex2f(0.0, gy);
+        glVertex2f(cols, gy);
+    }
+    glEnd();
+
+    // Path
+    if (len(pathFlat) >= 4)
+    {
+        glLineWidth(3.0);
+        glColor3f(0.98, 0.88, 0.25);
+        glBegin(GL_LINE_STRIP);
+        for (var i = 0; i < len(pathFlat); i = i + 2)
+        {
+            var px = pathFlat[i] + 0.5;
+            var py = pathFlat[i + 1] + 0.5;
+            glVertex2f(px, py);
+        }
+        glEnd();
+    }
+
+    // Start + Goal
+    drawCell(startX, startY, 0.24, 0.95, 0.38, 0.95);
+    drawCell(goalX, goalY, 0.96, 0.40, 0.22, 0.95);
+
+    Flip();
+}
+
+pf.destroy();
+Close();

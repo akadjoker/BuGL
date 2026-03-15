@@ -4,6 +4,7 @@ namespace OpenSteerBindings
 {
     NativeClassDef *g_agentClass = nullptr;
     NativeClassDef *g_sphereObstacleClass = nullptr;
+    NativeClassDef *g_pathwayClass = nullptr;
     NativeStructDef *g_vector3Def = nullptr;
 
     int push_nil1(Interpreter *vm)
@@ -36,6 +37,27 @@ namespace OpenSteerBindings
 
         *out = value.asNumber();
         return true;
+    }
+
+    bool read_boolish_arg(const Value &value, bool *out, const char *fn, int argIndex)
+    {
+        if (!out)
+            return false;
+
+        if (value.isBool())
+        {
+            *out = value.asBool();
+            return true;
+        }
+
+        if (value.isNumber())
+        {
+            *out = value.asNumber() != 0.0;
+            return true;
+        }
+
+        Error("%s arg %d expects bool or number", fn, argIndex);
+        return false;
     }
 
     bool read_vector3_arg(const Value &value, Vector3 *out, const char *fn, int argIndex)
@@ -75,6 +97,36 @@ namespace OpenSteerBindings
         return true;
     }
 
+    bool read_vector3_array_arg(const Value &value, std::vector<OpenSteer::Vec3> *out, const char *fn, int argIndex)
+    {
+        if (!out || !value.isArray())
+        {
+            Error("%s arg %d expects array of Vector3", fn, argIndex);
+            return false;
+        }
+
+        ArrayInstance *arr = value.asArray();
+        if (!arr)
+        {
+            Error("%s arg %d expects array of Vector3", fn, argIndex);
+            return false;
+        }
+
+        out->clear();
+        out->reserve(arr->values.size());
+        for (size_t i = 0; i < arr->values.size(); ++i)
+        {
+            Vector3 point;
+            if (!read_vector3_arg(arr->values[i], &point, fn, argIndex))
+            {
+                Error("%s arg %d item %d expects Vector3", fn, argIndex, (int)i + 1);
+                return false;
+            }
+            out->push_back(to_opensteer_vec3(point));
+        }
+        return true;
+    }
+
     OpenSteer::Vec3 to_opensteer_vec3(const Vector3 &value)
     {
         return OpenSteer::Vec3(value.x, value.y, value.z);
@@ -111,6 +163,17 @@ namespace OpenSteerBindings
         return handle;
     }
 
+    PathwayHandle *require_pathway(void *instance, const char *fn)
+    {
+        PathwayHandle *handle = (PathwayHandle *)instance;
+        if (!handle || !handle->valid || !handle->pathway)
+        {
+            Error("%s on invalid SteerPathway", fn);
+            return nullptr;
+        }
+        return handle;
+    }
+
     void destroy_agent_runtime(AgentHandle *handle)
     {
         if (!handle || !handle->valid)
@@ -128,6 +191,16 @@ namespace OpenSteerBindings
 
         delete handle->obstacle;
         handle->obstacle = nullptr;
+        handle->valid = false;
+    }
+
+    void destroy_pathway_runtime(PathwayHandle *handle)
+    {
+        if (!handle || !handle->valid)
+            return;
+
+        delete handle->pathway;
+        handle->pathway = nullptr;
         handle->valid = false;
     }
 

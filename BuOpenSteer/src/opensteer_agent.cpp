@@ -478,6 +478,84 @@ namespace OpenSteerBindings
         return push_vector3(vm, from_opensteer_vec3(handle->agent->steerForTargetSpeed((float)speed))) ? 1 : push_nil1(vm);
     }
 
+    static int agent_steer_to_follow_path(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 3)
+        {
+            Error("SteerAgent.followPath() expects (pathway, direction, predictionTime)");
+            return push_nil1(vm);
+        }
+
+        AgentHandle *handle = require_agent(instance, "SteerAgent.followPath()");
+        if (!handle)
+            return push_nil1(vm);
+
+        if (!args[0].isNativeClassInstance())
+        {
+            Error("SteerAgent.followPath() arg 1 expects SteerPathway");
+            return push_nil1(vm);
+        }
+
+        NativeClassInstance *pathInst = args[0].asNativeClassInstance();
+        if (!pathInst || pathInst->klass != g_pathwayClass || !pathInst->userData)
+        {
+            Error("SteerAgent.followPath() arg 1 expects SteerPathway");
+            return push_nil1(vm);
+        }
+
+        PathwayHandle *path = require_pathway(pathInst->userData, "SteerAgent.followPath()");
+        if (!path)
+            return push_nil1(vm);
+
+        double direction = 0.0;
+        double predictionTime = 0.0;
+        if (!read_number_arg(args[1], &direction, "SteerAgent.followPath()", 2) ||
+            !read_number_arg(args[2], &predictionTime, "SteerAgent.followPath()", 3))
+        {
+            return push_nil1(vm);
+        }
+
+        OpenSteer::Vec3 force = handle->agent->steerToFollowPath((int)direction, (float)predictionTime, *path->pathway);
+        return push_vector3(vm, from_opensteer_vec3(force)) ? 1 : push_nil1(vm);
+    }
+
+    static int agent_steer_to_stay_on_path(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 2)
+        {
+            Error("SteerAgent.stayOnPath() expects (pathway, predictionTime)");
+            return push_nil1(vm);
+        }
+
+        AgentHandle *handle = require_agent(instance, "SteerAgent.stayOnPath()");
+        if (!handle)
+            return push_nil1(vm);
+
+        if (!args[0].isNativeClassInstance())
+        {
+            Error("SteerAgent.stayOnPath() arg 1 expects SteerPathway");
+            return push_nil1(vm);
+        }
+
+        NativeClassInstance *pathInst = args[0].asNativeClassInstance();
+        if (!pathInst || pathInst->klass != g_pathwayClass || !pathInst->userData)
+        {
+            Error("SteerAgent.stayOnPath() arg 1 expects SteerPathway");
+            return push_nil1(vm);
+        }
+
+        PathwayHandle *path = require_pathway(pathInst->userData, "SteerAgent.stayOnPath()");
+        if (!path)
+            return push_nil1(vm);
+
+        double predictionTime = 0.0;
+        if (!read_number_arg(args[1], &predictionTime, "SteerAgent.stayOnPath()", 2))
+            return push_nil1(vm);
+
+        OpenSteer::Vec3 force = handle->agent->steerToStayOnPath((float)predictionTime, *path->pathway);
+        return push_vector3(vm, from_opensteer_vec3(force)) ? 1 : push_nil1(vm);
+    }
+
     static int agent_steer_for_arrival_method(Interpreter *vm, void *instance, int argCount, Value *args)
     {
         if (argCount != 2)
@@ -785,6 +863,8 @@ namespace OpenSteerBindings
         vm.addNativeMethod(g_agentClass, "flee", agent_steer_for_flee);
         vm.addNativeMethod(g_agentClass, "wander", agent_steer_for_wander);
         vm.addNativeMethod(g_agentClass, "targetSpeed", agent_steer_for_target_speed);
+        vm.addNativeMethod(g_agentClass, "followPath", agent_steer_to_follow_path);
+        vm.addNativeMethod(g_agentClass, "stayOnPath", agent_steer_to_stay_on_path);
         vm.addNativeMethod(g_agentClass, "arrive", agent_steer_for_arrival_method);
         vm.addNativeMethod(g_agentClass, "pursuit", agent_steer_for_pursuit);
         vm.addNativeMethod(g_agentClass, "evasion", agent_steer_for_evasion);

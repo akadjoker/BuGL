@@ -22,6 +22,7 @@ set(BINDING_SOURCES
     src/opensteer_bindings.cpp
     src/opensteer_agent.cpp
     src/opensteer_obstacle.cpp
+    src/opensteer_pathway.cpp
 )
 
 add_library(bu_opensteer SHARED src/plugin.cpp ${BINDING_SOURCES})

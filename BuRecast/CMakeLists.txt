@@ -44,10 +44,16 @@ set(DETOUR_CROWD_SOURCES
     ${RECAST_ROOT}/DetourCrowd/Source/DetourProximityGrid.cpp
 )
 
+set(DETOUR_TILECACHE_SOURCES
+    ${RECAST_ROOT}/DetourTileCache/Source/DetourTileCache.cpp
+    ${RECAST_ROOT}/DetourTileCache/Source/DetourTileCacheBuilder.cpp
+)
+
 set(BINDING_SOURCES
     src/recast_core.cpp
     src/recast_navmesh.cpp
     src/recast_crowd.cpp
+    src/recast_tilecache.cpp
     src/recast_bindings.cpp
 )
 
@@ -57,6 +63,7 @@ add_library(bu_recast SHARED
     ${RECAST_SOURCES}
     ${DETOUR_SOURCES}
     ${DETOUR_CROWD_SOURCES}
+    ${DETOUR_TILECACHE_SOURCES}
 )
 
 target_include_directories(bu_recast PRIVATE
@@ -66,6 +73,7 @@ target_include_directories(bu_recast PRIVATE
     ${RECAST_ROOT}/Recast/Include
     ${RECAST_ROOT}/Detour/Include
     ${RECAST_ROOT}/DetourCrowd/Include
+    ${RECAST_ROOT}/DetourTileCache/Include
 )
 
 target_compile_definitions(bu_recast PRIVATE BU_PLUGIN_BUILD)

@@ -88,8 +88,15 @@ namespace ImGuiBindings
             return push_nil(vm);
         }
 
+        const int idx = (int)args[0].asNumber();
+        if (idx < 0 || idx >= ImGuiCol_COUNT)
+        {
+            vm->runtimeError("ImGui.SetStyleColor index out of range");
+            return push_nil(vm);
+        }
+
         ImGuiStyle &style = ImGui::GetStyle();
-        ImVec4 &color = style.Colors[(int)args[0].asNumber()];
+        ImVec4 &color = style.Colors[idx];
         color.x = (float)args[1].asNumber();
         color.y = (float)args[2].asNumber();
         color.z = (float)args[3].asNumber();
@@ -109,7 +116,14 @@ namespace ImGuiBindings
             return push_nils(vm, 4);
         }
 
-        const ImVec4 &color = ImGui::GetStyle().Colors[(int)args[0].asNumber()];
+        const int idx = (int)args[0].asNumber();
+        if (idx < 0 || idx >= ImGuiCol_COUNT)
+        {
+            vm->runtimeError("ImGui.GetStyleColor index out of range");
+            return push_nils(vm, 4);
+        }
+
+        const ImVec4 &color = ImGui::GetStyle().Colors[idx];
         vm->pushDouble(color.x);
         vm->pushDouble(color.y);
         vm->pushDouble(color.z);

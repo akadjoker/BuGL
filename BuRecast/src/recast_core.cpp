@@ -4,6 +4,7 @@ namespace RecastBindings
 {
     NativeClassDef  *g_navMeshClass  = nullptr;
     NativeClassDef  *g_navCrowdClass = nullptr;
+    NativeClassDef  *g_navTileCacheClass = nullptr;
     NativeStructDef *g_vector3Def    = nullptr;
 
     // ── Basic helpers ────────────────────────────────────────
@@ -65,7 +66,7 @@ namespace RecastBindings
     NavMeshHandle *require_navmesh(void *instance, const char *fn)
     {
         NavMeshHandle *h = (NavMeshHandle *)instance;
-        if (!h || !h->valid || !h->navMesh)
+        if (!h || !h->valid || !h->navMesh || !h->navQuery)
         {
             Error("%s: invalid or destroyed NavMesh", fn);
             return nullptr;
@@ -76,9 +77,20 @@ namespace RecastBindings
     NavCrowdHandle *require_crowd(void *instance, const char *fn)
     {
         NavCrowdHandle *h = (NavCrowdHandle *)instance;
-        if (!h || !h->valid || !h->crowd)
+        if (!h || !h->valid || !h->crowd || !h->mesh || !h->mesh->valid || !h->mesh->navMesh || !h->mesh->navQuery)
         {
             Error("%s: invalid or destroyed NavCrowd", fn);
+            return nullptr;
+        }
+        return h;
+    }
+
+    NavTileCacheHandle *require_tilecache(void *instance, const char *fn)
+    {
+        NavTileCacheHandle *h = (NavTileCacheHandle *)instance;
+        if (!h || !h->valid || !h->tileCache || !h->navMesh || !h->navQuery)
+        {
+            Error("%s: invalid or destroyed NavTileCache", fn);
             return nullptr;
         }
         return h;

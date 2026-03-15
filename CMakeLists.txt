@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 cmake_policy(SET CMP0072 NEW)
 
-project(wdiv)
+project(bugl VERSION 2.0.0)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -106,7 +106,9 @@ add_subdirectory(BuJolt)
 add_subdirectory(BuChipmunk)
 add_subdirectory(BuOpenSteer)
 add_subdirectory(BuRecast)
+add_subdirectory(BuMicroPather)
 add_subdirectory(BuAssimp)
+add_subdirectory(BuEnTT)
  
 
  

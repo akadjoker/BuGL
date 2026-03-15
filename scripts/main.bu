@@ -48,6 +48,7 @@ using STB;
 //include "demo_box2d_stack.bu";
 //include "demo_audio.bu";
 //include "demo_shapes_legacy.bu";
+//include "demo_process_ticks_legacy.bu";
 
 //include  "demo_shapes_gc_repro.bu";
 
@@ -81,7 +82,7 @@ using STB;
 
 //include "demo_jolt_tank.bu";
 
-include "demo_chipmunk_joints.bu";
+//clude "demo_chipmunk_joints.bu";
 
 
 //include "demo_opensteer_boids.bu";
@@ -91,3 +92,19 @@ include "demo_chipmunk_joints.bu";
  //include "demo_opensteer_pedestrians.bu";
 
 //include "demo_steertest.bu";
+
+
+//include "demo_assimp.bu";
+//include "demo_assimp_animation.bu";
+
+//include "demo_recast_navmesh.bu";
+//include "demo_recast_tilecache.bu";
+
+
+//include "demo_micropather.bu";
+//include "demo_entt_basic.bu";
+//include "demo_entt_transform3d.bu";
+include "demo_entt_stress3d.bu";
+//include "demo_entt_swarm.bu";
+
+//include "demo_recast_tilecache.bu";

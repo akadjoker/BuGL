@@ -13,8 +13,6 @@ namespace AssimpBindings
     {
         (void)vm;
         NodeHandle *h = (NodeHandle *)instance;
-        if (!h) return;
-        h->owner->release();
         delete h;
     }
 
@@ -84,23 +82,13 @@ namespace AssimpBindings
         return push_node(vm, h->owner, h->node->mParent) ? 1 : push_nil1(vm);
     }
 
-    // getTransform() -> flat array[16] row-major 4x4
+    // getTransform() -> Matrix (raymath native struct, column-major like OpenGL)
     static int node_get_transform(Interpreter *vm, void *instance, int argCount, Value *args)
     {
         (void)argCount; (void)args;
         NodeHandle *h = require_node(instance, "AssimpNode.getTransform()");
         if (!h) return push_nil1(vm);
-        const aiMatrix4x4 &m = h->node->mTransformation;
-        Value arr = vm->makeArray();
-        ArrayInstance *a = arr.as.array;
-        a->values.reserve(16);
-        // row-major: a1..a4, b1..b4, c1..c4, d1..d4
-        a->values.push(vm->makeDouble(m.a1)); a->values.push(vm->makeDouble(m.a2)); a->values.push(vm->makeDouble(m.a3)); a->values.push(vm->makeDouble(m.a4));
-        a->values.push(vm->makeDouble(m.b1)); a->values.push(vm->makeDouble(m.b2)); a->values.push(vm->makeDouble(m.b3)); a->values.push(vm->makeDouble(m.b4));
-        a->values.push(vm->makeDouble(m.c1)); a->values.push(vm->makeDouble(m.c2)); a->values.push(vm->makeDouble(m.c3)); a->values.push(vm->makeDouble(m.c4));
-        a->values.push(vm->makeDouble(m.d1)); a->values.push(vm->makeDouble(m.d2)); a->values.push(vm->makeDouble(m.d3)); a->values.push(vm->makeDouble(m.d4));
-        vm->push(arr);
-        return 1;
+        return push_matrix(vm, h->node->mTransformation) ? 1 : push_nil1(vm);
     }
 
     void register_node(Interpreter &vm)

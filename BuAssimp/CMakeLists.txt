@@ -15,6 +15,7 @@ set(BINDING_SOURCES
     src/assimp_mesh.cpp
     src/assimp_material.cpp
     src/assimp_node.cpp
+    src/assimp_animation.cpp
     src/assimp_bindings.cpp
 )
 

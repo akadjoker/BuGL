@@ -2,6 +2,7 @@
 
  
 #include "config.hpp"
+#include "version.h"
 #include "filebuffer.hpp"
 #include "interpreter.hpp"
 #include "bindings.hpp"
@@ -252,6 +253,8 @@ void showFatalScreen(const std::string &message)
 
 int main(int argc, char *argv[])
 {
+    std::printf("BuGL version %s (git %s)\n", bugl::version::string(), bugl::version::git());
+
     Interpreter vm;
     vm.registerAll();
     SDLBindings::registerAll(vm);
@@ -261,9 +264,11 @@ int main(int argc, char *argv[])
     const std::filesystem::path exeDir = exePath.has_parent_path() ? exePath.parent_path() : std::filesystem::current_path();
     const std::filesystem::path cwd = std::filesystem::current_path();
 
-    // Release layout: <bugl>/plugins. Development layout: <repo>/bin/modules.
+    // Release layout: <bugl>/plugins. Development layout: <repo>/bin/plugins (or bin/modules).
     addUniqueVmPluginSearchPath(vm, pluginSearchPaths, exeDir / "plugins");
     addUniqueVmPluginSearchPath(vm, pluginSearchPaths, exeDir / "modules");
+    addUniqueVmPluginSearchPath(vm, pluginSearchPaths, cwd / "bin" / "plugins");
+    addUniqueVmPluginSearchPath(vm, pluginSearchPaths, cwd / "bin" / "modules");
     addUniqueVmPluginSearchPath(vm, pluginSearchPaths, cwd / "plugins");
     addUniqueVmPluginSearchPath(vm, pluginSearchPaths, cwd / "modules");
 

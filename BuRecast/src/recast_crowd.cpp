@@ -19,14 +19,14 @@ namespace RecastBindings
         }
 
         NativeClassInstance *nci = args[0].asNativeClassInstance();
-        if (!nci || !nci->instance)
+        if (!nci || nci->klass != g_navMeshClass || !nci->userData)
         {
             Error("NavCrowd: invalid NavMesh argument");
             return nullptr;
         }
 
-        NavMeshHandle *mesh = (NavMeshHandle *)nci->instance;
-        if (!mesh->valid || !mesh->navMesh)
+        NavMeshHandle *mesh = (NavMeshHandle *)nci->userData;
+        if (!mesh->valid || !mesh->navMesh || !mesh->navQuery)
         {
             Error("NavCrowd: NavMesh is not built");
             return nullptr;
@@ -37,10 +37,20 @@ namespace RecastBindings
             maxAgents = (int)args[1].asDouble();
         if (maxAgents < 1) maxAgents = 1;
 
+        mesh->retain();
+
         dtCrowd *crowd = dtAllocCrowd();
+        if (!crowd)
+        {
+            mesh->release();
+            Error("NavCrowd: dtAllocCrowd failed");
+            return nullptr;
+        }
+
         if (!crowd->init(maxAgents, 0.6f, mesh->navMesh))
         {
             dtFreeCrowd(crowd);
+            mesh->release();
             Error("NavCrowd: crowd init failed");
             return nullptr;
         }
@@ -98,9 +108,11 @@ namespace RecastBindings
     {
         (void)vm;
         if (argCount != 1) { Error("NavCrowd.removeAgent(id)"); return 0; }
+        double idd = 0.0;
+        if (!read_number_arg(args[0], &idd, "NavCrowd.removeAgent()", 1)) return 0;
         NavCrowdHandle *h = require_crowd(instance, "NavCrowd.removeAgent()");
         if (!h) return 0;
-        h->crowd->removeAgent((int)args[0].asDouble());
+        h->crowd->removeAgent((int)idd);
         return 0;
     }
 
@@ -111,7 +123,9 @@ namespace RecastBindings
         NavCrowdHandle *h = require_crowd(instance, "NavCrowd.setTarget()");
         if (!h) return push_nil1(vm);
 
-        int id = (int)args[0].asDouble();
+        double idd = 0.0;
+        if (!read_number_arg(args[0], &idd, "NavCrowd.setTarget()", 1)) return push_nil1(vm);
+        int id = (int)idd;
         Vector3 target;
         if (!read_vector3_arg(args[1], &target, "NavCrowd.setTarget()", 2)) return push_nil1(vm);
 
@@ -138,9 +152,11 @@ namespace RecastBindings
     {
         (void)vm;
         if (argCount != 1) { Error("NavCrowd.update(dt)"); return 0; }
+        double dt = 0.0;
+        if (!read_number_arg(args[0], &dt, "NavCrowd.update()", 1)) return 0;
         NavCrowdHandle *h = require_crowd(instance, "NavCrowd.update()");
         if (!h) return 0;
-        h->crowd->update((float)args[0].asDouble(), nullptr);
+        h->crowd->update((float)dt, nullptr);
         return 0;
     }
 
@@ -151,7 +167,9 @@ namespace RecastBindings
         NavCrowdHandle *h = require_crowd(instance, "NavCrowd.getPosition()");
         if (!h) return push_nil1(vm);
 
-        const dtCrowdAgent *ag = h->crowd->getAgent((int)args[0].asDouble());
+        double idd = 0.0;
+        if (!read_number_arg(args[0], &idd, "NavCrowd.getPosition()", 1)) return push_nil1(vm);
+        const dtCrowdAgent *ag = h->crowd->getAgent((int)idd);
         if (!ag || !ag->active) return push_nil1(vm);
 
         Vector3 pos = {ag->npos[0], ag->npos[1], ag->npos[2]};
@@ -165,7 +183,9 @@ namespace RecastBindings
         NavCrowdHandle *h = require_crowd(instance, "NavCrowd.getVelocity()");
         if (!h) return push_nil1(vm);
 
-        const dtCrowdAgent *ag = h->crowd->getAgent((int)args[0].asDouble());
+        double idd = 0.0;
+        if (!read_number_arg(args[0], &idd, "NavCrowd.getVelocity()", 1)) return push_nil1(vm);
+        const dtCrowdAgent *ag = h->crowd->getAgent((int)idd);
         if (!ag || !ag->active) return push_nil1(vm);
 
         Vector3 vel = {ag->vel[0], ag->vel[1], ag->vel[2]};
@@ -178,7 +198,9 @@ namespace RecastBindings
         if (argCount != 1) { Error("NavCrowd.isAgentActive(id)"); return push_nil1(vm); }
         NavCrowdHandle *h = require_crowd(instance, "NavCrowd.isAgentActive()");
         if (!h) { vm->pushBool(false); return 1; }
-        const dtCrowdAgent *ag = h->crowd->getAgent((int)args[0].asDouble());
+        double idd = 0.0;
+        if (!read_number_arg(args[0], &idd, "NavCrowd.isAgentActive()", 1)) return push_nil1(vm);
+        const dtCrowdAgent *ag = h->crowd->getAgent((int)idd);
         vm->pushBool(ag && ag->active);
         return 1;
     }
@@ -207,8 +229,8 @@ namespace RecastBindings
     // ── Registration ─────────────────────────────────────────
     void register_crowd(Interpreter &vm)
     {
-        g_navCrowdClass = vm.addNativeClass("NavCrowd",
-            crowd_ctor, crowd_dtor, sizeof(void *));
+        g_navCrowdClass = vm.registerNativeClass("NavCrowd",
+            crowd_ctor, crowd_dtor, -1, false);
 
         vm.addNativeMethod(g_navCrowdClass, "addAgent",       crowd_add_agent);
         vm.addNativeMethod(g_navCrowdClass, "removeAgent",    crowd_remove_agent);

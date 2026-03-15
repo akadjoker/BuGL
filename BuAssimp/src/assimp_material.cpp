@@ -14,8 +14,6 @@ namespace AssimpBindings
     {
         (void)vm;
         MaterialHandle *h = (MaterialHandle *)instance;
-        if (!h) return;
-        h->owner->release();
         delete h;
     }
 
@@ -121,9 +119,41 @@ namespace AssimpBindings
         MaterialHandle *h = require_material(instance, "AssimpMaterial.getTextureCount()");
         if (!h) return push_nil1(vm);
         int type = 1; // default: diffuse
-        if (argCount > 0 && args[0].isNumber()) type = (int)args[0].asDouble();
+        if (argCount > 0)
+        {
+            double typed = 0.0;
+            if (!read_number_arg(args[0], &typed, "AssimpMaterial.getTextureCount()", 1))
+                return push_nil1(vm);
+            type = (int)typed;
+        }
         unsigned int count = h->mat->GetTextureCount((aiTextureType)type);
         vm->pushInt((int)count);
+        return 1;
+    }
+
+    // hasTexture(type [, index=0]) -> bool
+    static int material_has_texture(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount < 1) { Error("AssimpMaterial.hasTexture(type [, index])"); return push_nil1(vm); }
+        MaterialHandle *h = require_material(instance, "AssimpMaterial.hasTexture()");
+        if (!h) return push_nil1(vm);
+
+        double typeD = 0.0;
+        if (!read_number_arg(args[0], &typeD, "AssimpMaterial.hasTexture()", 1))
+            return push_nil1(vm);
+
+        int index = 0;
+        if (argCount > 1)
+        {
+            double idxD = 0.0;
+            if (!read_number_arg(args[1], &idxD, "AssimpMaterial.hasTexture()", 2))
+                return push_nil1(vm);
+            index = (int)idxD;
+        }
+
+        aiString path;
+        bool ok = (h->mat->GetTexture((aiTextureType)(int)typeD, (unsigned int)index, &path) == AI_SUCCESS);
+        vm->pushBool(ok);
         return 1;
     }
 
@@ -133,14 +163,154 @@ namespace AssimpBindings
         if (argCount < 1) { Error("AssimpMaterial.getTexturePath(type [, index])"); return push_nil1(vm); }
         MaterialHandle *h = require_material(instance, "AssimpMaterial.getTexturePath()");
         if (!h) return push_nil1(vm);
-        int type  = (int)args[0].asDouble();
-        int index = (argCount > 1 && args[1].isNumber()) ? (int)args[1].asDouble() : 0;
+
+        double typeD = 0.0;
+        if (!read_number_arg(args[0], &typeD, "AssimpMaterial.getTexturePath()", 1))
+            return push_nil1(vm);
+
+        int index = 0;
+        if (argCount > 1)
+        {
+            double idxD = 0.0;
+            if (!read_number_arg(args[1], &idxD, "AssimpMaterial.getTexturePath()", 2))
+                return push_nil1(vm);
+            index = (int)idxD;
+        }
+
+        int type = (int)typeD;
         aiString path;
         if (h->mat->GetTexture((aiTextureType)type, (unsigned int)index, &path) != AI_SUCCESS)
         {
             vm->pushString("");
             return 1;
         }
+        vm->pushString(path.C_Str());
+        return 1;
+    }
+
+    // getFirstTexturePath(type) -> string
+    static int material_get_first_texture_path(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpMaterial.getFirstTexturePath(type)"); return push_nil1(vm); }
+        MaterialHandle *h = require_material(instance, "AssimpMaterial.getFirstTexturePath()");
+        if (!h) return push_nil1(vm);
+
+        double typeD = 0.0;
+        if (!read_number_arg(args[0], &typeD, "AssimpMaterial.getFirstTexturePath()", 1))
+            return push_nil1(vm);
+
+        aiString path;
+        if (h->mat->GetTexture((aiTextureType)(int)typeD, 0u, &path) != AI_SUCCESS)
+        {
+            vm->pushString("");
+            return 1;
+        }
+
+        vm->pushString(path.C_Str());
+        return 1;
+    }
+
+    // getTexturePaths(type) -> array<string>
+    static int material_get_texture_paths(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpMaterial.getTexturePaths(type)"); return push_nil1(vm); }
+        MaterialHandle *h = require_material(instance, "AssimpMaterial.getTexturePaths()");
+        if (!h) return push_nil1(vm);
+
+        double typeD = 0.0;
+        if (!read_number_arg(args[0], &typeD, "AssimpMaterial.getTexturePaths()", 1))
+            return push_nil1(vm);
+
+        aiTextureType type = (aiTextureType)(int)typeD;
+        unsigned int count = h->mat->GetTextureCount(type);
+
+        Value arr = vm->makeArray();
+        ArrayInstance *a = arr.as.array;
+        a->values.reserve(count);
+        for (unsigned int i = 0; i < count; ++i)
+        {
+            aiString path;
+            if (h->mat->GetTexture(type, i, &path) == AI_SUCCESS)
+                a->values.push(vm->makeString(path.C_Str()));
+            else
+                a->values.push(vm->makeString(""));
+        }
+
+        vm->push(arr);
+        return 1;
+    }
+
+    static int material_get_diffuse_texture_path(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        MaterialHandle *h = require_material(instance, "AssimpMaterial.getDiffuseTexturePath()");
+        if (!h) return push_nil1(vm);
+
+        int index = 0;
+        if (argCount > 0)
+        {
+            double idxD = 0.0;
+            if (!read_number_arg(args[0], &idxD, "AssimpMaterial.getDiffuseTexturePath()", 1))
+                return push_nil1(vm);
+            index = (int)idxD;
+        }
+
+        aiString path;
+        if (h->mat->GetTexture(aiTextureType_DIFFUSE, (unsigned int)index, &path) != AI_SUCCESS)
+        {
+            vm->pushString("");
+            return 1;
+        }
+
+        vm->pushString(path.C_Str());
+        return 1;
+    }
+
+    static int material_get_normal_texture_path(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        MaterialHandle *h = require_material(instance, "AssimpMaterial.getNormalTexturePath()");
+        if (!h) return push_nil1(vm);
+
+        int index = 0;
+        if (argCount > 0)
+        {
+            double idxD = 0.0;
+            if (!read_number_arg(args[0], &idxD, "AssimpMaterial.getNormalTexturePath()", 1))
+                return push_nil1(vm);
+            index = (int)idxD;
+        }
+
+        aiString path;
+        if (h->mat->GetTexture(aiTextureType_NORMALS, (unsigned int)index, &path) != AI_SUCCESS)
+        {
+            vm->pushString("");
+            return 1;
+        }
+
+        vm->pushString(path.C_Str());
+        return 1;
+    }
+
+    static int material_get_emissive_texture_path(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        MaterialHandle *h = require_material(instance, "AssimpMaterial.getEmissiveTexturePath()");
+        if (!h) return push_nil1(vm);
+
+        int index = 0;
+        if (argCount > 0)
+        {
+            double idxD = 0.0;
+            if (!read_number_arg(args[0], &idxD, "AssimpMaterial.getEmissiveTexturePath()", 1))
+                return push_nil1(vm);
+            index = (int)idxD;
+        }
+
+        aiString path;
+        if (h->mat->GetTexture(aiTextureType_EMISSIVE, (unsigned int)index, &path) != AI_SUCCESS)
+        {
+            vm->pushString("");
+            return 1;
+        }
+
         vm->pushString(path.C_Str());
         return 1;
     }
@@ -156,7 +326,13 @@ namespace AssimpBindings
         vm.addNativeMethod(g_materialClass, "getOpacity",        material_get_opacity);
         vm.addNativeMethod(g_materialClass, "getShininess",      material_get_shininess);
         vm.addNativeMethod(g_materialClass, "getTextureCount",   material_get_texture_count);
+        vm.addNativeMethod(g_materialClass, "hasTexture",        material_has_texture);
         vm.addNativeMethod(g_materialClass, "getTexturePath",    material_get_texture_path);
+        vm.addNativeMethod(g_materialClass, "getFirstTexturePath", material_get_first_texture_path);
+        vm.addNativeMethod(g_materialClass, "getTexturePaths",   material_get_texture_paths);
+        vm.addNativeMethod(g_materialClass, "getDiffuseTexturePath", material_get_diffuse_texture_path);
+        vm.addNativeMethod(g_materialClass, "getNormalTexturePath", material_get_normal_texture_path);
+        vm.addNativeMethod(g_materialClass, "getEmissiveTexturePath", material_get_emissive_texture_path);
     }
 
 } // namespace AssimpBindings

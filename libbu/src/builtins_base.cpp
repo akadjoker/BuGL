@@ -2,6 +2,7 @@
 #include "interpreter.hpp"
 #include "platform.hpp"
 #include "utils.hpp"
+#include <iostream>
 #include <string>
 
 int native_print_stack(Interpreter *vm, int argCount, Value *args)
@@ -247,20 +248,20 @@ int native_input(Interpreter *vm, int argCount, Value *args)
 {
   if (argCount > 0 && args[0].isString())
   {
-    printf("%s", args[0].asStringChars());
+    OsPrintf("%s", args[0].asStringChars());
+    std::cout.flush();
   }
 
-  char buffer[1024];
-  if (fgets(buffer, sizeof(buffer), stdin) != NULL)
+  std::string line;
+  if (std::getline(std::cin, line))
   {
-    size_t length = strlen(buffer);
-
-    // Remove o \n do final
-    if (length > 0 && buffer[length - 1] == '\n')
+    // Normalize CRLF on Windows consoles/pipes.
+    if (!line.empty() && line.back() == '\r')
     {
-      buffer[length - 1] = '\0';
+      line.pop_back();
     }
-    vm->push(vm->makeString(buffer));
+
+    vm->push(vm->makeString(line.c_str()));
     return 1;
   }
 

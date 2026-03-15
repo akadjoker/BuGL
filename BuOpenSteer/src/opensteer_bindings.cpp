@@ -8,6 +8,7 @@ namespace OpenSteerBindings
 
         register_agent(vm);
         register_obstacle(vm);
+        register_pathway(vm);
 
         ModuleBuilder module = vm.addModule("OpenSteer");
         module.addInt("SEEN_FROM_OUTSIDE", (int)OpenSteer::AbstractObstacle::outside)
@@ -17,5 +18,9 @@ namespace OpenSteerBindings
 
     void cleanup()
     {
+        g_vector3Def = nullptr;
+        g_agentClass = nullptr;
+        g_sphereObstacleClass = nullptr;
+        g_pathwayClass = nullptr;
     }
 }

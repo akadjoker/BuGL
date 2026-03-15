@@ -1,0 +1,47 @@
+require "EnTT";
+
+import EnTT;
+using EnTT;
+
+print("=== EnTT Basic Demo ===");
+
+var world = ECSWorld();
+print(format("world valid={} count={}", world.isValid(), world.getEntityCount()));
+
+var player = world.createEntity("player");
+player.setTransform2D(10.0, 5.0, 30.0, 1.0, 1.0);
+
+var enemy = world.createEntity("enemy");
+enemy.setPosition(-3.0, 2.5);
+enemy.setRotation(-15.0);
+enemy.setScale(1.2, 0.8);
+
+print(format("count after spawn={}", world.getEntityCount()));
+print(format("player id={} tag={}", player.getId(), player.getTag()));
+
+var (px, py) = player.getPosition();
+print(format("player pos=({}, {})", px, py));
+
+var ids = world.getEntityIds();
+print(format("all ids={} len={}", ids, len(ids)));
+
+var foundEnemy = world.findByTag("enemy");
+if (foundEnemy != nil)
+{
+    var (ex, ey) = foundEnemy.getPosition();
+    print(format("enemy id={} pos=({}, {})", foundEnemy.getId(), ex, ey));
+}
+
+var removed = world.destroyEntity(enemy);
+print(format("destroy enemy={} aliveEnemy={} count={}", removed, world.isAlive(enemy), world.getEntityCount()));
+
+player.destroy();
+print(format("count after player.destroy()={}", world.getEntityCount()));
+
+world.clear();
+print(format("count after clear={}", world.getEntityCount()));
+
+world.destroy();
+print(format("world valid after destroy={}", world.isValid()));
+
+print("=== End EnTT Demo ===");

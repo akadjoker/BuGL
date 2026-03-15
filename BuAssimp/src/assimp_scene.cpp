@@ -2,6 +2,18 @@
 
 namespace AssimpBindings
 {
+    static const aiNode *find_node_by_name_recursive(const aiNode *n, const char *name)
+    {
+        if (!n || !name) return nullptr;
+        if (strcmp(n->mName.C_Str(), name) == 0) return n;
+        for (unsigned int i = 0; i < n->mNumChildren; ++i)
+        {
+            const aiNode *hit = find_node_by_name_recursive(n->mChildren[i], name);
+            if (hit) return hit;
+        }
+        return nullptr;
+    }
+
     static void *scene_ctor(Interpreter *vm, int argCount, Value *args)
     {
         (void)vm; (void)argCount; (void)args;
@@ -12,7 +24,7 @@ namespace AssimpBindings
     {
         (void)vm;
         SceneHandle *h = (SceneHandle *)instance;
-        if (h) h->release();
+        if (h) delete h;
     }
 
     // load(path [, flags]) -> bool
@@ -24,7 +36,12 @@ namespace AssimpBindings
         const char *path = nullptr;
         if (!read_string_arg(args[0], &path, "AssimpScene.load()", 1)) return push_nil1(vm);
         unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_GenNormals | aiProcess_FlipUVs;
-        if (argCount > 1 && args[1].isNumber()) flags = (unsigned int)args[1].asDouble();
+        if (argCount > 1)
+        {
+            double flagsD = 0.0;
+            if (!read_number_arg(args[1], &flagsD, "AssimpScene.load()", 2)) return push_nil1(vm);
+            flags = (unsigned int)flagsD;
+        }
         h->destroy();
         h->load(path, flags);
         vm->pushBool(h->valid);
@@ -103,6 +120,49 @@ namespace AssimpBindings
         return push_node(vm, h, h->scene->mRootNode) ? 1 : push_nil1(vm);
     }
 
+    // findNodeByName(name) -> AssimpNode | nil
+    static int scene_find_node_by_name(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpScene.findNodeByName(name)"); return push_nil1(vm); }
+        SceneHandle *h = require_scene(instance, "AssimpScene.findNodeByName()");
+        if (!h) return push_nil1(vm);
+        const char *name = nullptr;
+        if (!read_string_arg(args[0], &name, "AssimpScene.findNodeByName()", 1)) return push_nil1(vm);
+
+        const aiNode *node = find_node_by_name_recursive(h->scene->mRootNode, name);
+        if (!node) return push_nil1(vm);
+        return push_node(vm, h, node) ? 1 : push_nil1(vm);
+    }
+
+    // getAnimationCount() -> int
+    static int scene_get_animation_count(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)argCount; (void)args;
+        SceneHandle *h = require_scene(instance, "AssimpScene.getAnimationCount()");
+        if (!h) return push_nil1(vm);
+        vm->pushInt((int)h->scene->mNumAnimations);
+        return 1;
+    }
+
+    // getAnimation(idx) -> AssimpAnimation
+    static int scene_get_animation(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpScene.getAnimation(idx)"); return push_nil1(vm); }
+        SceneHandle *h = require_scene(instance, "AssimpScene.getAnimation()");
+        if (!h) return push_nil1(vm);
+
+        double idxd = 0.0;
+        if (!read_number_arg(args[0], &idxd, "AssimpScene.getAnimation()", 1)) return push_nil1(vm);
+        int idx = (int)idxd;
+        if (idx < 0 || idx >= (int)h->scene->mNumAnimations)
+        {
+            Error("AssimpScene.getAnimation(): index %d out of range (0..%d)", idx, (int)h->scene->mNumAnimations - 1);
+            return push_nil1(vm);
+        }
+
+        return push_animation(vm, h, h->scene->mAnimations[idx]) ? 1 : push_nil1(vm);
+    }
+
     // getError() -> string
     static int scene_get_error(Interpreter *vm, void *instance, int argCount, Value *args)
     {
@@ -133,6 +193,9 @@ namespace AssimpBindings
         vm.addNativeMethod(g_sceneClass, "getMesh",          scene_get_mesh);
         vm.addNativeMethod(g_sceneClass, "getMaterial",      scene_get_material);
         vm.addNativeMethod(g_sceneClass, "getRootNode",      scene_get_root_node);
+        vm.addNativeMethod(g_sceneClass, "findNodeByName",   scene_find_node_by_name);
+        vm.addNativeMethod(g_sceneClass, "getAnimationCount",scene_get_animation_count);
+        vm.addNativeMethod(g_sceneClass, "getAnimation",     scene_get_animation);
         vm.addNativeMethod(g_sceneClass, "getError",         scene_get_error);
         vm.addNativeMethod(g_sceneClass, "free",             scene_free);
     }

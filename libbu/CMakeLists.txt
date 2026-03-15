@@ -20,6 +20,33 @@ file(GLOB SOURCES "src/*.cpp")
 # ============================================
 add_library(libbu STATIC ${SOURCES})
 
+set(BUGL_VERSION_STRING "${CMAKE_PROJECT_VERSION}")
+if(NOT BUGL_VERSION_STRING)
+    set(BUGL_VERSION_STRING "${PROJECT_VERSION}")
+endif()
+if(NOT BUGL_VERSION_STRING)
+    set(BUGL_VERSION_STRING "0.0.0")
+endif()
+
+set(BUGL_VERSION_GIT "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD
+        OUTPUT_VARIABLE BUGL_VERSION_GIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT BUGL_VERSION_GIT)
+        set(BUGL_VERSION_GIT "unknown")
+    endif()
+endif()
+
+target_compile_definitions(libbu PUBLIC
+    BUGL_VERSION_STRING=\"${BUGL_VERSION_STRING}\"
+    BUGL_VERSION_GIT=\"${BUGL_VERSION_GIT}\"
+)
+
 # Enable PIC so libbu can be linked into shared libraries (plugins)
 set_target_properties(libbu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

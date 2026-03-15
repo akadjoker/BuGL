@@ -1,0 +1,336 @@
+// ================================================================
+// BuGL Demo — Recast NavMesh + Crowd (top-down)
+// LMB   -> novo alvo no mouse
+// SPACE -> alterna entre dois alvos fixos
+// ESC   -> sair
+// ================================================================
+
+require "Recast";
+
+import SDL;    using SDL;
+import OpenGl; using OpenGl;
+import math;   using math;
+import Recast; using Recast;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+if (!Init("BuGL Recast NavMesh Demo", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glDisable(GL_DEPTH_TEST);
+glClearColor(0.06, 0.07, 0.10, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+
+var PI = 3.141592653589793;
+
+// Grid world (X,Z plane)
+var gridCols = 64;
+var gridRows = 64;
+var cellSize = 0.5;
+var worldMinX = 0.0 - (gridCols * cellSize * 0.5);
+var worldMinZ = 0.0 - (gridRows * cellSize * 0.5);
+
+var navVerts = [];
+var navTris = [];
+
+var viewHalfH = 16.0;
+var viewHalfW = viewHalfH * (GetWidth() / GetHeight());
+
+def vertexIndex(ix, iz)
+{
+    return iz * (gridCols + 1) + ix;
+}
+
+def isBlockedCell(cx, cz)
+{
+    // Bloco central para forcar desvio do path
+    if (cx > -2.5 && cx < 2.5 && cz > -2.5 && cz < 2.5) return true;
+
+    // Parede vertical com "porta" ao meio
+    if (cx > 6.0 && cx < 7.5)
+    {
+        if (cz < -2.0 || cz > 2.0) return true;
+    }
+
+    return false;
+}
+
+def buildNavInput()
+{
+    navVerts = [];
+    navTris = [];
+
+    for (var iz = 0; iz <= gridRows; iz = iz + 1)
+    {
+        for (var ix = 0; ix <= gridCols; ix = ix + 1)
+        {
+            var x = worldMinX + ix * cellSize;
+            var z = worldMinZ + iz * cellSize;
+            navVerts.push(x);
+            navVerts.push(0.0);
+            navVerts.push(z);
+        }
+    }
+
+    for (var iz2 = 0; iz2 < gridRows; iz2 = iz2 + 1)
+    {
+        for (var ix2 = 0; ix2 < gridCols; ix2 = ix2 + 1)
+        {
+            var cx = worldMinX + (ix2 + 0.5) * cellSize;
+            var cz = worldMinZ + (iz2 + 0.5) * cellSize;
+            if (isBlockedCell(cx, cz)) continue;
+
+            var a = vertexIndex(ix2, iz2);
+            var b = vertexIndex(ix2 + 1, iz2);
+            var c = vertexIndex(ix2 + 1, iz2 + 1);
+            var d = vertexIndex(ix2, iz2 + 1);
+
+            // winding CCW visto de cima (Y+)
+            navTris.push(a); navTris.push(d); navTris.push(b);
+            navTris.push(b); navTris.push(d); navTris.push(c);
+        }
+    }
+}
+
+def distanceXZ(a, b)
+{
+    var dx = a.x - b.x;
+    var dz = a.z - b.z;
+    return sqrt(dx * dx + dz * dz);
+}
+
+def screenToWorldX(px)
+{
+    var t = px / GetWidth();
+    var outX = (t * 2.0 - 1.0) * viewHalfW;
+    return outX;
+}
+
+def screenToWorldZ(py)
+{
+    var t = (GetHeight() - py) / GetHeight();
+    var outZ = (t * 2.0 - 1.0) * viewHalfH;
+    return outZ;
+}
+
+def drawCircle2D(cx, cy, r, segs)
+{
+    glBegin(GL_LINE_LOOP);
+    for (var i = 0; i < segs; i = i + 1)
+    {
+        var a = (i / segs) * PI * 2.0;
+        glVertex2f(cx + cos(a) * r, cy + sin(a) * r);
+    }
+    glEnd();
+}
+
+buildNavInput();
+print("Recast demo input: verts=" + (len(navVerts) / 3) + " tris=" + (len(navTris) / 3));
+
+var nav = NavMesh();
+var built = nav.build(navVerts, navTris, 0.35, 0.2, 1.8, 0.35, 0.8, 45.0);
+if (!built || !nav.isValid())
+{
+    print("NavMesh.build falhou.");
+    Close();
+    return;
+}
+
+var rawStart = Vector3(-13.0, 0.0, -12.5);
+var rawGoalA = Vector3(12.0, 0.0, 11.5);
+var rawGoalB = Vector3(-11.0, 0.0, 10.0);
+
+var startPos = nav.findNearestPoint(rawStart, 3.0, 6.0, 3.0);
+var goalA = nav.findNearestPoint(rawGoalA, 3.0, 6.0, 3.0);
+var goalB = nav.findNearestPoint(rawGoalB, 3.0, 6.0, 3.0);
+
+if (startPos == nil || goalA == nil || goalB == nil)
+{
+    print("findNearestPoint devolveu nil (start/goal fora do navmesh).\n");
+    nav.destroy();
+    Close();
+    return;
+}
+
+var crowd = NavCrowd(nav, 24);
+var agentId = crowd.addAgent(startPos, 3.2, 8.0, 0.35, 1.8);
+if (agentId < 0)
+{
+    print("NavCrowd.addAgent falhou.");
+    crowd.destroy();
+    nav.destroy();
+    Close();
+    return;
+}
+
+var goalPos = goalA;
+var movingToA = true;
+var setOk = crowd.setTarget(agentId, goalPos);
+print("Target inicial: " + setOk + " | agentId=" + agentId);
+
+var agentPos = startPos;
+var pathPoints = nav.findPath(startPos, goalPos, 2.0, 4.0, 2.0);
+var repathTimer = 0.0;
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+
+    if (IsKeyDown(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_SPACE))
+    {
+        if (movingToA)
+        {
+            goalPos = goalB;
+            movingToA = false;
+        }
+        else
+        {
+            goalPos = goalA;
+            movingToA = true;
+        }
+        crowd.setTarget(agentId, goalPos);
+        pathPoints = nav.findPath(agentPos, goalPos, 2.0, 4.0, 2.0);
+    }
+
+    if (IsMousePressed(MOUSE_LEFT))
+    {
+        var tx = screenToWorldX(GetMouseX());
+        var tz = screenToWorldZ(GetMouseY());
+        var clicked = Vector3(tx, 0.0, tz);
+        var nearest = nav.findNearestPoint(clicked, 3.0, 6.0, 3.0);
+        if (nearest != nil)
+        {
+            goalPos = nearest;
+            crowd.setTarget(agentId, goalPos);
+            pathPoints = nav.findPath(agentPos, goalPos, 2.0, 4.0, 2.0);
+            print("Novo alvo mouse: " + goalPos.x + ", " + goalPos.z);
+        }
+    }
+
+    crowd.update(dt);
+
+    var p = crowd.getPosition(agentId);
+    if (p != nil) agentPos = p;
+
+    if (distanceXZ(agentPos, goalPos) < 0.55)
+    {
+        if (movingToA)
+        {
+            goalPos = goalB;
+            movingToA = false;
+        }
+        else
+        {
+            goalPos = goalA;
+            movingToA = true;
+        }
+        crowd.setTarget(agentId, goalPos);
+        pathPoints = nav.findPath(agentPos, goalPos, 2.0, 4.0, 2.0);
+    }
+
+    repathTimer = repathTimer + dt;
+    if (repathTimer >= 0.75)
+    {
+        repathTimer = 0.0;
+        pathPoints = nav.findPath(agentPos, goalPos, 2.0, 4.0, 2.0);
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    viewHalfW = viewHalfH * (GetWidth() / GetHeight());
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0.0 - viewHalfW, viewHalfW, 0.0 - viewHalfH, viewHalfH, -1.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    // Navmesh (triangles walkables)
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.20, 0.36, 0.62, 0.35);
+    glBegin(GL_TRIANGLES);
+    for (var ti = 0; ti < len(navTris); ti = ti + 3)
+    {
+        var ia = navTris[ti + 0];
+        var ib = navTris[ti + 1];
+        var ic = navTris[ti + 2];
+
+        glVertex2f(navVerts[ia * 3 + 0], navVerts[ia * 3 + 2]);
+        glVertex2f(navVerts[ib * 3 + 0], navVerts[ib * 3 + 2]);
+        glVertex2f(navVerts[ic * 3 + 0], navVerts[ic * 3 + 2]);
+    }
+    glEnd();
+
+    // Obstaculos visuais (apenas debug)
+    glColor4f(0.85, 0.25, 0.25, 0.30);
+    glBegin(GL_QUADS);
+    glVertex2f(-2.5, -2.5); glVertex2f( 2.5, -2.5); glVertex2f( 2.5,  2.5); glVertex2f(-2.5,  2.5);
+    glVertex2f( 6.0, -16.0); glVertex2f( 7.5, -16.0); glVertex2f( 7.5, -2.0); glVertex2f( 6.0, -2.0);
+    glVertex2f( 6.0,  2.0);  glVertex2f( 7.5,  2.0);  glVertex2f( 7.5, 16.0);  glVertex2f( 6.0, 16.0);
+    glEnd();
+
+    // Path do agente
+    if (pathPoints != nil && len(pathPoints) > 1)
+    {
+        glLineWidth(3.0);
+        glColor3f(0.98, 0.91, 0.26);
+        glBegin(GL_LINE_STRIP);
+        for (var pi = 0; pi < len(pathPoints); pi = pi + 1)
+        {
+            var pp = pathPoints[pi];
+            glVertex2f(pp.x, pp.z);
+        }
+        glEnd();
+
+        glPointSize(5.0);
+        glBegin(GL_POINTS);
+        for (var pj = 0; pj < len(pathPoints); pj = pj + 1)
+        {
+            var pw = pathPoints[pj];
+            glVertex2f(pw.x, pw.z);
+        }
+        glEnd();
+    }
+
+    // Goal markers
+    glPointSize(10.0);
+    glColor3f(0.95, 0.45, 0.20);
+    glBegin(GL_POINTS);
+    glVertex2f(goalPos.x, goalPos.z);
+    glEnd();
+
+    glPointSize(8.0);
+    glColor3f(0.25, 0.95, 0.35);
+    glBegin(GL_POINTS);
+    glVertex2f(goalA.x, goalA.z);
+    glVertex2f(goalB.x, goalB.z);
+    glEnd();
+
+    // Agent marker
+    glLineWidth(2.0);
+    glColor3f(0.20, 1.0, 0.90);
+    drawCircle2D(agentPos.x, agentPos.z, 0.35, 24);
+
+    // Direcao de velocidade
+    var vel = crowd.getVelocity(agentId);
+    if (vel != nil)
+    {
+        glLineWidth(2.0);
+        glColor3f(0.95, 0.95, 0.95);
+        glBegin(GL_LINES);
+        glVertex2f(agentPos.x, agentPos.z);
+        glVertex2f(agentPos.x + vel.x * 0.35, agentPos.z + vel.z * 0.35);
+        glEnd();
+    }
+
+    Flip();
+}
+
+crowd.destroy();
+nav.destroy();
+Close();

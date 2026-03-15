@@ -1,0 +1,71 @@
+// ================================================================
+// Demo: Assimp animation/bones inspection + transform sampling
+// ================================================================
+
+require "Assimp";
+import Assimp; using Assimp;
+
+var scene = AssimpScene();
+var flags = Triangulate | GenSmoothNormals | JoinIdenticalVertices | FlipUVs;
+
+var modelPath = "assets/WusonBlitz.b3d";
+if (!scene.load(modelPath, flags))
+{
+    modelPath = "../assets/WusonBlitz.b3d";
+    if (!scene.load(modelPath, flags))
+    {
+        print("load failed: " + scene.getError());
+        return;
+    }
+}
+
+print("Assimp animation demo");
+print("meshes=" + scene.getMeshCount() + " mats=" + scene.getMaterialCount());
+
+// Bones per mesh
+for (var i = 0; i < scene.getMeshCount(); i = i + 1)
+{
+    var m = scene.getMesh(i);
+    var bc = m.getBoneCount();
+    print("mesh[" + i + "] name=" + m.getName() + " bones=" + bc);
+    if (bc > 0)
+    {
+        var bn = m.getBoneName(0);
+        var bwc = m.getBoneWeightCount(0);
+        print("  bone0=" + bn + " weights=" + bwc);
+        if (bwc > 0)
+        {
+            var (vid, w) = m.getBoneWeight(0, 0);
+            print("  bone0 weight0 -> vertex=" + vid + " weight=" + w);
+        }
+    }
+}
+
+var animCount = scene.getAnimationCount();
+print("animations=" + animCount);
+
+if (animCount > 0)
+{
+    var anim = scene.getAnimation(0);
+    print("anim0 name=" + anim.getName());
+    print("  durationTicks=" + anim.getDurationTicks());
+    print("  ticksPerSecond=" + anim.getTicksPerSecond());
+    print("  durationSeconds=" + anim.getDurationSeconds());
+    print("  channels=" + anim.getChannelCount());
+
+    if (anim.getChannelCount() > 0)
+    {
+        var ch = anim.getChannel(0);
+        var nodeName = ch.getNodeName();
+        print("  ch0 node=" + nodeName);
+        print("    posKeys=" + ch.getPositionKeyCount() + " rotKeys=" + ch.getRotationKeyCount() + " sclKeys=" + ch.getScalingKeyCount());
+
+        var m0 = anim.sampleNodeTransform(nodeName, 0.0, true);
+        var m1 = anim.sampleNodeTransform(nodeName, 0.2, true);
+        print("    sample t0 valid=" + (m0 != nil));
+        print("    sample t1 valid=" + (m1 != nil));
+    }
+}
+
+scene.free();
+print("done");

@@ -13,13 +13,19 @@ namespace ImGuiBindings
             return 0;
         }
 
+        if (argCount == 1 && args[0].isNumber())
+        {
+            ImGui::SameLine((float)args[0].asNumber());
+            return 0;
+        }
+
         if (argCount == 2 && args[0].isNumber() && args[1].isNumber())
         {
             ImGui::SameLine((float)args[0].asNumber(), (float)args[1].asNumber());
             return 0;
         }
 
-        vm->runtimeError("ImGui.SameLine expects () or (offsetFromStartX, spacing)");
+        vm->runtimeError("ImGui.SameLine expects (), (offsetFromStartX), or (offsetFromStartX, spacing)");
         return 0;
     }
 

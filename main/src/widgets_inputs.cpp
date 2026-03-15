@@ -1,5 +1,8 @@
 #include "bindings_internal.hpp"
 
+#include <string>
+#include <vector>
+
 namespace ImGuiBindings
 {
     int SmallButton(Interpreter *vm, int argCount, Value *args)
@@ -234,6 +237,79 @@ namespace ImGuiBindings
         return 2;
     }
 
+    int InputText(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.InputText()"))
+            return push_nils(vm, 2);
+
+        if (argCount < 2 || argCount > 4 || !args[0].isString() || !args[1].isString())
+        {
+            vm->runtimeError("ImGui.InputText expects (label, value[, maxChars[, flags]])");
+            return push_nils(vm, 2);
+        }
+
+        int maxChars = 256;
+        int flags = 0;
+        if (!optional_int_arg(args, 2, argCount, 256, &maxChars) ||
+            !optional_int_arg(args, 3, argCount, 0, &flags))
+        {
+            vm->runtimeError("ImGui.InputText expects (label, value[, maxChars[, flags]])");
+            return push_nils(vm, 2);
+        }
+
+        if (maxChars < 1)
+            maxChars = 1;
+
+        std::string text = args[1].asStringChars();
+        if ((int)text.size() > maxChars)
+            text.resize((size_t)maxChars);
+
+        std::vector<char> buffer((size_t)maxChars + 1, '\0');
+        for (size_t i = 0; i < text.size(); ++i)
+            buffer[i] = text[i];
+
+        const bool changed = ImGui::InputText(args[0].asStringChars(), buffer.data(), buffer.size(), (ImGuiInputTextFlags)flags);
+
+        vm->pushBool(changed);
+        vm->push(vm->makeString(buffer.data()));
+        return 2;
+    }
+
+    int Combo(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.Combo()"))
+            return push_nils(vm, 2);
+
+        if (argCount < 3 || !args[0].isString() || !args[1].isNumber())
+        {
+            vm->runtimeError("ImGui.Combo expects (label, currentIndex, item1, item2[, ...])");
+            return push_nils(vm, 2);
+        }
+
+        std::vector<const char *> items;
+        items.reserve((size_t)(argCount - 2));
+        for (int i = 2; i < argCount; ++i)
+        {
+            if (!args[i].isString())
+            {
+                vm->runtimeError("ImGui.Combo expects only strings for items");
+                return push_nils(vm, 2);
+            }
+            items.push_back(args[i].asStringChars());
+        }
+
+        int current = (int)args[1].asNumber();
+        if (current < 0)
+            current = 0;
+        if (!items.empty() && current >= (int)items.size())
+            current = (int)items.size() - 1;
+
+        const bool changed = ImGui::Combo(args[0].asStringChars(), &current, items.data(), (int)items.size());
+        vm->pushBool(changed);
+        vm->pushInt(current);
+        return 2;
+    }
+
     int ColorEdit3(Interpreter *vm, int argCount, Value *args)
     {
         if (!ensure_context(vm, "ImGui.ColorEdit3()"))
@@ -300,6 +376,8 @@ namespace ImGuiBindings
               .addFunction("SliderInt", SliderInt, -1)
               .addFunction("InputFloat", InputFloat, -1)
               .addFunction("InputInt", InputInt, -1)
+              .addFunction("InputText", InputText, -1)
+              .addFunction("Combo", Combo, -1)
               .addFunction("ColorEdit3", ColorEdit3, -1)
               .addFunction("ColorEdit4", ColorEdit4, -1)
               .addInt("SelectableFlags_None", (int)ImGuiSelectableFlags_None)
@@ -315,6 +393,15 @@ namespace ImGuiBindings
               .addInt("SliderFlags_Logarithmic", (int)ImGuiSliderFlags_Logarithmic)
               .addInt("SliderFlags_NoRoundToFormat", (int)ImGuiSliderFlags_NoRoundToFormat)
               .addInt("SliderFlags_NoInput", (int)ImGuiSliderFlags_NoInput)
+              .addInt("InputTextFlags_None", (int)ImGuiInputTextFlags_None)
+              .addInt("InputTextFlags_CharsDecimal", (int)ImGuiInputTextFlags_CharsDecimal)
+              .addInt("InputTextFlags_CharsHexadecimal", (int)ImGuiInputTextFlags_CharsHexadecimal)
+              .addInt("InputTextFlags_CharsUppercase", (int)ImGuiInputTextFlags_CharsUppercase)
+              .addInt("InputTextFlags_CharsNoBlank", (int)ImGuiInputTextFlags_CharsNoBlank)
+              .addInt("InputTextFlags_AutoSelectAll", (int)ImGuiInputTextFlags_AutoSelectAll)
+              .addInt("InputTextFlags_EnterReturnsTrue", (int)ImGuiInputTextFlags_EnterReturnsTrue)
+              .addInt("InputTextFlags_ReadOnly", (int)ImGuiInputTextFlags_ReadOnly)
+              .addInt("InputTextFlags_Password", (int)ImGuiInputTextFlags_Password)
               .addInt("ColorEdit_None", (int)ImGuiColorEditFlags_None)
               .addInt("ColorEdit_NoAlpha", (int)ImGuiColorEditFlags_NoAlpha)
               .addInt("ColorEdit_NoPicker", (int)ImGuiColorEditFlags_NoPicker)

@@ -40,6 +40,7 @@ var PI = 3.141592653589793;
 var RAD2DEG = 57.29577951308232;
 var pathRadius = 1.4;
 var pathPoints = [];
+var steerPath = nil;
 var walkers = [];
 var allAgents = [];
 var obstacles = [];
@@ -232,6 +233,8 @@ def drawPath()
 
 def setupPath()
 {
+    if (steerPath != nil) steerPath.destroy();
+
     pathPoints.clear();
     pathPoints.push(Vector3(-14.0, 0.6, -2.0));
     pathPoints.push(Vector3(-10.0, 0.6,  8.0));
@@ -241,6 +244,8 @@ def setupPath()
     pathPoints.push(Vector3( 12.0, 0.6, -8.0));
     pathPoints.push(Vector3(  3.0, 0.6,-12.0));
     pathPoints.push(Vector3( -8.0, 0.6,-10.0));
+
+    steerPath = SteerPathway(pathPoints, pathRadius, true);
 }
 
 def resetScene()
@@ -319,7 +324,8 @@ while (Running())
             target = pathPoints[w.waypoint];
         }
 
-        var pathSteer = agent.arrive(target, 6.0);
+        var pathSteer = agent.followPath(steerPath, 1, 0.85);
+        var stayPath = agent.stayOnPath(steerPath, 0.55);
         var separate = agent.separation(4.8, -0.55, allAgents);
         var align = agent.alignment(7.5, 0.65, allAgents);
         var cohesion = agent.cohesion(8.5, -0.20, allAgents);
@@ -328,7 +334,8 @@ while (Running())
         var wander = agent.wander(dt * 0.9);
 
         var steer = Vector3(0.0, 0.0, 0.0);
-        steer = Vector3Add(steer, Vector3Scale(pathSteer, 1.60));
+        steer = Vector3Add(steer, Vector3Scale(pathSteer, 1.55));
+        steer = Vector3Add(steer, Vector3Scale(stayPath, 1.10));
         steer = Vector3Add(steer, Vector3Scale(separate, 10.0));
         steer = Vector3Add(steer, Vector3Scale(align, 5.5));
         steer = Vector3Add(steer, Vector3Scale(cohesion, 4.0));
@@ -396,4 +403,5 @@ while (Running())
     Flip();
 }
 
+if (steerPath != nil) steerPath.destroy();
 Close();

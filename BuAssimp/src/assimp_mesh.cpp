@@ -13,8 +13,6 @@ namespace AssimpBindings
     {
         (void)vm;
         MeshHandle *h = (MeshHandle *)instance;
-        if (!h) return;
-        h->owner->release();
         delete h;
     }
 
@@ -103,7 +101,7 @@ namespace AssimpBindings
     {
         if (argCount < 1) { Error("AssimpMesh.getNormal(idx)"); return push_nil1(vm); }
         MeshHandle *h = require_mesh(instance, "AssimpMesh.getNormal()");
-        if (head -10 /media/projectos/projects/cpp/minirender/core/include/glad/glad.h || head -10>mesh->mNormals) { vm->pushNil(); vm->pushNil(); vm->pushNil(); return 3; }
+        if (!h || !h->mesh->mNormals) { vm->pushNil(); vm->pushNil(); vm->pushNil(); return 3; }
         double idxd = 0.0;
         if (!read_number_arg(args[0], &idxd, "AssimpMesh.getNormal()", 1)) return push_nil1(vm);
         int idx = (int)idxd;
@@ -137,7 +135,7 @@ namespace AssimpBindings
     {
         if (argCount < 1) { Error("AssimpMesh.getTangent(idx)"); return push_nil1(vm); }
         MeshHandle *h = require_mesh(instance, "AssimpMesh.getTangent()");
-        if (head -10 /media/projectos/projects/cpp/minirender/core/include/glad/glad.h || head -10>mesh->mTangents) { vm->pushNil(); vm->pushNil(); vm->pushNil(); return 3; }
+        if (!h || !h->mesh->mTangents) { vm->pushNil(); vm->pushNil(); vm->pushNil(); return 3; }
         double idxd = 0.0;
         if (!read_number_arg(args[0], &idxd, "AssimpMesh.getTangent()", 1)) return push_nil1(vm);
         int idx = (int)idxd;
@@ -190,7 +188,7 @@ namespace AssimpBindings
     {
         (void)argCount; (void)args;
         MeshHandle *h = require_mesh(instance, "AssimpMesh.getNormals()");
-        if (head -10 /media/projectos/projects/cpp/minirender/core/include/glad/glad.h || head -10>mesh->mNormals) return push_nil1(vm);
+        if (!h || !h->mesh->mNormals) return push_nil1(vm);
         Value arr = vm->makeArray();
         ArrayInstance *a = arr.as.array;
         a->values.reserve(h->mesh->mNumVertices * 3);
@@ -229,7 +227,7 @@ namespace AssimpBindings
     {
         (void)argCount; (void)args;
         MeshHandle *h = require_mesh(instance, "AssimpMesh.getTangents()");
-        if (head -10 /media/projectos/projects/cpp/minirender/core/include/glad/glad.h || head -10>mesh->mTangents) return push_nil1(vm);
+        if (!h || !h->mesh->mTangents) return push_nil1(vm);
         Value arr = vm->makeArray();
         ArrayInstance *a = arr.as.array;
         a->values.reserve(h->mesh->mNumVertices * 3);
@@ -262,6 +260,106 @@ namespace AssimpBindings
         return 1;
     }
 
+    static int mesh_get_bone_count(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)argCount; (void)args;
+        MeshHandle *h = require_mesh(instance, "AssimpMesh.getBoneCount()");
+        if (!h) return push_nil1(vm);
+        vm->pushInt((int)h->mesh->mNumBones);
+        return 1;
+    }
+
+    static int mesh_get_bone_name(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpMesh.getBoneName(index)"); return push_nil1(vm); }
+        MeshHandle *h = require_mesh(instance, "AssimpMesh.getBoneName()");
+        if (!h) return push_nil1(vm);
+
+        double idxd = 0.0;
+        if (!read_number_arg(args[0], &idxd, "AssimpMesh.getBoneName()", 1)) return push_nil1(vm);
+        int idx = (int)idxd;
+        if (idx < 0 || idx >= (int)h->mesh->mNumBones) return push_nil1(vm);
+
+        vm->pushString(h->mesh->mBones[idx]->mName.C_Str());
+        return 1;
+    }
+
+    static int mesh_get_bone_offset_matrix(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpMesh.getBoneOffsetMatrix(index)"); return push_nil1(vm); }
+        MeshHandle *h = require_mesh(instance, "AssimpMesh.getBoneOffsetMatrix()");
+        if (!h) return push_nil1(vm);
+
+        double idxd = 0.0;
+        if (!read_number_arg(args[0], &idxd, "AssimpMesh.getBoneOffsetMatrix()", 1)) return push_nil1(vm);
+        int idx = (int)idxd;
+        if (idx < 0 || idx >= (int)h->mesh->mNumBones) return push_nil1(vm);
+
+        return push_matrix(vm, h->mesh->mBones[idx]->mOffsetMatrix) ? 1 : push_nil1(vm);
+    }
+
+    static int mesh_get_bone_weight_count(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpMesh.getBoneWeightCount(boneIndex)"); return push_nil1(vm); }
+        MeshHandle *h = require_mesh(instance, "AssimpMesh.getBoneWeightCount()");
+        if (!h) return push_nil1(vm);
+
+        double bidxd = 0.0;
+        if (!read_number_arg(args[0], &bidxd, "AssimpMesh.getBoneWeightCount()", 1)) return push_nil1(vm);
+        int bidx = (int)bidxd;
+        if (bidx < 0 || bidx >= (int)h->mesh->mNumBones) return push_nil1(vm);
+
+        vm->pushInt((int)h->mesh->mBones[bidx]->mNumWeights);
+        return 1;
+    }
+
+    static int mesh_get_bone_weight(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 2) { Error("AssimpMesh.getBoneWeight(boneIndex, weightIndex)"); return push_nil1(vm); }
+        MeshHandle *h = require_mesh(instance, "AssimpMesh.getBoneWeight()");
+        if (!h) return push_nil1(vm);
+
+        double bidxd = 0.0, widxd = 0.0;
+        if (!read_number_arg(args[0], &bidxd, "AssimpMesh.getBoneWeight()", 1) ||
+            !read_number_arg(args[1], &widxd, "AssimpMesh.getBoneWeight()", 2))
+        {
+            return push_nil1(vm);
+        }
+        int bidx = (int)bidxd;
+        int widx = (int)widxd;
+        if (bidx < 0 || bidx >= (int)h->mesh->mNumBones) return push_nil1(vm);
+        const aiBone *b = h->mesh->mBones[bidx];
+        if (widx < 0 || widx >= (int)b->mNumWeights) return push_nil1(vm);
+
+        vm->pushInt((int)b->mWeights[widx].mVertexId);
+        vm->pushDouble((double)b->mWeights[widx].mWeight);
+        return 2;
+    }
+
+    static int mesh_get_bone_vertex_weights(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1) { Error("AssimpMesh.getBoneVertexWeights(boneIndex)"); return push_nil1(vm); }
+        MeshHandle *h = require_mesh(instance, "AssimpMesh.getBoneVertexWeights()");
+        if (!h) return push_nil1(vm);
+
+        double bidxd = 0.0;
+        if (!read_number_arg(args[0], &bidxd, "AssimpMesh.getBoneVertexWeights()", 1)) return push_nil1(vm);
+        int bidx = (int)bidxd;
+        if (bidx < 0 || bidx >= (int)h->mesh->mNumBones) return push_nil1(vm);
+        const aiBone *b = h->mesh->mBones[bidx];
+
+        Value arr = vm->makeArray();
+        ArrayInstance *a = arr.as.array;
+        a->values.reserve(b->mNumWeights * 2);
+        for (unsigned int i = 0; i < b->mNumWeights; ++i)
+        {
+            a->values.push(vm->makeInt((int)b->mWeights[i].mVertexId));
+            a->values.push(vm->makeDouble((double)b->mWeights[i].mWeight));
+        }
+        vm->push(arr);
+        return 1;
+    }
+
     void register_mesh(Interpreter &vm)
     {
         g_meshClass = vm.registerNativeClass("AssimpMesh", mesh_ctor_error, mesh_dtor, 0, false);
@@ -282,6 +380,12 @@ namespace AssimpBindings
         vm.addNativeMethod(g_meshClass, "getUVs",           mesh_get_uvs);
         vm.addNativeMethod(g_meshClass, "getTangents",      mesh_get_tangents);
         vm.addNativeMethod(g_meshClass, "getIndices",       mesh_get_indices);
+        vm.addNativeMethod(g_meshClass, "getBoneCount",     mesh_get_bone_count);
+        vm.addNativeMethod(g_meshClass, "getBoneName",      mesh_get_bone_name);
+        vm.addNativeMethod(g_meshClass, "getBoneOffsetMatrix", mesh_get_bone_offset_matrix);
+        vm.addNativeMethod(g_meshClass, "getBoneWeightCount",  mesh_get_bone_weight_count);
+        vm.addNativeMethod(g_meshClass, "getBoneWeight",       mesh_get_bone_weight);
+        vm.addNativeMethod(g_meshClass, "getBoneVertexWeights",mesh_get_bone_vertex_weights);
     }
 
 } // namespace AssimpBindings

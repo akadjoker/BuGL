@@ -99,12 +99,61 @@ namespace ImGuiBindings
         return 0;
     }
 
+    int SetNextWindowPos(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.SetNextWindowPos()"))
+            return 0;
+
+        if (argCount < 2 || argCount > 5 || !args[0].isNumber() || !args[1].isNumber())
+        {
+            vm->runtimeError("ImGui.SetNextWindowPos expects (x, y[, cond[, pivotX, pivotY]])");
+            return 0;
+        }
+
+        const float x = (float)args[0].asNumber();
+        const float y = (float)args[1].asNumber();
+        const ImGuiCond cond = (argCount >= 3 && args[2].isNumber()) ? (ImGuiCond)(int)args[2].asNumber() : ImGuiCond_None;
+
+        if (argCount == 3)
+        {
+            ImGui::SetNextWindowPos(ImVec2(x, y), cond);
+            return 0;
+        }
+
+        if (argCount == 5 && args[3].isNumber() && args[4].isNumber())
+        {
+            ImGui::SetNextWindowPos(ImVec2(x, y), cond, ImVec2((float)args[3].asNumber(), (float)args[4].asNumber()));
+            return 0;
+        }
+
+        vm->runtimeError("ImGui.SetNextWindowPos expects (x, y[, cond[, pivotX, pivotY]])");
+        return 0;
+    }
+
+    int SetNextWindowSize(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.SetNextWindowSize()"))
+            return 0;
+
+        if (argCount < 2 || argCount > 3 || !args[0].isNumber() || !args[1].isNumber() || (argCount == 3 && !args[2].isNumber()))
+        {
+            vm->runtimeError("ImGui.SetNextWindowSize expects (width, height[, cond])");
+            return 0;
+        }
+
+        const ImGuiCond cond = (argCount == 3) ? (ImGuiCond)(int)args[2].asNumber() : ImGuiCond_None;
+        ImGui::SetNextWindowSize(ImVec2((float)args[0].asNumber(), (float)args[1].asNumber()), cond);
+        return 0;
+    }
+
     void register_core(ModuleBuilder &module)
     {
         module.addFunction("Init", Init, 0);
         module.addFunction("HasDemoWindow", HasDemoWindow, 0);
         module.addFunction("Begin", Begin, -1);
         module.addFunction("BeginChild", BeginChild, -1);
+        module.addFunction("SetNextWindowPos", SetNextWindowPos, -1);
+        module.addFunction("SetNextWindowSize", SetNextWindowSize, -1);
         module.addFunction("End", End, 0);
         module.addFunction("EndChild", EndChild, 0);
         module.addFunction("ShowDemoWindow", ShowDemoWindow, 0);
@@ -121,6 +170,11 @@ namespace ImGuiBindings
               .addInt("WindowFlags_HorizontalScrollbar", (int)ImGuiWindowFlags_HorizontalScrollbar)
               .addInt("WindowFlags_AlwaysVerticalScrollbar", (int)ImGuiWindowFlags_AlwaysVerticalScrollbar)
               .addInt("WindowFlags_AlwaysHorizontalScrollbar", (int)ImGuiWindowFlags_AlwaysHorizontalScrollbar)
+              .addInt("Cond_None", (int)ImGuiCond_None)
+              .addInt("Cond_Always", (int)ImGuiCond_Always)
+              .addInt("Cond_Once", (int)ImGuiCond_Once)
+              .addInt("Cond_FirstUseEver", (int)ImGuiCond_FirstUseEver)
+              .addInt("Cond_Appearing", (int)ImGuiCond_Appearing)
               .addInt("ChildFlags_None", (int)ImGuiChildFlags_None)
               .addInt("ChildFlags_Borders", (int)ImGuiChildFlags_Borders)
               .addInt("ChildFlags_AlwaysUseWindowPadding", (int)ImGuiChildFlags_AlwaysUseWindowPadding)

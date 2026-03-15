@@ -1,5 +1,6 @@
 #include "jolt_core.hpp"
 
+#include <cmath>
 #include <thread>
 
 namespace JoltBindings
@@ -98,6 +99,11 @@ namespace JoltBindings
         double dt = 0.0;
         if (!read_number_arg(args[0], &dt, "JoltWorld.step()", 1))
             return push_nil1(vm);
+        if (!std::isfinite(dt) || dt < 0.0)
+        {
+            Error("JoltWorld.step() arg 1 expects finite dt >= 0");
+            return push_nil1(vm);
+        }
 
         int collisionSteps = 1;
         if (argCount == 2 && !read_int_arg(args[1], &collisionSteps, "JoltWorld.step()", 2))
@@ -207,6 +213,11 @@ namespace JoltBindings
         {
             return push_nil1(vm);
         }
+        if (hx <= 0.0 || hy <= 0.0 || hz <= 0.0)
+        {
+            Error("JoltWorld.createStaticBox() expects hx, hy, hz > 0");
+            return push_nil1(vm);
+        }
 
         JoltBodyHandle *body = create_body_handle(world,
                                                   new BoxShape(Vec3((float)hx, (float)hy, (float)hz)),
@@ -245,6 +256,11 @@ namespace JoltBindings
         {
             return push_nil1(vm);
         }
+        if (hx <= 0.0 || hy <= 0.0 || hz <= 0.0)
+        {
+            Error("JoltWorld.createBox() expects hx, hy, hz > 0");
+            return push_nil1(vm);
+        }
 
         JoltBodyHandle *body = create_body_handle(world,
                                                   new BoxShape(Vec3((float)hx, (float)hy, (float)hz)),
@@ -279,6 +295,11 @@ namespace JoltBindings
         {
             return push_nil1(vm);
         }
+        if (radius <= 0.0)
+        {
+            Error("JoltWorld.createSphere() expects radius > 0");
+            return push_nil1(vm);
+        }
 
         JoltBodyHandle *body = create_body_handle(world,
                                                   new SphereShape((float)radius),
@@ -287,6 +308,88 @@ namespace JoltBindings
                                                   Layers::MOVING,
                                                   0.55f,
                                                   0.35f,
+                                                  0.0f);
+        if (!body)
+            return push_nil1(vm);
+
+        return push_body_handle(vm, body) ? 1 : push_nil1(vm);
+    }
+
+    static int jolt_world_create_capsule(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 3)
+        {
+            Error("JoltWorld.createCapsule() expects (halfHeight, radius, Vector3)");
+            return push_nil1(vm);
+        }
+
+        JoltWorldHandle *world = require_world(instance, "JoltWorld.createCapsule()");
+        if (!world)
+            return push_nil1(vm);
+
+        double halfHeight = 0.0;
+        double radius = 0.0;
+        Vector3 position;
+        if (!read_number_arg(args[0], &halfHeight, "JoltWorld.createCapsule()", 1) ||
+            !read_number_arg(args[1], &radius, "JoltWorld.createCapsule()", 2) ||
+            !read_vector3_arg(args[2], &position, "JoltWorld.createCapsule()", 3))
+        {
+            return push_nil1(vm);
+        }
+        if (halfHeight <= 0.0 || radius <= 0.0)
+        {
+            Error("JoltWorld.createCapsule() expects halfHeight > 0 and radius > 0");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = create_body_handle(world,
+                                                  new CapsuleShape((float)halfHeight, (float)radius),
+                                                  position,
+                                                  EMotionType::Dynamic,
+                                                  Layers::MOVING,
+                                                  0.55f,
+                                                  0.35f,
+                                                  0.0f);
+        if (!body)
+            return push_nil1(vm);
+
+        return push_body_handle(vm, body) ? 1 : push_nil1(vm);
+    }
+
+    static int jolt_world_create_static_capsule(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 3)
+        {
+            Error("JoltWorld.createStaticCapsule() expects (halfHeight, radius, Vector3)");
+            return push_nil1(vm);
+        }
+
+        JoltWorldHandle *world = require_world(instance, "JoltWorld.createStaticCapsule()");
+        if (!world)
+            return push_nil1(vm);
+
+        double halfHeight = 0.0;
+        double radius = 0.0;
+        Vector3 position;
+        if (!read_number_arg(args[0], &halfHeight, "JoltWorld.createStaticCapsule()", 1) ||
+            !read_number_arg(args[1], &radius, "JoltWorld.createStaticCapsule()", 2) ||
+            !read_vector3_arg(args[2], &position, "JoltWorld.createStaticCapsule()", 3))
+        {
+            return push_nil1(vm);
+        }
+        if (halfHeight <= 0.0 || radius <= 0.0)
+        {
+            Error("JoltWorld.createStaticCapsule() expects halfHeight > 0 and radius > 0");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = create_body_handle(world,
+                                                  new CapsuleShape((float)halfHeight, (float)radius),
+                                                  position,
+                                                  EMotionType::Static,
+                                                  Layers::NON_MOVING,
+                                                  0.9f,
+                                                  0.05f,
                                                   0.0f);
         if (!body)
             return push_nil1(vm);
@@ -320,9 +423,19 @@ namespace JoltBindings
         {
             return push_nil1(vm);
         }
+        if (hx <= 0.0 || hy <= 0.0 || hz <= 0.0)
+        {
+            Error("JoltWorld.createOffsetBox() expects hx, hy, hz > 0");
+            return push_nil1(vm);
+        }
 
         if (argCount == 6 && !read_number_arg(args[5], &mass, "JoltWorld.createOffsetBox()", 6))
             return push_nil1(vm);
+        if (mass < 0.0)
+        {
+            Error("JoltWorld.createOffsetBox() expects mass >= 0");
+            return push_nil1(vm);
+        }
 
         RefConst<Shape> shape = OffsetCenterOfMassShapeSettings(
                                     to_jolt_vec3(offset),
@@ -349,6 +462,45 @@ namespace JoltBindings
         return push_body_handle(vm, body) ? 1 : push_nil1(vm);
     }
 
+    static int jolt_world_create_static_sphere(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 2)
+        {
+            Error("JoltWorld.createStaticSphere() expects (radius, Vector3)");
+            return push_nil1(vm);
+        }
+
+        JoltWorldHandle *world = require_world(instance, "JoltWorld.createStaticSphere()");
+        if (!world)
+            return push_nil1(vm);
+
+        double radius = 0.0;
+        Vector3 position;
+        if (!read_number_arg(args[0], &radius, "JoltWorld.createStaticSphere()", 1) ||
+            !read_vector3_arg(args[1], &position, "JoltWorld.createStaticSphere()", 2))
+        {
+            return push_nil1(vm);
+        }
+        if (radius <= 0.0)
+        {
+            Error("JoltWorld.createStaticSphere() expects radius > 0");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = create_body_handle(world,
+                                                  new SphereShape((float)radius),
+                                                  position,
+                                                  EMotionType::Static,
+                                                  Layers::NON_MOVING,
+                                                  0.9f,
+                                                  0.05f,
+                                                  0.0f);
+        if (!body)
+            return push_nil1(vm);
+
+        return push_body_handle(vm, body) ? 1 : push_nil1(vm);
+    }
+
     void register_jolt_world(Interpreter &vm)
     {
         g_worldClass = vm.registerNativeClass("JoltWorld", jolt_world_ctor, jolt_world_dtor, -1, false);
@@ -361,7 +513,10 @@ namespace JoltBindings
         vm.addNativeMethod(g_worldClass, "optimizeBroadPhase", jolt_world_optimize_broad_phase);
         vm.addNativeMethod(g_worldClass, "getBodyCount", jolt_world_get_body_count);
         vm.addNativeMethod(g_worldClass, "createStaticBox", jolt_world_create_static_box);
+        vm.addNativeMethod(g_worldClass, "createStaticSphere", jolt_world_create_static_sphere);
+        vm.addNativeMethod(g_worldClass, "createStaticCapsule", jolt_world_create_static_capsule);
         vm.addNativeMethod(g_worldClass, "createBox", jolt_world_create_box);
+        vm.addNativeMethod(g_worldClass, "createCapsule", jolt_world_create_capsule);
         vm.addNativeMethod(g_worldClass, "createOffsetBox", jolt_world_create_offset_box);
         vm.addNativeMethod(g_worldClass, "createSphere", jolt_world_create_sphere);
     }

@@ -19,7 +19,7 @@ namespace RecastBindings
     {
         (void)vm;
         NavMeshHandle *h = (NavMeshHandle *)instance;
-        if (h) { h->destroy(); delete h; }
+        if (h) h->release();
     }
 
     // ── NavMesh.build(verts, tris [, cellSize, cellHeight,
@@ -37,6 +37,12 @@ namespace RecastBindings
 
         NavMeshHandle *h = (NavMeshHandle *)instance;
         if (!h) return push_nil1(vm);
+
+        if (h->refCount > 1)
+        {
+            Error("NavMesh.build: cannot rebuild while one or more NavCrowd instances are using this NavMesh");
+            return push_nil1(vm);
+        }
 
         // Read verts array
         if (!args[0].isArray())
@@ -115,7 +121,15 @@ namespace RecastBindings
         (void)vm; (void)args;
         if (argCount != 0) { Error("NavMesh.destroy() expects 0 arguments"); return 0; }
         NavMeshHandle *h = (NavMeshHandle *)instance;
-        if (h) h->destroy();
+        if (h)
+        {
+            if (h->refCount > 1)
+            {
+                Error("NavMesh.destroy(): cannot destroy while one or more NavCrowd instances are using this NavMesh");
+                return 0;
+            }
+            h->destroy();
+        }
         return 0;
     }
 
@@ -240,8 +254,8 @@ namespace RecastBindings
     // ── Registration ─────────────────────────────────────────
     void register_navmesh(Interpreter &vm)
     {
-        g_navMeshClass = vm.addNativeClass("NavMesh",
-            navmesh_ctor, navmesh_dtor, sizeof(void *));
+        g_navMeshClass = vm.registerNativeClass("NavMesh",
+            navmesh_ctor, navmesh_dtor, 0, false);
 
         vm.addNativeMethod(g_navMeshClass, "build",           navmesh_build);
         vm.addNativeMethod(g_navMeshClass, "isValid",         navmesh_is_valid);
