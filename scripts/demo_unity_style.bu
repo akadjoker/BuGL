@@ -1,0 +1,140 @@
+require "EnTT";
+
+import EnTT;
+using EnTT;
+
+
+
+var world = ECSWorld();
+
+// =====================================================
+//  SCRIPT COMPONENTS - estilo Unity MonoBehaviour
+// =====================================================
+
+class Player
+{
+    var entity;
+    var speed;
+
+    def init(e)
+    {
+        self.entity = e;
+        self.speed  = 100.0;
+    }
+
+    def start()
+    {
+        self.entity.addComponent<Transform2D>(0.0, 0.0, 0.0, 1.0, 1.0);
+        self.entity.addComponent<Velocity2D>(0.0, 0.0);
+        print("Player.start() - components adicionados");
+    }
+
+    def update(dt)
+    {
+        var (vx, vy) = self.entity.getComponent<Velocity2D>();
+        var (x, y, rot, sx, sy) = self.entity.getComponent<Transform2D>();
+
+        x = x + vx * dt;
+        y = y + vy * dt;
+
+        self.entity.setComponent<Transform2D>(x, y, rot, sx, sy);
+    }
+
+    def move(dx, dy)
+    {
+        self.entity.setComponent<Velocity2D>(dx * self.speed, dy * self.speed);
+    }
+
+    def getPosition()
+    {
+        var (x, y, rot, sx, sy) = self.entity.getComponent<Transform2D>();
+        return (x, y);
+    }
+}
+
+class Enemy
+{
+    var entity;
+    var target;
+
+    def init(e, targetEntity)
+    {
+        self.entity = e;
+        self.target = targetEntity;
+    }
+
+    def start()
+    {
+        self.entity.addComponent<Transform2D>(200.0, 150.0, 0.0, 1.0, 1.0);
+        self.entity.addComponent<Velocity2D>(0.0, 0.0);
+        print("Enemy.start() - components adicionados");
+    }
+
+    def update(dt)
+    {
+        // Perseguir o player
+        var (ex, ey, rot, sx, sy) = self.entity.getComponent<Transform2D>();
+        var (px, py, pr, psx, psy) = self.target.getComponent<Transform2D>();
+
+        var dx = px - ex;
+        var dy = py - ey;
+        var dist = sqrt(dx * dx + dy * dy);
+
+        if (dist > 1.0)
+        {
+            dx = dx / dist;
+            dy = dy / dist;
+        }
+
+        var speed = 60.0;
+        ex = ex + dx * speed * dt;
+        ey = ey + dy * speed * dt;
+
+        self.entity.setComponent<Transform2D>(ex, ey, rot, sx, sy);
+    }
+
+    def getPosition()
+    {
+        var (x, y, rot, sx, sy) = self.entity.getComponent<Transform2D>();
+        return (x, y);
+    }
+}
+
+// =====================================================
+//  SCENE SETUP
+// =====================================================
+
+var playerEntity = world.createEntity("player");
+var enemyEntity  = world.createEntity("enemy");
+
+var player = Player(playerEntity);
+var enemy  = Enemy(enemyEntity, playerEntity);
+
+player.start();
+enemy.start();
+
+// =====================================================
+//  GAME LOOP (3 frames de teste)
+// =====================================================
+
+player.move(1.0, 0.5);   // dar velocidade ao player
+
+var dt = 0.016;           // ~60fps
+var tick = 0;
+
+while (tick < 5)
+{
+    player.update(dt);
+    enemy.update(dt);
+
+    var (px, py) = player.getPosition();
+    var (ex, ey) = enemy.getPosition();
+
+    print(format("tick={} player=({}, {}) enemy=({}, {})",
+                 tick, px, py, ex, ey));
+
+    tick = tick + 1;
+}
+
+world.destroy();
+print("=== Done ===");

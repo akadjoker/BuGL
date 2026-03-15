@@ -2311,10 +2311,48 @@ void Compiler::dot(bool canAssign)
 
     uint16_t nameIdx = identifierConstant(propName);
 
+    // Generic call: obj.method<TypeName>(args...)
+    // Disambiguate from comparison: only treat as generic when pattern is
+    // <identifier> ( — i.e. peek(0)=ident, peek(1)=>, peek(2)=(
+    bool hasGenericArg = false;
+    std::string genericTypeName;
+    if (check(TOKEN_LESS)
+        && (peek(0).type == TOKEN_IDENTIFIER || isKeywordToken(peek(0).type))
+        && peek(1).type == TOKEN_GREATER
+        && peek(2).type == TOKEN_LPAREN)
+    {
+        advance(); // consume <
+        consumeIdentifierLike("Expect type name after '<'");
+        genericTypeName = previous.lexeme;
+        consume(TOKEN_GREATER, "Expect '>' after type name");
+        hasGenericArg = true;
+    }
+
     //  METHOD CALL
     if (match(TOKEN_LPAREN))
     {
-        uint8_t argCount = argumentList();
+        uint8_t argCount = 0;
+        if (hasGenericArg)
+        {
+            // Type name becomes the implicit first argument (string)
+            emitConstant(vm_->makeString(genericTypeName.c_str()));
+            argCount = 1;
+            if (!check(TOKEN_RPAREN))
+            {
+                do
+                {
+                    expression();
+                    if (argCount == 255)
+                        error("Can't have more than 255 arguments");
+                    argCount++;
+                } while (match(TOKEN_COMMA));
+            }
+            consume(TOKEN_RPAREN, "Expect ')' after arguments");
+        }
+        else
+        {
+            argCount = argumentList();
+        }
         if (propName.lexeme == "push" && argCount == 1)
         {
             emitByte(OP_ARRAY_PUSH);

@@ -1,0 +1,29 @@
+require "EnTT";
+
+import EnTT;
+using EnTT;
+
+print("=== Generic syntax test ===");
+
+var world = ECSWorld();
+
+var e = world.createEntity("hero");
+
+// generic syntax  =>  addComponent("Transform2D", 10, 20, 0, 1, 1)
+e.addComponent<Transform2D>(10.0, 20.0, 0.0, 1.0, 1.0);
+
+// generic syntax  =>  hasComponent("Transform2D")
+var has = e.hasComponent<Transform2D>();
+print(format("has Transform2D = {}", has));
+
+// generic syntax  =>  getComponent("Transform2D")
+var (x, y, rot, sx, sy) = e.getComponent<Transform2D>();
+print(format("Transform2D  x={} y={} rot={} sx={} sy={}", x, y, rot, sx, sy));
+
+// generic syntax  =>  removeComponent("Transform2D")
+e.removeComponent<Transform2D>();
+has = e.hasComponent<Transform2D>();
+print(format("has Transform2D after remove = {}", has));
+
+world.destroy();
+print("=== Done ===");

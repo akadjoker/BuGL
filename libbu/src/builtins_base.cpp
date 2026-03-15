@@ -100,6 +100,33 @@ int native_string(Interpreter *vm, int argCount, Value *args)
   return 1;
 }
 
+int native_classname(Interpreter *vm, int argCount, Value *args)
+{
+  if (argCount != 1)
+  {
+    vm->runtimeError("classname() expects exactly one argument");
+    return 0;
+  }
+  const Value &arg = args[0];
+  if (arg.isClassInstance())
+  {
+    vm->pushString(arg.as.sClass->klass->name->chars());
+    return 1;
+  }
+  if (arg.isStructInstance())
+  {
+    vm->pushString(arg.as.sInstance->def->name->chars());
+    return 1;
+  }
+  if (arg.isNativeClassInstance() && arg.as.sClassInstance->klass)
+  {
+    vm->pushString(arg.as.sClassInstance->klass->name->chars());
+    return 1;
+  }
+  vm->runtimeError("classname() argument is not a class/struct instance");
+  return 0;
+}
+
 int native_int(Interpreter *vm, int argCount, Value *args)
 {
   if (argCount != 1)
@@ -299,6 +326,7 @@ void Interpreter::registerBase()
   registerNative("str", native_string, 1);
   registerNative("int", native_int, 1);
   registerNative("real", native_real, 1);
+  registerNative("classname", native_classname, 1);
 }
 
 void Interpreter::registerAll()

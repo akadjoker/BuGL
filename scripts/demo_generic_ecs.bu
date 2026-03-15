@@ -1,0 +1,149 @@
+// =====================================================
+//  ECS PURO EM BULANG usando <> generics
+//  Sem C++, sem plugins, sem EnTT
+//  O GC trata de tudo - maps sao GCObjects
+// =====================================================
+
+class Entity
+{
+    var _components;
+    var _id;
+
+    def init(id)
+    {
+        self._id = id;
+        self._components = {};
+    }
+
+    def addComponent(instance)
+    {
+        self._components[classname(instance)] = instance;
+    }
+
+    def getComponent(T)
+    {
+        return self._components[T];
+    }
+
+    def hasComponent(T)
+    {
+        return self._components[T] != nil;
+    }
+
+    def removeComponent(T)
+    {
+        self._components.remove(T);
+    }
+
+    def getId()
+    {
+        return self._id;
+    }
+}
+
+// =====================================================
+//  COMPONENTES definidos em BuLang
+// =====================================================
+
+class Transform2D
+{
+    var x;
+    var y;
+    var rotation;
+
+    def init(x, y)
+    {
+        self.x = x;
+        self.y = y;
+        self.rotation = 0.0;
+    }
+}
+
+class Velocity2D
+{
+    var vx;
+    var vy;
+
+    def init(vx, vy)
+    {
+        self.vx = vx;
+        self.vy = vy;
+    }
+}
+
+class Health
+{
+    var hp;
+    var max_hp;
+
+    def init(hp)
+    {
+        self.hp = hp;
+        self.max_hp = hp;
+    }
+
+    def takeDamage(amount)
+    {
+        self.hp = self.hp - amount;
+        if (self.hp < 0)
+        {
+            self.hp = 0;
+        }
+    }
+
+    def isAlive()
+    {
+        return self.hp > 0;
+    }
+}
+
+// =====================================================
+//  TESTE
+// =====================================================
+
+var player = Entity(1);
+player.addComponent(Transform2D(0.0, 0.0));
+player.addComponent(Velocity2D(50.0, 25.0));
+player.addComponent(Health(100));
+
+var enemy = Entity(2);
+enemy.addComponent(Transform2D(200.0, 150.0));
+enemy.addComponent(Health(50));
+
+// --- has ---
+print("player.hasComponent<Transform2D> = " + player.hasComponent<Transform2D>());
+print("player.hasComponent<Health>      = " + player.hasComponent<Health>());
+print("enemy.hasComponent<Velocity2D>   = " + enemy.hasComponent<Velocity2D>());
+
+// --- get e usa ---
+var ph = player.getComponent<Health>();
+print("player HP = " + ph.hp);
+ph.takeDamage(30);
+print("player HP depois de takeDamage(30) = " + ph.hp);
+print("player isAlive = " + ph.isAlive());
+
+var pt = player.getComponent<Transform2D>();
+var pv = player.getComponent<Velocity2D>();
+
+// simula 3 frames de movimento
+var dt = 0.016;
+var i = 0;
+while (i < 3)
+{
+    pt.x = pt.x + pv.vx * dt;
+    pt.y = pt.y + pv.vy * dt;
+    i = i + 1;
+}
+print("player pos apos 3 frames: (" + pt.x + ", " + pt.y + ")");
+
+// --- remove ---
+player.removeComponent<Velocity2D>();
+print("player.hasComponent<Velocity2D> depois de remove = " + player.hasComponent<Velocity2D>());
+
+// --- enemy persegue player ---
+var et = enemy.getComponent<Transform2D>();
+var dx = pt.x - et.x;
+var dy = pt.y - et.y;
+print("vector player->enemy: (" + dx + ", " + dy + ")");
+
+print("=== Done ===");
