@@ -23,7 +23,14 @@ add_executable(main   ${SOURCES}
     ${CMAKE_SOURCE_DIR}/main/src/imgui_impl_sdl2.cpp
     ${CMAKE_SOURCE_DIR}/main/src/imgui_impl_opengl3.cpp
 )
-set_target_properties(main PROPERTIES ENABLE_EXPORTS ON)
+if (WIN32)
+    # MinGW may track an import library side output for executables with ENABLE_EXPORTS.
+    # Keep it off on Windows to avoid perpetual relink; plugins link libbu directly there.
+    set_target_properties(main PROPERTIES ENABLE_EXPORTS OFF)
+else()
+    # Unix plugins resolve host symbols from the main executable.
+    set_target_properties(main PROPERTIES ENABLE_EXPORTS ON)
+endif()
 set_target_properties(main PROPERTIES OUTPUT_NAME "bugl")
 target_include_directories(main PUBLIC include src 
     ${CMAKE_SOURCE_DIR}/vendor/imgui

@@ -1,9 +1,15 @@
 #pragma once
 
-#include "Batch.hpp"
+#include "batch.hpp"
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// Windows GDI headers may define GetCharWidth as a macro alias.
+// Keep SpriteFont::GetCharWidth as a real method name.
+#ifdef GetCharWidth
+#undef GetCharWidth
+#endif
 
 struct Texture
 {

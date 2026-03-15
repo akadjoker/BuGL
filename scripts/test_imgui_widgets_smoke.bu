@@ -19,6 +19,9 @@ var count = 2;
 var enabled = true;
 var value = 0.5;
 var currentTab = 0;
+var precise = 0.125;
+var listIndex = 0;
+var flagBits = 1;
 
 while (SDL.Running())
 {
@@ -38,6 +41,14 @@ while (SDL.Running())
 
         var (changedEnabled, nextEnabled) = ImGui.Checkbox("Enabled", enabled);
         enabled = nextEnabled;
+        var (changedPrecise, nextPrecise) = ImGui.InputDouble("Precise", precise, 0.001, 0.01, "%.4f");
+        precise = nextPrecise;
+
+        var (changedList, nextList) = ImGui.ListBox("List", listIndex, "One", "Two", "Three");
+        listIndex = nextList;
+
+        var (changedFlags, nextFlags) = ImGui.CheckboxFlags("Flag 1", flagBits, 1);
+        flagBits = nextFlags;
 
         if (ImGui.BeginTabBar("smoke_tabs", ImGui.TabBarFlags_Reorderable))
         {
@@ -48,6 +59,7 @@ while (SDL.Running())
                 var (changedValue, nextValue) = ImGui.SliderFloat("Value", value, 0.0, 1.0, "%.2f");
                 value = nextValue;
                 ImGui.ProgressBar(value, 0, 0, "progress");
+                var (changedColor, cr, cg, cb) = ImGui.ColorPicker3("Color", value, 0.6, 0.2);
                 ImGui.EndTabItem();
             }
 

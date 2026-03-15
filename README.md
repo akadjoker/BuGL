@@ -47,8 +47,33 @@ brew install cmake sdl2
 git clone https://github.com/akadjoker/BuGL
 cd BuGL
 cmake -S . -B build && cmake --build build -j
-./bin/main scripts/tutor_1.bu
+./bin/bugl scripts/tutor_1.bu
 ```
+
+---
+
+## First 10 Minutes (New to BuLang/BuGL)
+
+If this is your first time seeing the project, follow this exact path:
+
+1. Run `scripts/tutor_1.bu` to confirm your environment and event loop.
+2. Run `scripts/tutor_3.bu` to jump into modern shader/VBO flow.
+3. Run `scripts/tutor_6.bu` to see text/font rendering and typed buffers.
+4. Run `scripts/demo_jolt_tank_csm_particles.bu` for a full release-style scene (Jolt vehicle + cascaded shadows + batch sparks).
+5. Open the script, tweak one value (color/speed/light), and rerun.
+
+If step 5 feels easy, you're ready to explore any demo in `scripts/`.
+
+---
+
+## Mental Model: BuLang vs BuGL
+
+- **BuLang** is the scripting language (syntax, arrays, classes, control flow).
+- **BuGL** is the runtime/API surface exposed to BuLang (SDL, OpenGL, physics, audio, tools).
+- You write `.bu` scripts in BuLang and call BuGL modules directly.
+- Most demos follow one loop pattern: `Init -> while (Running) -> update -> draw -> Flip`.
+
+Think of BuGL as a practical graphics sandbox: real APIs, less boilerplate.
 
 ---
 
@@ -111,6 +136,7 @@ After the tutorials, explore the demos:
 | `demo_jolt_vehicle_wheeled.bu` | Jolt · wheeled vehicle · suspension · obstacles |
 | `demo_jolt_motorcycle.bu` | Jolt · motorcycle controller · ramp · follow camera |
 | `demo_jolt_tank.bu` | Jolt · tracked vehicle · turret control · explosions |
+| `demo_jolt_tank_csm_particles.bu` | Release scene · Jolt tracked tank · cascaded shadow maps · batch spark particles |
 
 All demos support **F12** to record a GIF.
 
@@ -272,8 +298,8 @@ cmake --build build -j
 ```
 
 ```bash
-./bin/main scripts/tutor_1.bu   # run a script directly
-./bin/main scripts/main.bu      # launcher with menu
+./bin/bugl scripts/tutor_1.bu   # run a script directly
+./bin/bugl scripts/main.bu      # launcher with menu
 ```
 
 ---

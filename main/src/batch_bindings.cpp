@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "bindings.hpp"
 #include "batch.hpp"
+#include "spriteFont.hpp"
 #include "raymath.h"
 
 #include <cstring>
@@ -1446,9 +1447,197 @@ namespace SDLBindings
         }
     }
 
+        // ─── SpriteFont ───────────────────────────────────────────────────────
+
+        struct FontHandle
+        {
+            SpriteFont font;
+        };
+
+        static FontHandle *as_font(void *p) { return (FontHandle *)p; }
+
+        static void *font_ctor(Interpreter *vm, int argCount, Value *args)
+        {
+            (void)vm; (void)args;
+            if (argCount != 0)
+            {
+                Error("SpriteFont() expects no arguments");
+                return nullptr;
+            }
+            return new FontHandle();
+        }
+
+        static void font_dtor(Interpreter *vm, void *p)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h) return;
+            h->font.Release();
+            delete h;
+        }
+
+        static int font_release(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm; (void)args;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 0) { Error("SpriteFont.release() expects no arguments"); return 0; }
+            h->font.Release();
+            return 0;
+        }
+
+        static int font_load_default(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)args;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 0) { Error("SpriteFont.loadDefault() expects no arguments"); return 0; }
+            vm->pushBool(h->font.LoadDefaultFont());
+            return 1;
+        }
+
+        static int font_load_bmfont(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            FontHandle *h = as_font(p);
+            if (!h || argc < 1 || argc > 2 || !args[0].isString())
+            {
+                Error("SpriteFont.loadBMFont(fntPath[, texturePath])");
+                return 0;
+            }
+            const char *texPath = (argc == 2 && args[1].isString()) ? args[1].asStringChars() : nullptr;
+            vm->pushBool(h->font.LoadBMFont(args[0].asStringChars(), texPath));
+            return 1;
+        }
+
+        static int font_load_ttf(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            FontHandle *h = as_font(p);
+            if (!h || argc < 2 || argc > 3 || !args[0].isString() || !args[1].isNumber())
+            {
+                Error("SpriteFont.loadTTF(path, fontSize[, atlasSize])");
+                return 0;
+            }
+            int atlasSize = (argc == 3 && args[2].isNumber()) ? args[2].asInt() : 512;
+            vm->pushBool(h->font.LoadTTF(args[0].asStringChars(), (float)args[1].asNumber(), atlasSize));
+            return 1;
+        }
+
+        static int font_set_batch(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 1 || !args[0].isNativeClassInstance())
+            {
+                Error("SpriteFont.setBatch(batch)");
+                return 0;
+            }
+            NativeClassInstance *inst = args[0].asNativeClassInstance();
+            if (!inst || !inst->userData) { Error("SpriteFont.setBatch: invalid batch"); return 0; }
+            BatchHandle *bh = (BatchHandle *)inst->userData;
+            h->font.SetBatch(&bh->batch);
+            return 0;
+        }
+
+        static int font_set_color(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || (argc != 3 && argc != 4))
+            {
+                Error("SpriteFont.setColor(r, g, b[, a])");
+                return 0;
+            }
+            u8 r = (u8)args[0].asInt();
+            u8 g = (u8)args[1].asInt();
+            u8 b = (u8)args[2].asInt();
+            u8 a = (argc == 4) ? (u8)args[3].asInt() : 255;
+            h->font.SetColor(r, g, b, a);
+            return 0;
+        }
+
+        static int font_set_font_size(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 1 || !args[0].isNumber()) { Error("SpriteFont.setFontSize(size)"); return 0; }
+            h->font.SetFontSize((float)args[0].asNumber());
+            return 0;
+        }
+
+        static int font_set_spacing(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 1 || !args[0].isNumber()) { Error("SpriteFont.setSpacing(value)"); return 0; }
+            h->font.SetSpacing((float)args[0].asNumber());
+            return 0;
+        }
+
+        static int font_set_line_spacing(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 1 || !args[0].isNumber()) { Error("SpriteFont.setLineSpacing(value)"); return 0; }
+            h->font.SetLineSpacing((float)args[0].asNumber());
+            return 0;
+        }
+
+        static int font_print(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || argc < 3 || !args[0].isString() || !args[1].isNumber() || !args[2].isNumber())
+            {
+                Error("SpriteFont.print(text, x, y)");
+                return 0;
+            }
+            h->font.Print(args[0].asStringChars(), (float)args[1].asNumber(), (float)args[2].asNumber());
+            return 0;
+        }
+
+        static int font_print_wrapped(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)vm;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 4 || !args[0].isString() ||
+                !args[1].isNumber() || !args[2].isNumber() || !args[3].isNumber())
+            {
+                Error("SpriteFont.printWrapped(text, x, y, maxWidth)");
+                return 0;
+            }
+            h->font.PrintWrapped(args[0].asStringChars(),
+                                 (float)args[1].asNumber(),
+                                 (float)args[2].asNumber(),
+                                 (float)args[3].asNumber());
+            return 0;
+        }
+
+        static int font_get_text_width(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            FontHandle *h = as_font(p);
+            if (!h || argc != 1 || !args[0].isString()) { Error("SpriteFont.getTextWidth(text)"); return 0; }
+            vm->pushDouble(h->font.GetTextWidth(args[0].asStringChars()));
+            return 1;
+        }
+
+        static int font_get_text_height(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            FontHandle *h = as_font(p);
+            if (!h || argc != 1 || !args[0].isString()) { Error("SpriteFont.getTextHeight(text)"); return 0; }
+            vm->pushDouble(h->font.GetTextHeight(args[0].asStringChars()));
+            return 1;
+        }
+
+        static int font_is_valid(Interpreter *vm, void *p, int argc, Value *args)
+        {
+            (void)args;
+            FontHandle *h = as_font(p);
+            if (!h || argc != 0) { Error("SpriteFont.isValid()"); return 0; }
+            vm->pushBool(h->font.IsValid());
+            return 1;
+        }
+
     void register_batch(Interpreter &vm, ModuleBuilder &module)
     {
-        NativeClassDef *batchClass = vm.registerNativeClass("Batch", batch_ctor, batch_dtor, -1, false);
+        NativeClassDef *batchClass = vm.registerNativeClass("Batch", batch_ctor, batch_dtor, 2, false);
         vm.addNativeMethod(batchClass, "release", batch_release);
         vm.addNativeMethod(batchClass, "render", batch_render);
         vm.addNativeMethod(batchClass, "setMode", batch_set_mode);
@@ -1495,5 +1684,21 @@ namespace SDLBindings
         module.addInt("BATCH_LINES", kBatchModeLines)
               .addInt("BATCH_TRIANGLES", kBatchModeTriangles)
               .addInt("BATCH_QUAD", kBatchModeQuad);
+
+        NativeClassDef *fontClass = vm.registerNativeClass("SpriteFont", font_ctor, font_dtor, 0, false);
+        vm.addNativeMethod(fontClass, "release",        font_release);
+        vm.addNativeMethod(fontClass, "loadDefault",    font_load_default);
+        vm.addNativeMethod(fontClass, "loadBMFont",     font_load_bmfont);
+        vm.addNativeMethod(fontClass, "loadTTF",        font_load_ttf);
+        vm.addNativeMethod(fontClass, "setBatch",       font_set_batch);
+        vm.addNativeMethod(fontClass, "setColor",       font_set_color);
+        vm.addNativeMethod(fontClass, "setFontSize",    font_set_font_size);
+        vm.addNativeMethod(fontClass, "setSpacing",     font_set_spacing);
+        vm.addNativeMethod(fontClass, "setLineSpacing", font_set_line_spacing);
+        vm.addNativeMethod(fontClass, "print",          font_print);
+        vm.addNativeMethod(fontClass, "printWrapped",   font_print_wrapped);
+        vm.addNativeMethod(fontClass, "getTextWidth",   font_get_text_width);
+        vm.addNativeMethod(fontClass, "getTextHeight",  font_get_text_height);
+        vm.addNativeMethod(fontClass, "isValid",        font_is_valid);
     }
 }

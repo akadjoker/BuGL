@@ -1,0 +1,44 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUGL_PORTABLE_RELEASE": "ON",
+        "BUGL_STRIP_RELEASE": "ON",
+        "BUGL_ENABLE_COMPILER_CACHE": "ON"
+      }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "release-base",
+      "binaryDir": "${sourceDir}/build-release"
+    },
+    {
+      "name": "win64-release",
+      "inherits": "release-base",
+      "binaryDir": "${sourceDir}/build-win64-release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/mingw-w64.cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "win64-release",
+      "configurePreset": "win64-release"
+    }
+  ]
+}

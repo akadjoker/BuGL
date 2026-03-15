@@ -394,6 +394,113 @@ namespace ImGuiBindings
         return 2;
     }
 
+    int ListBox(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.ListBox()"))
+            return push_nils(vm, 2);
+
+        if (argCount < 3 || !args[0].isString() || !args[1].isNumber())
+        {
+            vm->runtimeError("ImGui.ListBox expects (label, currentIndex, item1, item2[, ...])");
+            return push_nils(vm, 2);
+        }
+
+        std::vector<const char *> items;
+        items.reserve((size_t)(argCount - 2));
+        for (int i = 2; i < argCount; ++i)
+        {
+            if (!args[i].isString())
+            {
+                vm->runtimeError("ImGui.ListBox expects only strings for items");
+                return push_nils(vm, 2);
+            }
+            items.push_back(args[i].asStringChars());
+        }
+
+        int current = (int)args[1].asNumber();
+        if (current < 0)
+            current = 0;
+        if (!items.empty() && current >= (int)items.size())
+            current = (int)items.size() - 1;
+
+        const bool changed = ImGui::ListBox(args[0].asStringChars(), &current, items.data(), (int)items.size());
+        vm->pushBool(changed);
+        vm->pushInt(current);
+        return 2;
+    }
+
+    int InputDouble(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.InputDouble()"))
+            return push_nils(vm, 2);
+
+        if (argCount < 2 || argCount > 6 || !args[0].isString() || !args[1].isNumber())
+        {
+            vm->runtimeError("ImGui.InputDouble expects (label, value[, step[, stepFast[, format[, flags]]]])");
+            return push_nils(vm, 2);
+        }
+
+        double value = args[1].asNumber();
+        double step = 0.0;
+        double stepFast = 0.0;
+        const char *format = "%.6f";
+        int flags = 0;
+
+        if (argCount >= 3 && !args[2].isNumber())
+        {
+            vm->runtimeError("ImGui.InputDouble step expects number");
+            return push_nils(vm, 2);
+        }
+        if (argCount >= 4 && !args[3].isNumber())
+        {
+            vm->runtimeError("ImGui.InputDouble stepFast expects number");
+            return push_nils(vm, 2);
+        }
+        if (argCount >= 5 && !args[4].isString())
+        {
+            vm->runtimeError("ImGui.InputDouble format expects string");
+            return push_nils(vm, 2);
+        }
+        if (argCount >= 6 && !args[5].isNumber())
+        {
+            vm->runtimeError("ImGui.InputDouble flags expects number");
+            return push_nils(vm, 2);
+        }
+
+        if (argCount >= 3)
+            step = args[2].asNumber();
+        if (argCount >= 4)
+            stepFast = args[3].asNumber();
+        if (argCount >= 5)
+            format = args[4].asStringChars();
+        if (argCount >= 6)
+            flags = (int)args[5].asNumber();
+
+        const bool changed = ImGui::InputDouble(args[0].asStringChars(), &value, step, stepFast, format, flags);
+        vm->pushBool(changed);
+        vm->pushDouble(value);
+        return 2;
+    }
+
+    int CheckboxFlags(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.CheckboxFlags()"))
+            return push_nils(vm, 2);
+
+        if (argCount != 3 || !args[0].isString() || !args[1].isNumber() || !args[2].isNumber())
+        {
+            vm->runtimeError("ImGui.CheckboxFlags expects (label, flags, flagValue)");
+            return push_nils(vm, 2);
+        }
+
+        int flags = (int)args[1].asNumber();
+        const int flagValue = (int)args[2].asNumber();
+        const bool changed = ImGui::CheckboxFlags(args[0].asStringChars(), &flags, flagValue);
+        vm->pushBool(changed);
+        vm->pushInt(flags);
+        return 2;
+    }
+
     int ColorEdit3(Interpreter *vm, int argCount, Value *args)
     {
         if (!ensure_context(vm, "ImGui.ColorEdit3()"))
@@ -440,6 +547,60 @@ namespace ImGuiBindings
         };
         const ImGuiColorEditFlags flags = (argCount == 6) ? (ImGuiColorEditFlags)(int)args[5].asNumber() : ImGuiColorEditFlags_None;
         const bool changed = ImGui::ColorEdit4(args[0].asStringChars(), color, flags);
+        vm->pushBool(changed);
+        vm->pushDouble(color[0]);
+        vm->pushDouble(color[1]);
+        vm->pushDouble(color[2]);
+        vm->pushDouble(color[3]);
+        return 5;
+    }
+
+    int ColorPicker3(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.ColorPicker3()"))
+            return push_nils(vm, 4);
+
+        if ((argCount != 4 && argCount != 5) || !args[0].isString() || !args[1].isNumber() ||
+            !args[2].isNumber() || !args[3].isNumber() || (argCount == 5 && !args[4].isNumber()))
+        {
+            vm->runtimeError("ImGui.ColorPicker3 expects (label, r, g, b[, flags])");
+            return push_nils(vm, 4);
+        }
+
+        float color[3] = {
+            (float)args[1].asNumber(),
+            (float)args[2].asNumber(),
+            (float)args[3].asNumber()
+        };
+        const ImGuiColorEditFlags flags = (argCount == 5) ? (ImGuiColorEditFlags)(int)args[4].asNumber() : ImGuiColorEditFlags_None;
+        const bool changed = ImGui::ColorPicker3(args[0].asStringChars(), color, flags);
+        vm->pushBool(changed);
+        vm->pushDouble(color[0]);
+        vm->pushDouble(color[1]);
+        vm->pushDouble(color[2]);
+        return 4;
+    }
+
+    int ColorPicker4(Interpreter *vm, int argCount, Value *args)
+    {
+        if (!ensure_context(vm, "ImGui.ColorPicker4()"))
+            return push_nils(vm, 5);
+
+        if ((argCount != 5 && argCount != 6) || !args[0].isString() || !args[1].isNumber() ||
+            !args[2].isNumber() || !args[3].isNumber() || !args[4].isNumber() || (argCount == 6 && !args[5].isNumber()))
+        {
+            vm->runtimeError("ImGui.ColorPicker4 expects (label, r, g, b, a[, flags])");
+            return push_nils(vm, 5);
+        }
+
+        float color[4] = {
+            (float)args[1].asNumber(),
+            (float)args[2].asNumber(),
+            (float)args[3].asNumber(),
+            (float)args[4].asNumber()
+        };
+        const ImGuiColorEditFlags flags = (argCount == 6) ? (ImGuiColorEditFlags)(int)args[5].asNumber() : ImGuiColorEditFlags_None;
+        const bool changed = ImGui::ColorPicker4(args[0].asStringChars(), color, flags);
         vm->pushBool(changed);
         vm->pushDouble(color[0]);
         vm->pushDouble(color[1]);
@@ -540,11 +701,16 @@ namespace ImGuiBindings
               .addFunction("SliderInt", SliderInt, -1)
               .addFunction("InputFloat", InputFloat, -1)
               .addFunction("InputInt", InputInt, -1)
+              .addFunction("InputDouble", InputDouble, -1)
               .addFunction("InputText", InputText, -1)
               .addFunction("InputTextMultiline", InputTextMultiline, -1)
               .addFunction("Combo", Combo, -1)
+              .addFunction("ListBox", ListBox, -1)
               .addFunction("ColorEdit3", ColorEdit3, -1)
               .addFunction("ColorEdit4", ColorEdit4, -1)
+              .addFunction("ColorPicker3", ColorPicker3, -1)
+              .addFunction("ColorPicker4", ColorPicker4, -1)
+              .addFunction("CheckboxFlags", CheckboxFlags, 3)
               .addInt("SelectableFlags_None", (int)ImGuiSelectableFlags_None)
               .addInt("SelectableFlags_DontClosePopups", (int)ImGuiSelectableFlags_DontClosePopups)
               .addInt("SelectableFlags_SpanAllColumns", (int)ImGuiSelectableFlags_SpanAllColumns)

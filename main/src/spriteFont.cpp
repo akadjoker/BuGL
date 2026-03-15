@@ -17,6 +17,10 @@
 #include "stb_image.h"
 #include "stb_truetype.h"
 
+#ifdef GetCharWidth
+#undef GetCharWidth
+#endif
+
 namespace
 {
     static int get_codepoint_next(const char *text, int *codepointSize)

@@ -1,0 +1,95 @@
+// ================================================================
+// test_font.bu — testa SpriteFont + Batch
+// ESC -> sair
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+SDL.SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SDL.SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SDL.SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("test_font", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glDisable(GL_DEPTH_TEST);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+glClearColor(0.10, 0.10, 0.14, 1.0);
+glDisable(GL_CULL_FACE);
+
+var batch = Batch(1, 16384);
+
+var font = SpriteFont();
+
+if (!font.loadDefault())
+{
+    print("ERRO: nao carregou a font default");
+    SDL.Close();
+    return;
+}
+font.setBatch(batch);
+
+print("font valida: " + font.isValid());
+print("largura 'Hello World': " + font.getTextWidth("Hello World"));
+
+var frameCount = 0;
+var fps = 0.0;
+var fpsTimer = 0.0;
+
+while (SDL.Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (SDL.IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    var dt = GetDeltaTime();
+    if (dt > 0.05) dt = 0.05;
+
+    fpsTimer = fpsTimer + dt;
+    frameCount = frameCount + 1;
+    if (fpsTimer >= 1.0)
+    {
+        fps = frameCount / fpsTimer;
+        frameCount = 0;
+        fpsTimer = 0.0;
+    }
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    var proj = MatrixOrtho(0.0, GetWidth(), GetHeight(), 0.0, -1.0, 1.0);
+    batch.setMatrix(proj);
+
+    // fundo do painel
+    batch.setColor(0.15, 0.18, 0.25, 0.85);
+    batch.rectangle(10.0, 10.0, 460.0, 180.0);
+
+    // texto branco
+    font.setFontSize(20.0);
+    font.setColor(255, 255, 255);
+    font.print("SpriteFont + Batch", 20.0, 20.0);
+
+    // fps em amarelo
+    font.setColor(255, 220, 50);
+    font.print("FPS: " + fps, 20.0, 48.0);
+
+    // texto multiline — verde
+    font.setFontSize(16.0);
+    font.setColor(100, 220, 100);
+    font.print("LoadDefault OK", 20.0, 80.0);
+    font.print("largura 'Hello': " + font.getTextWidth("Hello"), 20.0, 100.0);
+    font.print("altura  'Hello': " + font.getTextHeight("Hello"), 20.0, 120.0);
+
+    // printWrapped — ciano
+    font.setFontSize(14.0);
+    font.setColor(100, 220, 220);
+    font.printWrapped("Este texto usa printWrapped e quebra automaticamente quando passa do limite de 240 pixels de largura.", 20.0, 150.0, 240.0);
+
+    batch.render();
+    SDL.Flip();
+}
+
+SDL.Close();

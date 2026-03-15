@@ -33,9 +33,15 @@ var tintA = 1.00;
 var amount = 0.50;
 var count = 3;
 var uiSpeed = 0.25;
+var precise = 0.125;
 var modeA = true;
 var choiceOne = true;
 var choiceTwo = false;
+var listIndex = 1;
+var featureA = 1;
+var featureB = 2;
+var featureC = 4;
+var featureFlags = featureA | featureC;
 
 while (SDL.Running())
 {
@@ -74,6 +80,8 @@ while (SDL.Running())
             amount = typedAmount;
             var (changedInputCount, typedCount) = ImGui.InputInt("Typed Count", count, 1, 10);
             count = typedCount;
+            var (changedPrecise, nextPrecise) = ImGui.InputDouble("Precise Value", precise, 0.001, 0.01, "%.4f");
+            precise = nextPrecise;
 
             var (changedColor, nextR, nextG, nextB) = ImGui.ColorEdit3("Accent", tintR, tintG, tintB);
             tintR = nextR;
@@ -119,6 +127,23 @@ while (SDL.Running())
 
             var (selectedChanged, selectedNow) = ImGui.Selectable("Selectable Row", modeA);
             modeA = selectedNow;
+
+            ImGui.SeparatorText("Advanced Widgets");
+            var (listChanged, nextList) = ImGui.ListBox("Preset", listIndex, "Low", "Medium", "High", "Ultra");
+            listIndex = nextList;
+
+            var (flagAChanged, nextFlagsA) = ImGui.CheckboxFlags("Feature A", featureFlags, featureA);
+            featureFlags = nextFlagsA;
+            var (flagBChanged, nextFlagsB) = ImGui.CheckboxFlags("Feature B", featureFlags, featureB);
+            featureFlags = nextFlagsB;
+            var (flagCChanged, nextFlagsC) = ImGui.CheckboxFlags("Feature C", featureFlags, featureC);
+            featureFlags = nextFlagsC;
+
+            var (pickerChanged, pickR, pickG, pickB, pickA) = ImGui.ColorPicker4("Picker", tintR, tintG, tintB, tintA);
+            tintR = pickR;
+            tintG = pickG;
+            tintB = pickB;
+            tintA = pickA;
 
             ImGui.SeparatorText("Child");
             var childOpen = ImGui.BeginChild("values_child", 0, 110, ImGui.ChildFlags_Borders | ImGui.ChildFlags_FrameStyle);
