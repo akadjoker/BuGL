@@ -1,0 +1,11 @@
+{
+    "autosave_enabled": true,
+    "autosave_interval_ms": 1500,
+    "console_visible": false,
+    "palette": "vscode_dark",
+    "font_choice": "droid_sans",
+    "font_scale": 1.0,
+    "last_file_path": "/media/projectos/projects/cpp/BuGL/scripts/vm_cheatsheet.bu",
+    "bugl_path": "bin/bugl",
+    "bytecode_output_path": "/media/projectos/projects/cpp/BuGL/scripts/vm_cheatsheet.buc"
+}
