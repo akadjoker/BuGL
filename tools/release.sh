@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec /usr/bin/env bash "$0" "$@"
+fi
+
 # ============================================================
 #  BuGL release script
 #  Uso: ./tools/release.sh [--skip-build] [--skip-linux] [--skip-win] [--local-only] [TAG]
@@ -222,12 +226,40 @@ UPLOAD_URL="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.loa
 RELEASE_ID="$(echo "$RELEASE_JSON"  | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")"
 echo "    Release ID: $RELEASE_ID"
 
+find_asset_id_by_name() {
+    local NAME="$1"
+    curl -sf "$API/repos/$REPO_SLUG/releases/$RELEASE_ID/assets?per_page=100" \
+        -H "$AUTH_HEADER" \
+    | python3 -c 'import sys,json
+name=sys.argv[1]
+for asset in json.load(sys.stdin):
+    if asset.get("name")==name:
+        print(asset.get("id"))
+        break' "$NAME"
+}
+
+delete_asset_if_exists() {
+    local NAME="$1"
+    local ASSET_ID
+    ASSET_ID="$(find_asset_id_by_name "$NAME" || true)"
+    if [[ -n "$ASSET_ID" ]]; then
+        echo "    Asset já existe, a remover: $NAME (id=$ASSET_ID)"
+        curl -sf -X DELETE "$API/repos/$REPO_SLUG/releases/assets/$ASSET_ID" \
+            -H "$AUTH_HEADER" > /dev/null
+    fi
+}
+
 upload_asset() {
     local FILE="$1"
     local NAME="$(basename "$FILE")"
     local MIME="application/octet-stream"
+    local NAME_ENCODED
+
+    delete_asset_if_exists "$NAME"
+    NAME_ENCODED="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$NAME")"
+
     echo "    Upload: $NAME"
-    curl -sf -X POST "${UPLOAD_URL}?name=${NAME}" \
+    curl -sf -X POST "${UPLOAD_URL}?name=${NAME_ENCODED}" \
         -H "$AUTH_HEADER" \
         -H "Content-Type: $MIME" \
         --data-binary @"$FILE" > /dev/null
