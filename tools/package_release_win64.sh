@@ -21,7 +21,14 @@ rm -rf "$DIST_DIR"
 mkdir -p "$PLUGIN_DIR"
 
 cp -a "$ROOT_DIR/bin/bugl.exe" "$BIN_DIR/"
-cp -a "$ROOT_DIR/bin/plugins/"*.dll "$PLUGIN_DIR/"
+shopt -s nullglob
+win_plugins=("$ROOT_DIR/bin/plugins/"*.dll)
+if [[ ${#win_plugins[@]} -eq 0 ]]; then
+    echo "error: no Windows plugins (.dll) found in $ROOT_DIR/bin/plugins"
+    exit 1
+fi
+cp -a "${win_plugins[@]}" "$PLUGIN_DIR/"
+shopt -u nullglob
 cp -a "$ROOT_DIR/scripts" "$DIST_DIR/"
 cp -a "$ROOT_DIR/assets" "$DIST_DIR/"
 cp -a "$ROOT_DIR/README.md" "$DIST_DIR/"
