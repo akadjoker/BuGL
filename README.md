@@ -1,11 +1,27 @@
 # BuGL
 
-> Real graphics APIs, scripted in BuLang.
+> Build your own engine in script.
 
-BuGL is a scripting-first runtime for graphics/gameplay experiments.
-You write `.bu` scripts and call modules like `SDL`, `OpenGl`, `Batch`, `SpriteFont`, physics, and tools directly.
+BuGL is not a closed game engine. BuGL is an engine-building runtime.
+You write `.bu` scripts in BuLang and assemble your own stack: rendering, physics, AI navigation, UI, and tooling.
 
-## If You Know Nothing Yet
+BuLang is easy to iterate with (Python-like workflow), but keeps explicit engine structure with braces, `class`, `struct`, `process`, and generics (`<>`).
+
+## First Public Release (v2.0.1)
+
+This is the first public release focused on practical, programmable game-tech blocks:
+
+- Plugin-based runtime architecture.
+- 3D physics with `Jolt`.
+- 2D physics with `Chipmunk` and `Box2D`.
+- Navigation and agents with `Recast/Detour`, `OpenSteer`, and `MicroPather`.
+- Tooling UI with `ImGui`.
+- 3D model import pipeline with `Assimp`.
+- Generics in BuLang (`<>`) for reusable gameplay/framework code.
+
+BuGL is designed for people who want control: no editor lock-in, no monolithic workflow, no hidden pipeline.
+
+## Quick Start (5 Minutes)
 
 Start here:
 
@@ -44,12 +60,23 @@ Main plugin modules:
 | `BuOde` | `ODE` | 3D rigid body simulation |
 | `BuBox2d` | `Box2D` | 2D physics |
 | `BuChipmunk` | `Chipmunk` | Alternative 2D physics |
-| `BuRecast` | `Recast` | Navmesh + crowd/pathing |
+| `BuRecast` | `Recast` | Navmesh + Detour pathfinding/crowd |
 | `BuOpenSteer` | `OpenSteer` | Steering behaviors |
 | `BuMicroPather` | `MicroPather` | Grid/pathfinding |
 | `BuAssimp` | `Assimp` | 3D model loading |
 
 Plugin binaries are in `bin/plugins/`.
+
+## AI and Navigation Stack
+
+BuGL is strong for real-time agent behavior:
+
+- `Recast/Detour`: navmesh generation, path queries, and crowd movement for large scenes.
+- `OpenSteer`: flocking, pursuit, avoidance, and steering behaviors for responsive agents.
+- `MicroPather`: fast grid-based pathfinding for tactics, RTS logic, and fallback routing.
+- Combined workflow: high-level path (`Detour`) + local motion (`OpenSteer`) + deterministic grid logic (`MicroPather`).
+
+Relevant demos: `demo_recast_*`, `demo_opensteer_*`, `demo_steertest.bu`, `demo_micropather.bu`.
 
 ## Gallery
 
@@ -83,6 +110,16 @@ Plugin binaries are in `bin/plugins/`.
 | ![batch 3d primitives](gif/batch_3d_primitives.gif) | ![tank jolt csm](gif/tank_jolt.gif) | ![tutor5 capture](gif/capture_tutor5.gif) |
 | 3D primitives with Batch | Jolt + cascaded shadows + particles | FPS camera tutorial |
 
+| OpenSteer Boids | OpenSteer Path | Steering Test |
+|:-:|:-:|:-:|
+| ![opensteer boids](gif/opensteer_boids.gif) | ![opensteer path](gif/opensteer_path.gif) | ![steertest](gif/steertest.gif) |
+| Flocking behaviors | Path following | Steering sandbox |
+
+| MicroPather Pathfinding | OpenSteer Showcase | Assimp Import |
+|:-:|:-:|:-:|
+| ![micropather pathfinding](gif/pathfind.gif) | ![opensteer](gif/opensteer.gif) | ![assimp](gif/assimp.gif) |
+| Grid pathfinding | Steering behaviors | Model import pipeline |
+
 ## Learning Path
 
 Tutorials:
@@ -99,6 +136,7 @@ Then demos by topic:
 - Rendering: `demo_phong.bu`, `demo_texture_quad.bu`, `demo_bloom_hdr.bu`
 - Advanced visuals: `demo_raymarching.bu`, `demo_raytrace.bu`, `demo_shadowmap_csm_v3.bu`
 - Physics: `demo_jolt_*`, `demo_ode_*`, `demo_box2d_*`
+- AI/Navigation: `demo_opensteer_*`, `demo_steertest.bu`, `demo_recast_*`, `demo_micropather.bu`
 - UI/tools: `demo_imgui.bu`, `test_imgui_widgets_smoke.bu`, `test_font.bu`
 
 ## API Orientation

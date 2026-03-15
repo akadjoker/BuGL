@@ -204,7 +204,7 @@ while (Running())
             goalPos = nearest;
             crowd.setTarget(agentId, goalPos);
             pathPoints = nav.findPath(agentPos, goalPos, 2.0, 4.0, 2.0);
-            print("Novo alvo mouse: " + goalPos.x + ", " + goalPos.z);
+            print("Novo alvo mouse: " , goalPos.x , ", " , goalPos.z);
         }
     }
 

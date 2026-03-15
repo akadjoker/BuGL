@@ -85,7 +85,7 @@ using STB;
 //clude "demo_chipmunk_joints.bu";
 
 
-//include "demo_opensteer_boids.bu";
+include "demo_opensteer_boids.bu";
 
 //include "demo_opensteer_path.bu";
 
