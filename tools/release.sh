@@ -99,7 +99,7 @@ fi
 # ============================================================
 BUILD_LINUX="$ROOT_DIR/build-release"
 if [[ $SKIP_BUILD -eq 0 && $SKIP_LINUX -eq 0 ]]; then
-    if [[ -f "$BUILD_LINUX/CMakeCache.txt" ]] && rg -q "^CMAKE_TOOLCHAIN_FILE:.*mingw" "$BUILD_LINUX/CMakeCache.txt"; then
+    if [[ -f "$BUILD_LINUX/CMakeCache.txt" ]] && grep -Eq "^CMAKE_TOOLCHAIN_FILE:.*mingw" "$BUILD_LINUX/CMakeCache.txt"; then
         echo "warning: build-release contém cache mingw; a limpar para reconfigurar Linux nativo"
         rm -rf "$BUILD_LINUX"
     fi
@@ -133,7 +133,7 @@ fi
 # ============================================================
 BUILD_WIN="$ROOT_DIR/build-win64-release"
 if [[ $SKIP_BUILD -eq 0 && $SKIP_WIN -eq 0 ]]; then
-    if [[ -f "$BUILD_WIN/CMakeCache.txt" ]] && ! rg -q "^CMAKE_TOOLCHAIN_FILE:.*mingw-w64\\.cmake" "$BUILD_WIN/CMakeCache.txt"; then
+    if [[ -f "$BUILD_WIN/CMakeCache.txt" ]] && ! grep -Eq "^CMAKE_TOOLCHAIN_FILE:.*mingw-w64\\.cmake" "$BUILD_WIN/CMakeCache.txt"; then
         echo "warning: build-win64-release sem toolchain mingw; a limpar para reconfigurar cross-compile"
         rm -rf "$BUILD_WIN"
     fi
