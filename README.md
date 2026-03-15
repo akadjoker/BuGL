@@ -5,19 +5,19 @@
 BuGL is not a closed game engine. BuGL is an engine-building runtime.
 You write `.bu` scripts in BuLang and assemble your own stack: rendering, physics, AI navigation, UI, and tooling.
 
-BuLang is easy to iterate with (Python-like workflow), but keeps explicit engine structure with braces, `class`, `struct`, `process`, and generics (`<>`).
+BuLang is easy to iterate with (Python-like workflow), but keeps explicit engine structure with braces, `class`, `struct`, and `process`.
 
 ## First Public Release (v2.0.1)
 
 This is the first public release focused on practical, programmable game-tech blocks:
 
 - Plugin-based runtime architecture.
-- 3D physics with `Jolt`.
+- 3D physics with `Jolt` and `ODE`.
 - 2D physics with `Chipmunk` and `Box2D`.
 - Navigation and agents with `Recast/Detour`, `OpenSteer`, and `MicroPather`.
 - Tooling UI with `ImGui`.
 - 3D model import pipeline with `Assimp`.
-- Generics in BuLang (`<>`) for reusable gameplay/framework code.
+- Next target in the physics stack: `Bullet` integration.
 
 BuGL is designed for people who want control: no editor lock-in, no monolithic workflow, no hidden pipeline.
 
