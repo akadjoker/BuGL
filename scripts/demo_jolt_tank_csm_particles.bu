@@ -29,6 +29,8 @@ using Shapes;
 import math;
 using math;
 
+import path;
+
 require "Jolt";
 import Jolt;
 using Jolt;
@@ -44,14 +46,43 @@ glCullFace(GL_BACK);
 glEnable(GL_BLEND);
 glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 glClearColor(0.06, 0.08, 0.11, 1.0);
-glViewport(0, 0, GetWidth(), GetHeight());
 
-var progDepth = LoadShaderProgram("../assets/shaders/depth.vert", "../assets/shaders/depth.frag");
-var progScene = LoadShaderProgram("../assets/shaders/csm_scene_v3.vert", "../assets/shaders/csm_scene_v3.frag");
-var progSky = LoadShaderProgram("../assets/shaders/sky_proc.vert", "../assets/shaders/sky_proc.frag");
-if (progDepth == nil) progDepth = 0;
-if (progScene == nil) progScene = 0;
-if (progSky == nil) progSky = 0;
+def getWindowSizeSafe()
+{
+    var w = GetWidth();
+    var h = GetHeight();
+    if (w <= 0) w = 1;
+    if (h <= 0) h = 1;
+    return (w, h);
+}
+
+var (bootW, bootH) = getWindowSizeSafe();
+glViewport(0, 0, bootW, bootH);
+
+def loadShaderProgramAuto(vertexName, fragmentName)
+{
+    var rootBase = "assets/shaders/";
+    var scriptBase = "../assets/shaders/";
+    var rootV = rootBase + vertexName;
+    var rootF = rootBase + fragmentName;
+    var scriptV = scriptBase + vertexName;
+    var scriptF = scriptBase + fragmentName;
+
+    var prog = 0;
+    if (path.exists(rootV) && path.exists(rootF))
+        prog = LoadShaderProgram(rootV, rootF);
+    else if (path.exists(scriptV) && path.exists(scriptF))
+        prog = LoadShaderProgram(scriptV, scriptF);
+    else
+        print("Shader source not found: " + vertexName + " / " + fragmentName);
+
+    if (prog == nil) prog = 0;
+    return prog;
+}
+
+var progDepth = loadShaderProgramAuto("depth.vert", "depth.frag");
+var progScene = loadShaderProgramAuto("csm_scene_v3.vert", "csm_scene_v3.frag");
+var progSky = loadShaderProgramAuto("sky_proc.vert", "sky_proc.frag");
 if (progDepth <= 0 || progScene <= 0)
 {
     print("Failed to load CSM shaders.");
@@ -507,6 +538,17 @@ var split0 = 24.0;
 var split1 = 68.0;
 
 var sparkBatch = Batch(1, 32768);
+var uiBatch = Batch(1, 4096);
+var uiFont = SpriteFont();
+var uiFontOk = false;
+if (uiFont.loadDefault())
+{
+    uiFont.setBatch(uiBatch);
+    uiFont.setFontSize(16.0);
+    uiFontOk = true;
+}
+else
+    print("Warning: default SpriteFont unavailable, FPS overlay disabled.");
 
 
 def addSceneBox(body, hx, hy, hz, r, g, b)
@@ -735,7 +777,7 @@ def resetScene()
 
     camReady = false;
 
-    addSceneBox(world.createStaticBox(80.0, 0.40, 80.0, Vector3(0.0, -0.40, 0.0)), 80.0, 0.40, 80.0, 0.19, 0.21, 0.25);
+    addSceneBox(world.createStaticBox(800.0, 0.40, 800.0, Vector3(0.0, -0.40, 0.0)), 800.0, 0.40, 800.0, 0.19, 0.21, 0.25);
     addSceneBox(world.createStaticBox(5.0, 0.40, 12.0, Vector3(0.0, 0.40, 16.0)), 5.0, 0.40, 12.0, 0.25, 0.31, 0.40);
     addSceneBox(world.createStaticBox(0.50, 1.4, 20.0, Vector3(-8.0, 1.4, 8.0)), 0.50, 1.4, 20.0, 0.46, 0.34, 0.18);
     addSceneBox(world.createStaticBox(0.50, 1.4, 20.0, Vector3( 8.0, 1.4, 8.0)), 0.50, 1.4, 20.0, 0.46, 0.34, 0.18);
@@ -968,6 +1010,30 @@ def renderSparkBatch(vp)
     glDepthMask(true);
 }
 
+def renderHud(winW, winH)
+{
+    if (!uiFontOk) return;
+
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(false);
+    glDisable(GL_CULL_FACE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    uiBatch.setMatrix(MatrixOrtho(0.0, winW, winH, 0.0, -1.0, 1.0));
+    uiBatch.setColor(0.06, 0.08, 0.11, 0.72);
+    uiBatch.rectangle(10.0, 10.0, 128.0, 34.0);
+
+    uiFont.setColor(255, 235, 120);
+    uiFont.print("FPS: " + GetFPS(), 18.0, 18.0);
+
+    uiBatch.render();
+
+    glDepthMask(true);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+}
+
 def renderSky(vp, eyeX, eyeY, eyeZ, sunX, sunY, sunZ)
 {
     if (progSky <= 0) return;
@@ -1101,8 +1167,6 @@ while (Running())
         accumulator = accumulator - fixedStep;
     }
 
-    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
-
     // Camera follow
     var cpos = chassis.getPosition();
     var crot = chassis.getRotation();
@@ -1131,7 +1195,8 @@ while (Running())
     var upV = Vector3(0.0, 1.0, 0.0);
 
     var view = MatrixLookAt(eye, tgt, upV);
-    var aspect = GetWidth() / GetHeight();
+    var (winW, winH) = getWindowSizeSafe();
+    var aspect = winW / winH;
     var proj = MatrixPerspective(60.0 * deg2rad, aspect, 0.1, 260.0);
     var vp = MatrixMultiply(view, proj);
 
@@ -1174,7 +1239,7 @@ while (Running())
     glCullFace(GL_BACK);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+    glViewport(0, 0, winW, winH);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     renderSky(vp, camX, camY, camZ, -ldx, -ldy, -ldz);
@@ -1213,6 +1278,7 @@ while (Running())
     glUseProgram(0);
 
     renderSparkBatch(vp);
+    renderHud(winW, winH);
 
     Flip();
 }
