@@ -7,6 +7,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
 set(BUEDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/DocumentSymbols.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/GifRecorder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ImGuiFileDialog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ImGuiConsole.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TextEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/LanguageDefinitions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl_sdl2.cpp
@@ -44,6 +48,7 @@ foreach(BUEDITOR_RUNTIME_TARGET IN ITEMS
 endforeach()
 
 target_include_directories(BuEditor PRIVATE
+    ${CMAKE_SOURCE_DIR}/main/src
     ${CMAKE_SOURCE_DIR}/vendor/imgui
     ${CMAKE_SOURCE_DIR}/vendor/assimp/contrib/rapidjson/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

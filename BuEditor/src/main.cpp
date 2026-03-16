@@ -1,3 +1,9 @@
+#include "DocumentSymbols.h"
+#include "GifRecorder.h"
+#include "ImGuiFileDialog.h"
+#include "ImGuiConsole.h"
+#include "ImGuiFontAwesome.h"
+#include "ImGuiSplitter.h"
 #include "TextEditor.h"
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
@@ -13,10 +19,13 @@
 #include <rapidjson/filewritestream.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -33,7 +42,21 @@ namespace
 enum class EditorFontChoice
 {
     Default,
-    DroidSans
+    DroidSans,
+    Custom
+};
+
+enum class OutlineSide
+{
+    Left,
+    Right
+};
+
+struct EditorFontEntry
+{
+    std::string id;
+    std::string label;
+    ImFont* font = nullptr;
 };
 
 struct EditorSettings
@@ -43,13 +66,16 @@ struct EditorSettings
     bool console_visible = false;
     TextEditor::PaletteId palette = TextEditor::PaletteId::VsCodeDark;
     EditorFontChoice font_choice = EditorFontChoice::DroidSans;
+    std::string font_path;
     float font_scale = 1.0f;
     std::string last_file_path = "scripts/vm_cheatsheet.bu";
     std::string bugl_path;
     std::string bytecode_output_path;
+    bool outline_visible = true;
+    OutlineSide outline_side = OutlineSide::Left;
 };
 
-const char* kSettingsPath = "BuEditor/settings.json";
+std::string gSettingsPath;
 
 struct AsyncCommandState
 {
@@ -62,162 +88,175 @@ struct AsyncCommandState
     std::string output;
 };
 
-struct FileDialogEntry
+struct FindReplaceState
 {
-    std::string label;
-    std::filesystem::path path;
-    bool is_directory = false;
+    bool visible = false;
+    bool replace_visible = false;
+    bool case_sensitive = true;
+    bool focus_find_input = false;
+    bool focus_replace_input = false;
+    std::string find_text;
+    std::string replace_text;
 };
 
-struct ConsoleStyle
+struct GoToLineState
 {
-    ImVec4 color = ImVec4(0.82f, 0.84f, 0.88f, 1.0f);
-    bool bright = false;
+    bool visible = false;
+    bool focus_input = false;
+    std::string line_text;
 };
 
-ImVec4 GetAnsiColor(int code, bool bright)
+struct FontPickerState
 {
-    const bool use_bright = bright || code >= 90;
-    const int base = code >= 90 ? code - 90 : code - 30;
-    static const ImVec4 normal_colors[8] = {
-        ImVec4(0.07f, 0.07f, 0.07f, 1.0f),
-        ImVec4(0.80f, 0.29f, 0.29f, 1.0f),
-        ImVec4(0.38f, 0.72f, 0.36f, 1.0f),
-        ImVec4(0.82f, 0.71f, 0.33f, 1.0f),
-        ImVec4(0.35f, 0.55f, 0.88f, 1.0f),
-        ImVec4(0.74f, 0.42f, 0.78f, 1.0f),
-        ImVec4(0.31f, 0.75f, 0.78f, 1.0f),
-        ImVec4(0.82f, 0.84f, 0.88f, 1.0f)
-    };
-    static const ImVec4 bright_colors[8] = {
-        ImVec4(0.35f, 0.37f, 0.40f, 1.0f),
-        ImVec4(0.98f, 0.48f, 0.45f, 1.0f),
-        ImVec4(0.55f, 0.88f, 0.52f, 1.0f),
-        ImVec4(0.98f, 0.86f, 0.46f, 1.0f),
-        ImVec4(0.50f, 0.70f, 0.98f, 1.0f),
-        ImVec4(0.89f, 0.59f, 0.92f, 1.0f),
-        ImVec4(0.49f, 0.90f, 0.92f, 1.0f),
-        ImVec4(0.96f, 0.97f, 0.98f, 1.0f)
-    };
+    bool visible = false;
+    bool focus_filter = false;
+    std::string filter;
+};
 
-    if (base < 0 || base > 7)
-    {
-        return normal_colors[7];
-    }
-    return use_bright ? bright_colors[base] : normal_colors[base];
-}
-
-void ApplyAnsiCode(int code, ConsoleStyle& style, const ImVec4& default_color)
+struct OutlineState
 {
-    if (code == 0)
-    {
-        style.color = default_color;
-        style.bright = false;
-    }
-    else if (code == 1)
-    {
-        style.bright = true;
-    }
-    else if (code == 22)
-    {
-        style.bright = false;
-    }
-    else if (code == 39)
-    {
-        style.color = default_color;
-    }
-    else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97))
-    {
-        style.color = GetAnsiColor(code, style.bright);
-    }
-}
+    bool visible = true;
+    float width = 220.0f;
+    OutlineSide side = OutlineSide::Left;
+    std::deque<DocumentSymbol> symbols;
+};
 
-void RenderAnsiConsoleText(const std::string& text)
+std::vector<size_t> BuildLineOffsets(const std::string& text)
 {
-    const ImVec4 default_color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-    ConsoleStyle style;
-    style.color = default_color;
-
-    std::string segment;
-    bool line_has_content = false;
-
-    auto flush_segment = [&]()
+    std::vector<size_t> offsets;
+    offsets.push_back(0);
+    for (size_t i = 0; i < text.size(); ++i)
     {
-        if (segment.empty())
-        {
-            return;
-        }
-
-        if (line_has_content)
-        {
-            ImGui::SameLine(0.0f, 0.0f);
-        }
-        ImGui::PushStyleColor(ImGuiCol_Text, style.color);
-        ImGui::TextUnformatted(segment.c_str());
-        ImGui::PopStyleColor();
-        segment.clear();
-        line_has_content = true;
-    };
-
-    for (size_t i = 0; i < text.size();)
-    {
-        if (text[i] == '\x1b' && (i + 1) < text.size() && text[i + 1] == '[')
-        {
-            flush_segment();
-            size_t j = i + 2;
-            std::string code_text;
-            while (j < text.size() && text[j] != 'm')
-            {
-                code_text += text[j];
-                ++j;
-            }
-
-            if (j < text.size() && text[j] == 'm')
-            {
-                if (code_text.empty())
-                {
-                    ApplyAnsiCode(0, style, default_color);
-                }
-                else
-                {
-                    std::stringstream code_stream(code_text);
-                    std::string item;
-                    while (std::getline(code_stream, item, ';'))
-                    {
-                        ApplyAnsiCode(item.empty() ? 0 : std::atoi(item.c_str()), style, default_color);
-                    }
-                }
-                i = j + 1;
-                continue;
-            }
-        }
-
-        if (text[i] == '\r')
-        {
-            ++i;
-            continue;
-        }
-
         if (text[i] == '\n')
         {
-            if (!segment.empty())
-            {
-                flush_segment();
-            }
-            else if (!line_has_content)
-            {
-                ImGui::TextUnformatted("");
-            }
-            line_has_content = false;
-            ++i;
+            offsets.push_back(i + 1);
+        }
+    }
+    return offsets;
+}
+
+size_t LineColumnToOffset(const std::vector<size_t>& line_offsets, int line, int column)
+{
+    if (line_offsets.empty())
+    {
+        return 0;
+    }
+    const int clamped_line = std::max(0, std::min(line, static_cast<int>(line_offsets.size()) - 1));
+    return line_offsets[clamped_line] + static_cast<size_t>(std::max(0, column));
+}
+
+TextEditor::TextPosition OffsetToTextPosition(const std::vector<size_t>& line_offsets, size_t offset)
+{
+    TextEditor::TextPosition result;
+    if (line_offsets.empty())
+    {
+        return result;
+    }
+
+    auto it = std::upper_bound(line_offsets.begin(), line_offsets.end(), offset);
+    const int line = static_cast<int>(std::max<std::ptrdiff_t>(0, (it - line_offsets.begin()) - 1));
+    result.line = line;
+    result.column = static_cast<int>(offset - line_offsets[line]);
+    return result;
+}
+
+std::string ToLowerCopy(const std::string& value)
+{
+    std::string result = value;
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char ch)
+    {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return result;
+}
+
+bool FindTextRange(const std::string& text,
+                   const std::string& needle,
+                   bool case_sensitive,
+                   size_t start_offset,
+                   bool forward,
+                   size_t& out_start,
+                   size_t& out_end)
+{
+    if (needle.empty())
+    {
+        return false;
+    }
+
+    const std::string haystack = case_sensitive ? text : ToLowerCopy(text);
+    const std::string token = case_sensitive ? needle : ToLowerCopy(needle);
+
+    if (forward)
+    {
+        size_t found = haystack.find(token, std::min(start_offset, haystack.size()));
+        if (found == std::string::npos && start_offset > 0)
+        {
+            found = haystack.find(token, 0);
+        }
+        if (found == std::string::npos)
+        {
+            return false;
+        }
+        out_start = found;
+        out_end = found + token.size();
+        return true;
+    }
+
+    size_t found = std::string::npos;
+    if (!haystack.empty())
+    {
+        const size_t bounded_start = std::min(start_offset, haystack.size());
+        if (bounded_start > 0)
+        {
+            found = haystack.rfind(token, bounded_start - 1);
+        }
+        if (found == std::string::npos)
+        {
+            found = haystack.rfind(token);
+        }
+    }
+    if (found == std::string::npos)
+    {
+        return false;
+    }
+    out_start = found;
+    out_end = found + token.size();
+    return true;
+}
+
+bool SelectionMatchesQuery(const std::string& selected_text, const std::string& query, bool case_sensitive)
+{
+    return case_sensitive ? selected_text == query : ToLowerCopy(selected_text) == ToLowerCopy(query);
+}
+
+const char* SymbolIcon(DocumentSymbolKind kind)
+{
+    switch (kind)
+    {
+    case DocumentSymbolKind::Class: return ImGuiFontAwesome::kGears;
+    case DocumentSymbolKind::Struct: return ImGuiFontAwesome::kFileLines;
+    case DocumentSymbolKind::Def: return ImGuiFontAwesome::kPlay;
+    case DocumentSymbolKind::Process: return ImGuiFontAwesome::kTerminal;
+    }
+    return ImGuiFontAwesome::kFile;
+}
+
+const DocumentSymbol* FindInnermostSymbolAtLine(const std::deque<DocumentSymbol>& symbols, int line)
+{
+    for (const DocumentSymbol& symbol : symbols)
+    {
+        if (line < symbol.line || line > symbol.end_line)
+        {
             continue;
         }
 
-        segment += text[i];
-        ++i;
+        if (const DocumentSymbol* child = FindInnermostSymbolAtLine(symbol.children, line))
+        {
+            return child;
+        }
+        return &symbol;
     }
-
-    flush_segment();
+    return nullptr;
 }
 
 bool FileExists(const std::string& path)
@@ -329,85 +368,6 @@ std::filesystem::path GetProjectDirectory(const std::filesystem::path& executabl
     return executable_dir.parent_path().empty() ? executable_dir : executable_dir.parent_path();
 }
 
-std::filesystem::path GetDialogStartDirectory(const std::string& candidate_path, const std::filesystem::path& executable_dir)
-{
-    const std::filesystem::path project_dir = GetProjectDirectory(executable_dir);
-    const std::filesystem::path scripts_dir = project_dir / "scripts";
-    const std::string resolved = ResolveExistingPath(candidate_path, executable_dir);
-    std::error_code ec;
-
-    if (!resolved.empty())
-    {
-        const std::filesystem::path resolved_path(resolved);
-        if (std::filesystem::is_directory(resolved_path, ec))
-        {
-            return resolved_path;
-        }
-        ec.clear();
-        if (std::filesystem::exists(resolved_path, ec))
-        {
-            return resolved_path.parent_path();
-        }
-
-        const std::filesystem::path parent = resolved_path.parent_path();
-        ec.clear();
-        if (!parent.empty() && std::filesystem::exists(parent, ec))
-        {
-            return parent;
-        }
-    }
-
-    ec.clear();
-    if (std::filesystem::exists(scripts_dir, ec))
-    {
-        return scripts_dir;
-    }
-
-    return project_dir;
-}
-
-std::string GetDialogFileName(const std::string& candidate_path)
-{
-    return std::filesystem::path(candidate_path).filename().string();
-}
-
-std::vector<FileDialogEntry> ListDirectoryEntries(const std::filesystem::path& directory)
-{
-    std::vector<FileDialogEntry> entries;
-    std::error_code ec;
-    if (!std::filesystem::exists(directory, ec))
-    {
-        return entries;
-    }
-
-    for (const auto& entry : std::filesystem::directory_iterator(directory, std::filesystem::directory_options::skip_permission_denied, ec))
-    {
-        if (ec)
-        {
-            break;
-        }
-
-        std::error_code type_error;
-        const bool is_directory = entry.is_directory(type_error);
-        FileDialogEntry dialog_entry;
-        dialog_entry.path = entry.path();
-        dialog_entry.label = dialog_entry.path.filename().string();
-        dialog_entry.is_directory = !type_error && is_directory;
-        entries.push_back(dialog_entry);
-    }
-
-    std::sort(entries.begin(), entries.end(), [](const FileDialogEntry& lhs, const FileDialogEntry& rhs)
-    {
-        if (lhs.is_directory != rhs.is_directory)
-        {
-            return lhs.is_directory > rhs.is_directory;
-        }
-        return lhs.label < rhs.label;
-    });
-
-    return entries;
-}
-
 std::string QuoteCommandArgument(const std::string& value)
 {
     std::string quoted = "\"";
@@ -490,6 +450,7 @@ const char* FontChoiceToString(EditorFontChoice font_choice)
     {
     case EditorFontChoice::Default: return "default";
     case EditorFontChoice::DroidSans: return "droid_sans";
+    case EditorFontChoice::Custom: return "custom";
     }
     return "default";
 }
@@ -500,12 +461,164 @@ EditorFontChoice FontChoiceFromString(const std::string& value)
     {
         return EditorFontChoice::DroidSans;
     }
+    if (value == "custom")
+    {
+        return EditorFontChoice::Custom;
+    }
     return EditorFontChoice::Default;
+}
+
+const char* OutlineSideToString(OutlineSide side)
+{
+    switch (side)
+    {
+    case OutlineSide::Left: return "left";
+    case OutlineSide::Right: return "right";
+    }
+    return "left";
+}
+
+OutlineSide OutlineSideFromString(const std::string& value)
+{
+    if (value == "right")
+    {
+        return OutlineSide::Right;
+    }
+    return OutlineSide::Left;
+}
+
+std::string MakeFontLabel(const std::filesystem::path& path, const char* prefix)
+{
+    const std::string stem = path.stem().string();
+    return std::string(prefix) + ": " + (stem.empty() ? path.filename().string() : stem);
+}
+
+void AppendDiscoveredFonts(std::vector<std::pair<std::string, std::string>>& out_fonts,
+                           const std::filesystem::path& directory,
+                           const char* prefix)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(directory, ec) || !std::filesystem::is_directory(directory, ec))
+    {
+        return;
+    }
+
+    for (std::filesystem::recursive_directory_iterator it(directory, std::filesystem::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end;
+         it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+        {
+            continue;
+        }
+
+        std::filesystem::path path = it->path();
+        std::string extension = ToLowerCopy(path.extension().string());
+        if (extension != ".ttf" && extension != ".otf")
+        {
+            continue;
+        }
+
+        const std::string normalized = NormalizePath(path);
+        const auto duplicate = std::find_if(out_fonts.begin(), out_fonts.end(), [&](const auto& item)
+        {
+            return item.first == normalized;
+        });
+        if (duplicate != out_fonts.end())
+        {
+            continue;
+        }
+
+        out_fonts.push_back({normalized, MakeFontLabel(path, prefix)});
+    }
+}
+
+void AppendKnownSystemFonts(std::vector<std::pair<std::string, std::string>>& out_fonts,
+                            const std::filesystem::path& root_directory,
+                            const std::vector<std::string>& file_names)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(root_directory, ec) || !std::filesystem::is_directory(root_directory, ec))
+    {
+        return;
+    }
+
+    for (const std::string& file_name : file_names)
+    {
+        bool found = false;
+        for (std::filesystem::recursive_directory_iterator it(root_directory, std::filesystem::directory_options::skip_permission_denied, ec), end;
+             !ec && it != end;
+             it.increment(ec))
+        {
+            if (!it->is_regular_file(ec))
+            {
+                continue;
+            }
+            if (ToLowerCopy(it->path().filename().string()) != ToLowerCopy(file_name))
+            {
+                continue;
+            }
+
+            const std::string normalized = NormalizePath(it->path());
+            const auto duplicate = std::find_if(out_fonts.begin(), out_fonts.end(), [&](const auto& item)
+            {
+                return item.first == normalized;
+            });
+            if (duplicate == out_fonts.end())
+            {
+                out_fonts.push_back({normalized, MakeFontLabel(it->path(), "System")});
+            }
+            found = true;
+            break;
+        }
+        ec.clear();
+        if (found)
+        {
+            continue;
+        }
+    }
+}
+
+std::vector<std::pair<std::string, std::string>> DiscoverEditorFonts(const std::filesystem::path& executable_dir,
+                                                                     const std::filesystem::path& project_dir)
+{
+    std::vector<std::pair<std::string, std::string>> fonts;
+    AppendDiscoveredFonts(fonts, executable_dir / "assets" / "fonts", "Assets");
+    AppendDiscoveredFonts(fonts, project_dir / "assets" / "fonts", "Assets");
+    AppendDiscoveredFonts(fonts, project_dir / "BuEditor" / "assets" / "fonts", "Editor");
+
+#if defined(_WIN32)
+    AppendKnownSystemFonts(fonts,
+                           "C:/Windows/Fonts",
+                           {"consola.ttf", "CascadiaMono.ttf", "CascadiaCode.ttf", "segoeui.ttf", "cour.ttf"});
+#else
+    const std::vector<std::string> system_font_names = {
+        "DejaVuSansMono.ttf",
+        "NotoSansMono-Regular.ttf",
+        "LiberationMono-Regular.ttf",
+        "UbuntuMono-R.ttf",
+        "JetBrainsMono-Regular.ttf",
+        "FiraCode-Regular.ttf",
+    };
+    AppendKnownSystemFonts(fonts, "/usr/share/fonts", system_font_names);
+    AppendKnownSystemFonts(fonts, "/usr/local/share/fonts", system_font_names);
+    if (const char* home = std::getenv("HOME"))
+    {
+        AppendKnownSystemFonts(fonts, std::filesystem::path(home) / ".fonts", system_font_names);
+        AppendKnownSystemFonts(fonts, std::filesystem::path(home) / ".local" / "share" / "fonts", system_font_names);
+    }
+#endif
+
+    std::sort(fonts.begin(), fonts.end(), [](const auto& lhs, const auto& rhs)
+    {
+        return lhs.second < rhs.second;
+    });
+    return fonts;
 }
 
 bool LoadSettings(EditorSettings& settings)
 {
-    FILE* file = std::fopen(kSettingsPath, "rb");
+    FILE* file = std::fopen(gSettingsPath.c_str(), "rb");
     if (!file)
     {
         return false;
@@ -542,6 +655,10 @@ bool LoadSettings(EditorSettings& settings)
     {
         settings.font_choice = FontChoiceFromString(document["font_choice"].GetString());
     }
+    if (document.HasMember("font_path") && document["font_path"].IsString())
+    {
+        settings.font_path = document["font_path"].GetString();
+    }
     if (document.HasMember("font_scale") && document["font_scale"].IsNumber())
     {
         settings.font_scale = std::clamp(document["font_scale"].GetFloat(), 0.6f, 2.5f);
@@ -558,6 +675,14 @@ bool LoadSettings(EditorSettings& settings)
     {
         settings.bytecode_output_path = document["bytecode_output_path"].GetString();
     }
+    if (document.HasMember("outline_visible") && document["outline_visible"].IsBool())
+    {
+        settings.outline_visible = document["outline_visible"].GetBool();
+    }
+    if (document.HasMember("outline_side") && document["outline_side"].IsString())
+    {
+        settings.outline_side = OutlineSideFromString(document["outline_side"].GetString());
+    }
 
     if (settings.bugl_path.empty())
     {
@@ -573,7 +698,13 @@ bool LoadSettings(EditorSettings& settings)
 
 bool SaveSettings(const EditorSettings& settings)
 {
-    FILE* file = std::fopen(kSettingsPath, "wb");
+    std::error_code ec;
+    if (!gSettingsPath.empty())
+    {
+        std::filesystem::create_directories(std::filesystem::path(gSettingsPath).parent_path(), ec);
+    }
+
+    FILE* file = std::fopen(gSettingsPath.c_str(), "wb");
     if (!file)
     {
         return false;
@@ -594,6 +725,8 @@ bool SaveSettings(const EditorSettings& settings)
     writer.String(PaletteIdToString(settings.palette));
     writer.Key("font_choice");
     writer.String(FontChoiceToString(settings.font_choice));
+    writer.Key("font_path");
+    writer.String(settings.font_path.c_str());
     writer.Key("font_scale");
     writer.Double(settings.font_scale);
     writer.Key("last_file_path");
@@ -602,6 +735,10 @@ bool SaveSettings(const EditorSettings& settings)
     writer.String(settings.bugl_path.c_str());
     writer.Key("bytecode_output_path");
     writer.String(settings.bytecode_output_path.c_str());
+    writer.Key("outline_visible");
+    writer.Bool(settings.outline_visible);
+    writer.Key("outline_side");
+    writer.String(OutlineSideToString(settings.outline_side));
     writer.EndObject();
 
     std::fclose(file);
@@ -644,9 +781,13 @@ bool SaveTextFile(const std::string& path, const std::string& content, std::stri
     return true;
 }
 
-void UpdateWindowTitle(SDL_Window* window, const std::string& file_path, bool dirty)
+void UpdateWindowTitle(SDL_Window* window, const std::string& file_path, bool dirty, bool gif_recording)
 {
     std::string title = "BuEditor";
+    if (gif_recording)
+    {
+        title += " [REC]";
+    }
     if (!file_path.empty())
     {
         title += " - ";
@@ -662,14 +803,9 @@ void UpdateWindowTitle(SDL_Window* window, const std::string& file_path, bool di
 
 int main(int argc, char** argv)
 {
-enum class FileDialogMode
-{
-    OpenFile,
-    SaveFile
-};
-
     const std::filesystem::path executable_dir = GetExecutableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::filesystem::path project_dir = GetProjectDirectory(executable_dir);
+    gSettingsPath = NormalizePath(project_dir / "BuEditor" / "settings.json");
 
 #if defined(__APPLE__)
     const char* glsl_version = "#version 150";
@@ -727,12 +863,32 @@ enum class FileDialogMode
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
 
+    const auto discovered_fonts = DiscoverEditorFonts(executable_dir, project_dir);
+    std::vector<EditorFontEntry> editor_fonts;
     ImFont* default_editor_font = io.Fonts->AddFontDefault();
+    editor_fonts.push_back({"default", "Default", default_editor_font});
     ImFont* droid_sans_font = nullptr;
-    const std::string droid_sans_path = "vendor/recastnavigation/RecastDemo/Bin/DroidSans.ttf";
+    const std::string droid_sans_path = ResolveExistingPath("vendor/recastnavigation/RecastDemo/Bin/DroidSans.ttf", executable_dir);
     if (FileExists(droid_sans_path))
     {
         droid_sans_font = io.Fonts->AddFontFromFileTTF(droid_sans_path.c_str(), 18.0f);
+        if (droid_sans_font != nullptr)
+        {
+            editor_fonts.push_back({"droid_sans", "Vendor: Droid Sans", droid_sans_font});
+        }
+    }
+
+    for (const auto& [font_path, label] : discovered_fonts)
+    {
+        ImFont* font = io.Fonts->AddFontFromFileTTF(font_path.c_str(), 18.0f);
+        if (font != nullptr)
+        {
+            editor_fonts.push_back({font_path, label, font});
+        }
+    }
+    for (const EditorFontEntry& font_entry : editor_fonts)
+    {
+        ImGuiFontAwesome::MergeSolid(io, font_entry.font, 13.0f);
     }
 
     if (!ImGui_ImplSDL2_InitForOpenGL(window, gl_context))
@@ -767,9 +923,24 @@ enum class FileDialogMode
         settings.bytecode_output_path = GetDefaultBytecodePath(settings.last_file_path);
     }
 
-    if (settings.font_choice == EditorFontChoice::DroidSans && droid_sans_font == nullptr)
+    auto find_font_entry = [&](const std::string& id) -> const EditorFontEntry*
+    {
+        auto it = std::find_if(editor_fonts.begin(), editor_fonts.end(), [&](const EditorFontEntry& entry)
+        {
+            return entry.id == id;
+        });
+        return it != editor_fonts.end() ? &(*it) : nullptr;
+    };
+
+    if (settings.font_choice == EditorFontChoice::DroidSans && find_font_entry("droid_sans") == nullptr)
     {
         settings.font_choice = EditorFontChoice::Default;
+        settings.font_path.clear();
+    }
+    if (settings.font_choice == EditorFontChoice::Custom && find_font_entry(settings.font_path) == nullptr)
+    {
+        settings.font_choice = EditorFontChoice::Default;
+        settings.font_path.clear();
     }
     SaveSettings(settings);
 
@@ -796,12 +967,16 @@ enum class FileDialogMode
     EditorFontChoice font_choice = settings.font_choice;
     Uint32 last_edit_ticks = SDL_GetTicks();
     Uint32 last_autosave_ticks = 0;
-    bool console_visible = settings.console_visible;
-    bool file_dialog_requested = false;
-    bool dialog_focus_filename = false;
-    FileDialogMode file_dialog_mode = FileDialogMode::OpenFile;
-    std::filesystem::path dialog_directory = GetDialogStartDirectory(file_path, executable_dir);
-    std::string dialog_file_name = GetDialogFileName(file_path);
+    ImGuiFileDialog file_dialog;
+    GifRecorder gif_recorder;
+    ImGuiConsole console;
+    FindReplaceState find_replace;
+    GoToLineState go_to_line;
+    FontPickerState font_picker;
+    OutlineState outline;
+    outline.visible = settings.outline_visible;
+    outline.side = settings.outline_side;
+    console.SetVisible(settings.console_visible);
     auto command_state = std::make_shared<AsyncCommandState>();
 
     auto apply_palette = [&](TextEditor::PaletteId palette, const char* label)
@@ -813,11 +988,53 @@ enum class FileDialogMode
     };
     auto selected_font = [&]() -> ImFont*
     {
-        if (font_choice == EditorFontChoice::DroidSans && droid_sans_font != nullptr)
+        if (font_choice == EditorFontChoice::DroidSans)
         {
-            return droid_sans_font;
+            if (const EditorFontEntry* entry = find_font_entry("droid_sans"))
+            {
+                return entry->font;
+            }
+        }
+        if (font_choice == EditorFontChoice::Custom)
+        {
+            if (const EditorFontEntry* entry = find_font_entry(settings.font_path))
+            {
+                return entry->font;
+            }
         }
         return default_editor_font;
+    };
+    auto selected_font_name = [&]() -> std::string
+    {
+        if (font_choice == EditorFontChoice::DroidSans)
+        {
+            if (const EditorFontEntry* entry = find_font_entry("droid_sans"))
+            {
+                return entry->label;
+            }
+        }
+        if (font_choice == EditorFontChoice::Custom)
+        {
+            if (const EditorFontEntry* entry = find_font_entry(settings.font_path))
+            {
+                return entry->label;
+            }
+        }
+        return "Default";
+    };
+    auto select_font = [&](EditorFontChoice choice, const std::string& font_id, const char* label)
+    {
+        font_choice = choice;
+        settings.font_choice = choice;
+        settings.font_path = font_id;
+        SaveSettings(settings);
+        status = std::string("Font: ") + label;
+    };
+    auto open_font_picker = [&]()
+    {
+        font_picker.visible = true;
+        font_picker.focus_filter = true;
+        font_picker.filter.clear();
     };
     auto adjust_zoom = [&](float delta)
     {
@@ -832,6 +1049,13 @@ enum class FileDialogMode
         settings.bugl_path = bugl_path;
         settings.bytecode_output_path = bytecode_output_path;
         SaveSettings(settings);
+    };
+    auto toggle_gif_recording = [&]()
+    {
+        int drawable_w = 0;
+        int drawable_h = 0;
+        SDL_GL_GetDrawableSize(window, &drawable_w, &drawable_h);
+        gif_recorder.Toggle(project_dir, drawable_w, drawable_h, status);
     };
     auto launch_command = [&](const std::string& label, const std::string& command)
     {
@@ -855,8 +1079,8 @@ enum class FileDialogMode
         last_command_line = command;
         command_output = "$ " + command + "\n";
         status = label + " started";
-        console_visible = true;
-        settings.console_visible = true;
+        console.SetVisible(true);
+        settings.console_visible = console.IsVisible();
         SaveSettings(settings);
 
         auto shared_state = command_state;
@@ -893,6 +1117,130 @@ enum class FileDialogMode
 
         return true;
     };
+    auto navigate_to_line = [&](int line)
+    {
+        const int clamped_line = std::max(0, std::min(line, editor.GetLineCount() - 1));
+        editor.SetCursorPosition(clamped_line, 0);
+        editor.SetViewAtLine(clamped_line, TextEditor::SetViewAtLineMode::Centered);
+        status = "Line " + std::to_string(clamped_line + 1);
+    };
+    auto find_next = [&](bool forward)
+    {
+        const std::string current_text = editor.GetText();
+        if (find_replace.find_text.empty() || current_text.empty())
+        {
+            status = "Find text is empty";
+            return false;
+        }
+
+        const std::vector<size_t> line_offsets = BuildLineOffsets(current_text);
+        const TextEditor::SelectionPosition selection = editor.GetSelectionPosition();
+        const bool has_selection =
+            selection.start.line >= 0 &&
+            (selection.start.line != selection.end.line || selection.start.column != selection.end.column);
+        const TextEditor::TextPosition cursor = editor.GetCursorPosition();
+        const size_t start_offset = has_selection
+            ? LineColumnToOffset(line_offsets,
+                                 forward ? selection.end.line : selection.start.line,
+                                 forward ? selection.end.column : selection.start.column)
+            : LineColumnToOffset(line_offsets, cursor.line, cursor.column);
+
+        size_t match_start = 0;
+        size_t match_end = 0;
+        if (!FindTextRange(current_text, find_replace.find_text, find_replace.case_sensitive, start_offset, forward, match_start, match_end))
+        {
+            status = "No matches for \"" + find_replace.find_text + "\"";
+            return false;
+        }
+
+        const TextEditor::TextPosition start = OffsetToTextPosition(line_offsets, match_start);
+        const TextEditor::TextPosition end = OffsetToTextPosition(line_offsets, match_end);
+        editor.SetSelectionPosition({start, end});
+        editor.SetViewAtLine(start.line, TextEditor::SetViewAtLineMode::Centered);
+        status = "Match at line " + std::to_string(start.line + 1);
+        return true;
+    };
+    auto replace_current = [&]()
+    {
+        if (find_replace.find_text.empty())
+        {
+            status = "Find text is empty";
+            return false;
+        }
+
+        std::string current_text = editor.GetText();
+        const TextEditor::SelectionPosition selection = editor.GetSelectionPosition();
+        const std::string selected_text = editor.GetSelectedText();
+        if (selected_text.empty() || !SelectionMatchesQuery(selected_text, find_replace.find_text, find_replace.case_sensitive))
+        {
+            if (!find_next(true))
+            {
+                return false;
+            }
+            current_text = editor.GetText();
+        }
+
+        const std::vector<size_t> line_offsets = BuildLineOffsets(current_text);
+        const TextEditor::SelectionPosition updated_selection = editor.GetSelectionPosition();
+        const size_t start_offset = LineColumnToOffset(line_offsets, updated_selection.start.line, updated_selection.start.column);
+        const size_t end_offset = LineColumnToOffset(line_offsets, updated_selection.end.line, updated_selection.end.column);
+        current_text.replace(start_offset, end_offset - start_offset, find_replace.replace_text);
+        editor.SetText(current_text);
+
+        const std::vector<size_t> new_offsets = BuildLineOffsets(current_text);
+        const TextEditor::TextPosition new_start = OffsetToTextPosition(new_offsets, start_offset);
+        const TextEditor::TextPosition new_end = OffsetToTextPosition(new_offsets, start_offset + find_replace.replace_text.size());
+        editor.SetSelectionPosition({new_start, new_end});
+        editor.SetViewAtLine(new_start.line, TextEditor::SetViewAtLineMode::Centered);
+        status = "Replaced selection";
+        return true;
+    };
+    auto replace_all = [&]()
+    {
+        if (find_replace.find_text.empty())
+        {
+            status = "Find text is empty";
+            return false;
+        }
+
+        const std::string source_text = editor.GetText();
+        if (source_text.empty())
+        {
+            status = "Document is empty";
+            return false;
+        }
+
+        std::string haystack = find_replace.case_sensitive ? source_text : ToLowerCopy(source_text);
+        const std::string token = find_replace.case_sensitive ? find_replace.find_text : ToLowerCopy(find_replace.find_text);
+        std::string result;
+        result.reserve(source_text.size());
+
+        size_t cursor_offset = 0;
+        size_t replaced_count = 0;
+        while (cursor_offset < haystack.size())
+        {
+            const size_t found = haystack.find(token, cursor_offset);
+            if (found == std::string::npos)
+            {
+                result.append(source_text.substr(cursor_offset));
+                break;
+            }
+            result.append(source_text.substr(cursor_offset, found - cursor_offset));
+            result.append(find_replace.replace_text);
+            cursor_offset = found + token.size();
+            ++replaced_count;
+        }
+
+        if (replaced_count == 0)
+        {
+            status = "No matches for \"" + find_replace.find_text + "\"";
+            return false;
+        }
+
+        editor.SetText(result);
+        status = "Replaced " + std::to_string(replaced_count) + " matches";
+        return true;
+    };
 
     auto run_new = [&]()
     {
@@ -904,19 +1252,26 @@ enum class FileDialogMode
     };
     auto open_open_popup = [&]()
     {
-        file_dialog_mode = FileDialogMode::OpenFile;
-        dialog_directory = GetDialogStartDirectory(file_path, executable_dir);
-        dialog_file_name = GetDialogFileName(file_path);
-        file_dialog_requested = true;
-        dialog_focus_filename = true;
+        std::filesystem::path start_directory = GetProjectDirectory(executable_dir) / "scripts";
+        if (!file_path.empty())
+        {
+            start_directory = std::filesystem::path(ResolveExistingPath(file_path, executable_dir)).parent_path();
+        }
+        file_dialog.Open(ImGuiFileDialog::Mode::OpenFile,
+                         start_directory,
+                         std::filesystem::path(file_path).filename().string());
     };
     auto open_save_as_popup = [&]()
     {
-        file_dialog_mode = FileDialogMode::SaveFile;
-        dialog_directory = GetDialogStartDirectory(file_path, executable_dir);
-        dialog_file_name = GetDialogFileName(file_path.empty() ? settings.last_file_path : file_path);
-        file_dialog_requested = true;
-        dialog_focus_filename = true;
+        std::filesystem::path start_directory = GetProjectDirectory(executable_dir) / "scripts";
+        const std::string seed_path = file_path.empty() ? settings.last_file_path : file_path;
+        if (!seed_path.empty())
+        {
+            start_directory = std::filesystem::path(ResolveWritablePath(seed_path, executable_dir)).parent_path();
+        }
+        file_dialog.Open(ImGuiFileDialog::Mode::SaveFile,
+                         start_directory,
+                         std::filesystem::path(seed_path).filename().string());
     };
     auto run_open = [&]()
     {
@@ -934,6 +1289,7 @@ enum class FileDialogMode
             editor.SetText(loaded_text);
             last_saved_text = loaded_text;
             last_seen_text = loaded_text;
+            outline.symbols = ScanDocumentSymbols(loaded_text);
             settings.last_file_path = file_path;
             bytecode_output_path = ResolveWritablePath(GetDefaultBytecodePath(file_path), executable_dir);
             settings.bytecode_output_path = bytecode_output_path;
@@ -1023,7 +1379,10 @@ enum class FileDialogMode
         launch_command("Compile Bytecode", command);
     };
 
-    run_open();
+    if (!file_path.empty())
+    {
+        run_open();
+    }
 
     while (!done)
     {
@@ -1092,6 +1451,23 @@ enum class FileDialogMode
                             }
                         }
                     }
+                    else if (event.key.keysym.sym == SDLK_f)
+                    {
+                        find_replace.visible = true;
+                        find_replace.replace_visible = false;
+                        find_replace.focus_find_input = true;
+                    }
+                    else if (event.key.keysym.sym == SDLK_h)
+                    {
+                        find_replace.visible = true;
+                        find_replace.replace_visible = true;
+                        find_replace.focus_find_input = true;
+                    }
+                    else if (event.key.keysym.sym == SDLK_g)
+                    {
+                        go_to_line.visible = true;
+                        go_to_line.focus_input = true;
+                    }
                     else if (event.key.keysym.sym == SDLK_EQUALS || event.key.keysym.sym == SDLK_PLUS || event.key.keysym.sym == SDLK_KP_PLUS)
                     {
                         adjust_zoom(0.1f);
@@ -1118,10 +1494,18 @@ enum class FileDialogMode
                 }
                 else if (event.key.keysym.sym == SDLK_F8)
                 {
-                    console_visible = !console_visible;
-                    settings.console_visible = console_visible;
+                    console.SetVisible(!console.IsVisible());
+                    settings.console_visible = console.IsVisible();
                     SaveSettings(settings);
-                    status = console_visible ? "Console shown" : "Console hidden";
+                    status = console.IsVisible() ? "Console shown" : "Console hidden";
+                }
+                else if (event.key.keysym.sym == SDLK_F9)
+                {
+                    toggle_gif_recording();
+                }
+                else if (event.key.keysym.sym == SDLK_F3)
+                {
+                    find_next((event.key.keysym.mod & KMOD_SHIFT) == 0);
                 }
             }
         }
@@ -1166,6 +1550,35 @@ enum class FileDialogMode
                 }
                 ImGui::EndMenu();
             }
+            if (ImGui::BeginMenu("Edit"))
+            {
+                if (ImGui::MenuItem("Find", "Ctrl+F"))
+                {
+                    find_replace.visible = true;
+                    find_replace.replace_visible = false;
+                    find_replace.focus_find_input = true;
+                }
+                if (ImGui::MenuItem("Replace", "Ctrl+H"))
+                {
+                    find_replace.visible = true;
+                    find_replace.replace_visible = true;
+                    find_replace.focus_find_input = true;
+                }
+                if (ImGui::MenuItem("Find Next", "F3"))
+                {
+                    find_next(true);
+                }
+                if (ImGui::MenuItem("Find Previous", "Shift+F3"))
+                {
+                    find_next(false);
+                }
+                if (ImGui::MenuItem("Go To Line", "Ctrl+G"))
+                {
+                    go_to_line.visible = true;
+                    go_to_line.focus_input = true;
+                }
+                ImGui::EndMenu();
+            }
             if (ImGui::BeginMenu("Build"))
             {
                 if (ImGui::MenuItem("Run Script", "F5"))
@@ -1177,16 +1590,17 @@ enum class FileDialogMode
                     run_compile_bytecode();
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem("Console", "F8", console_visible))
+                if (ImGui::MenuItem("Console", "F8", console.IsVisible()))
                 {
-                    console_visible = !console_visible;
-                    settings.console_visible = console_visible;
+                    console.SetVisible(!console.IsVisible());
+                    settings.console_visible = console.IsVisible();
                     SaveSettings(settings);
-                    status = console_visible ? "Console shown" : "Console hidden";
+                    status = console.IsVisible() ? "Console shown" : "Console hidden";
                 }
                 if (ImGui::MenuItem("Clear Output"))
                 {
                     command_output.clear();
+                    console.Clear();
                     std::lock_guard<std::mutex> lock(command_state->mutex);
                     command_state->output.clear();
                     last_command_label.clear();
@@ -1213,12 +1627,38 @@ enum class FileDialogMode
                     status = "Zoom reset";
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem("Console", "F8", console_visible))
+                if (ImGui::MenuItem("Console", "F8", console.IsVisible()))
                 {
-                    console_visible = !console_visible;
-                    settings.console_visible = console_visible;
+                    console.SetVisible(!console.IsVisible());
+                    settings.console_visible = console.IsVisible();
                     SaveSettings(settings);
-                    status = console_visible ? "Console shown" : "Console hidden";
+                    status = console.IsVisible() ? "Console shown" : "Console hidden";
+                }
+                if (ImGui::MenuItem(gif_recorder.IsRecording() ? "Stop GIF Recording" : "Record GIF", "F9"))
+                {
+                    toggle_gif_recording();
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Outline", nullptr, outline.visible))
+                {
+                    outline.visible = !outline.visible;
+                    settings.outline_visible = outline.visible;
+                    SaveSettings(settings);
+                }
+                if (outline.visible)
+                {
+                    if (ImGui::MenuItem("Outline Left", nullptr, outline.side == OutlineSide::Left))
+                    {
+                        outline.side = OutlineSide::Left;
+                        settings.outline_side = outline.side;
+                        SaveSettings(settings);
+                    }
+                    if (ImGui::MenuItem("Outline Right", nullptr, outline.side == OutlineSide::Right))
+                    {
+                        outline.side = OutlineSide::Right;
+                        settings.outline_side = outline.side;
+                        SaveSettings(settings);
+                    }
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("VSCode Dark", nullptr, editor.GetPalette() == TextEditor::PaletteId::VsCodeDark))
@@ -1242,20 +1682,9 @@ enum class FileDialogMode
                     apply_palette(TextEditor::PaletteId::RetroBlue, "Retro Blue");
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem("Default Font", nullptr, font_choice == EditorFontChoice::Default))
+                if (ImGui::MenuItem("Choose Font..."))
                 {
-                    font_choice = EditorFontChoice::Default;
-                    settings.font_choice = font_choice;
-                    SaveSettings(settings);
-                    status = "Font: Default";
-                }
-                if (droid_sans_font != nullptr &&
-                    ImGui::MenuItem("Droid Sans", nullptr, font_choice == EditorFontChoice::DroidSans))
-                {
-                    font_choice = EditorFontChoice::DroidSans;
-                    settings.font_choice = font_choice;
-                    SaveSettings(settings);
-                    status = "Font: Droid Sans";
+                    open_font_picker();
                 }
                 ImGui::EndMenu();
             }
@@ -1271,124 +1700,175 @@ enum class FileDialogMode
                      ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoResize);
 
-        if (file_dialog_requested)
+        const std::filesystem::path scripts_dir = project_dir / "scripts";
+        file_dialog.Render(project_dir, scripts_dir, executable_dir);
+        if (file_dialog.HasResult())
         {
-            ImGui::OpenPopup("File Browser");
-            file_dialog_requested = false;
-        }
-
-        if (ImGui::BeginPopupModal("File Browser", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            const std::filesystem::path project_dir = GetProjectDirectory(executable_dir);
-            const std::filesystem::path scripts_dir = project_dir / "scripts";
-            const std::filesystem::path bin_dir = executable_dir;
-
-            if (ImGui::Button("Project"))
+            const ImGuiFileDialog::Result result = file_dialog.ConsumeResult();
+            if (result.accepted)
             {
-                dialog_directory = project_dir;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Scripts"))
-            {
-                dialog_directory = scripts_dir;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Bin"))
-            {
-                dialog_directory = bin_dir;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Up"))
-            {
-                const std::filesystem::path parent = dialog_directory.parent_path();
-                if (!parent.empty())
-                {
-                    dialog_directory = parent;
-                }
-            }
-
-            ImGui::Separator();
-            ImGui::TextWrapped("%s", dialog_directory.string().c_str());
-
-            const std::vector<FileDialogEntry> entries = ListDirectoryEntries(dialog_directory);
-            ImGui::BeginChild("##file_dialog_entries", ImVec2(680.0f, 280.0f), true);
-            for (const FileDialogEntry& entry : entries)
-            {
-                const std::string item_label = entry.is_directory
-                    ? "[DIR] " + entry.label
-                    : entry.label;
-                const bool is_selected = dialog_file_name == entry.label;
-                if (ImGui::Selectable(item_label.c_str(), is_selected))
-                {
-                    if (entry.is_directory)
-                    {
-                        dialog_directory = entry.path;
-                    }
-                    else
-                    {
-                        dialog_file_name = entry.label;
-                    }
-                }
-
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                {
-                    if (entry.is_directory)
-                    {
-                        dialog_directory = entry.path;
-                    }
-                    else
-                    {
-                        dialog_file_name = entry.label;
-                        if (file_dialog_mode == FileDialogMode::OpenFile)
-                        {
-                            file_path = (dialog_directory / dialog_file_name).string();
-                            run_open();
-                            ImGui::CloseCurrentPopup();
-                        }
-                    }
-                }
-            }
-            ImGui::EndChild();
-
-            ImGui::SetNextItemWidth(680.0f);
-            ImGui::InputTextWithHint(
-                "##dialog_file_name",
-                file_dialog_mode == FileDialogMode::OpenFile ? "File to open" : "File to save",
-                &dialog_file_name);
-            if (dialog_focus_filename)
-            {
-                ImGui::SetKeyboardFocusHere(-1);
-                dialog_focus_filename = false;
-            }
-
-            const bool has_target_file = !dialog_file_name.empty();
-            if (!has_target_file)
-            {
-                ImGui::BeginDisabled();
-            }
-            if (ImGui::Button(file_dialog_mode == FileDialogMode::OpenFile ? "Open" : "Save", ImVec2(100.0f, 0.0f)))
-            {
-                file_path = (dialog_directory / dialog_file_name).string();
-                if (file_dialog_mode == FileDialogMode::OpenFile)
+                file_path = result.path.string();
+                if (result.mode == ImGuiFileDialog::Mode::OpenFile)
                 {
                     run_open();
                 }
-                else
+                else if (result.mode == ImGuiFileDialog::Mode::SaveFile)
                 {
                     run_save();
                 }
-                ImGui::CloseCurrentPopup();
             }
-            if (!has_target_file)
+        }
+
+        if (find_replace.visible)
+        {
+            ImGui::BeginChild("##find_panel", ImVec2(-1.0f, find_replace.replace_visible ? 82.0f : 48.0f), true);
+            ImGui::SetNextItemWidth(260.0f);
+            if (ImGui::InputTextWithHint("##find_text", "Find", &find_replace.find_text, ImGuiInputTextFlags_EnterReturnsTrue))
             {
-                ImGui::EndDisabled();
+                find_next(true);
+            }
+            if (find_replace.focus_find_input)
+            {
+                ImGui::SetKeyboardFocusHere(-1);
+                find_replace.focus_find_input = false;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)))
+            if (ImGui::Button("Next"))
+            {
+                find_next(true);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Prev"))
+            {
+                find_next(false);
+            }
+            ImGui::SameLine();
+            ImGui::Checkbox("Case", &find_replace.case_sensitive);
+            ImGui::SameLine();
+            if (ImGui::Button(find_replace.replace_visible ? "Hide Replace" : "Replace"))
+            {
+                find_replace.replace_visible = !find_replace.replace_visible;
+                find_replace.focus_replace_input = find_replace.replace_visible;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close"))
+            {
+                find_replace.visible = false;
+                find_replace.replace_visible = false;
+            }
+
+            if (find_replace.replace_visible)
+            {
+                ImGui::SetNextItemWidth(260.0f);
+                if (ImGui::InputTextWithHint("##replace_text", "Replace", &find_replace.replace_text, ImGuiInputTextFlags_EnterReturnsTrue))
+                {
+                    replace_current();
+                }
+                if (find_replace.focus_replace_input)
+                {
+                    ImGui::SetKeyboardFocusHere(-1);
+                    find_replace.focus_replace_input = false;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Replace One"))
+                {
+                    replace_current();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Replace All"))
+                {
+                    replace_all();
+                }
+            }
+            ImGui::EndChild();
+        }
+
+        if (go_to_line.visible)
+        {
+            ImGui::BeginChild("##goto_panel", ImVec2(-1.0f, 48.0f), true);
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::InputTextWithHint("##goto_line", "Line number", &go_to_line.line_text, ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                navigate_to_line(std::max(1, std::atoi(go_to_line.line_text.c_str())) - 1);
+            }
+            if (go_to_line.focus_input)
+            {
+                ImGui::SetKeyboardFocusHere(-1);
+                go_to_line.focus_input = false;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Go"))
+            {
+                navigate_to_line(std::max(1, std::atoi(go_to_line.line_text.c_str())) - 1);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close##goto"))
+            {
+                go_to_line.visible = false;
+            }
+            ImGui::EndChild();
+        }
+
+        if (font_picker.visible)
+        {
+            ImGui::OpenPopup("Choose Font");
+            font_picker.visible = false;
+        }
+        if (ImGui::BeginPopupModal("Choose Font", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            if (font_picker.focus_filter)
+            {
+                ImGui::SetKeyboardFocusHere();
+            }
+            ImGui::SetNextItemWidth(360.0f);
+            ImGui::InputTextWithHint("##font_filter", "Filter fonts", &font_picker.filter);
+            if (font_picker.focus_filter)
+            {
+                font_picker.focus_filter = false;
+            }
+
+            const std::string filter = ToLowerCopy(font_picker.filter);
+            auto matches_filter = [&](const std::string& value) -> bool
+            {
+                return filter.empty() || ToLowerCopy(value).find(filter) != std::string::npos;
+            };
+            auto render_font_option = [&](const char* label, EditorFontChoice choice, const std::string& font_id)
+            {
+                const bool selected =
+                    (choice == EditorFontChoice::Default && font_choice == EditorFontChoice::Default) ||
+                    (choice == EditorFontChoice::DroidSans && font_choice == EditorFontChoice::DroidSans) ||
+                    (choice == EditorFontChoice::Custom && font_choice == EditorFontChoice::Custom && settings.font_path == font_id);
+                if (!matches_filter(label))
+                {
+                    return;
+                }
+                if (ImGui::Selectable(label, selected))
+                {
+                    select_font(choice, font_id, label);
+                    ImGui::CloseCurrentPopup();
+                }
+            };
+
+            ImGui::BeginChild("##font_list", ImVec2(480.0f, 320.0f), true);
+            render_font_option("Default", EditorFontChoice::Default, "");
+            if (find_font_entry("droid_sans") != nullptr)
+            {
+                render_font_option("Vendor: Droid Sans", EditorFontChoice::DroidSans, "");
+            }
+            for (const EditorFontEntry& font_entry : editor_fonts)
+            {
+                if (font_entry.id == "default" || font_entry.id == "droid_sans")
+                {
+                    continue;
+                }
+                render_font_option(font_entry.label.c_str(), EditorFontChoice::Custom, font_entry.id);
+            }
+            ImGui::EndChild();
+
+            if (ImGui::Button("Close"))
             {
                 ImGui::CloseCurrentPopup();
             }
-
             ImGui::EndPopup();
         }
 
@@ -1397,28 +1877,124 @@ enum class FileDialogMode
             std::lock_guard<std::mutex> lock(command_state->mutex);
             return command_state->running;
         }();
+        const std::string current_text = editor.GetText();
+        if (current_text != last_seen_text)
+        {
+            outline.symbols = ScanDocumentSymbols(current_text);
+        }
         if (command_running)
         {
-            console_visible = true;
+            console.SetVisible(true);
         }
-        settings.console_visible = console_visible;
-        const bool show_output_panel = console_visible;
+        console.SetText(command_output);
+        settings.console_visible = console.IsVisible();
+        const bool show_output_panel = console.IsVisible();
 
         const float output_panel_height = show_output_panel ? 160.0f : 0.0f;
         const float footer_height = show_output_panel
             ? output_panel_height + (ImGui::GetFrameHeightWithSpacing() * 5.0f)
             : ImGui::GetFrameHeightWithSpacing() * 2.0f;
         const bool parent_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        const float editor_region_height = std::max(80.0f, ImGui::GetContentRegionAvail().y - footer_height);
+        int cursor_line = 0;
+        int cursor_column = 0;
+        editor.GetCursorPosition(cursor_line, cursor_column);
+        const auto select_symbol_block = [&](const DocumentSymbol& symbol)
+        {
+            TextEditor::SelectionPosition selection;
+            selection.start.line = symbol.line;
+            selection.start.column = 0;
+            selection.end.line = symbol.end_line;
+            selection.end.column = std::numeric_limits<int>::max();
+            editor.SetSelectionPosition(selection);
+            editor.SetViewAtLine(symbol.line, TextEditor::SetViewAtLineMode::Centered);
+            status = "Selected " + symbol.name;
+        };
+        const DocumentSymbol* active_symbol = FindInnermostSymbolAtLine(outline.symbols, cursor_line);
+
+        const auto render_outline_panel = [&]()
+        {
+            ImGui::BeginChild("##outline_panel", ImVec2(outline.width, editor_region_height), true);
+            ImGui::TextUnformatted("Outline");
+            ImGui::Separator();
+
+            auto render_symbols = [&](auto&& self, const std::deque<DocumentSymbol>& symbols) -> void
+            {
+                for (const DocumentSymbol& symbol : symbols)
+                {
+                    const std::string label = std::string(SymbolIcon(symbol.kind)) + " " + symbol.name;
+                    const bool selected_symbol = active_symbol == &symbol;
+                    if (symbol.children.empty())
+                    {
+                        if (ImGui::Selectable(label.c_str(), selected_symbol))
+                        {
+                            navigate_to_line(symbol.line);
+                        }
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        {
+                            select_symbol_block(symbol);
+                        }
+                    }
+                    else
+                    {
+                        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+                        if (selected_symbol)
+                        {
+                            flags |= ImGuiTreeNodeFlags_Selected;
+                        }
+                        const bool open = ImGui::TreeNodeEx((label + "##" + std::to_string(symbol.line)).c_str(), flags);
+                        if (ImGui::IsItemClicked())
+                        {
+                            navigate_to_line(symbol.line);
+                        }
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        {
+                            select_symbol_block(symbol);
+                        }
+                        if (open)
+                        {
+                            self(self, symbol.children);
+                            ImGui::TreePop();
+                        }
+                    }
+                }
+            };
+            render_symbols(render_symbols, outline.symbols);
+            ImGui::EndChild();
+        };
+
+        if (outline.visible)
+        {
+            outline.width = std::clamp(outline.width, 160.0f, std::max(200.0f, ImGui::GetContentRegionAvail().x - 240.0f));
+        }
+
+        if (outline.visible && outline.side == OutlineSide::Left)
+        {
+            render_outline_panel();
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGuiSplitter::Vertical("outline_splitter", &outline.width, 160.0f, 260.0f, editor_region_height);
+            ImGui::SameLine(0.0f, 0.0f);
+        }
+
+        const float editor_width = (outline.visible && outline.side == OutlineSide::Right)
+            ? std::max(80.0f, ImGui::GetContentRegionAvail().x - outline.width - 6.0f)
+            : -1.0f;
         ImGui::PushFont(selected_font());
-        editor.Render("##source", parent_focused, ImVec2(-1.0f, -footer_height), false);
+        editor.Render("##source", parent_focused, ImVec2(editor_width, editor_region_height), false);
         ImGui::PopFont();
+
+        if (outline.visible && outline.side == OutlineSide::Right)
+        {
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGuiSplitter::VerticalRight("outline_splitter_right", &outline.width, 260.0f, 160.0f, editor_region_height);
+            ImGui::SameLine(0.0f, 0.0f);
+            render_outline_panel();
+        }
 
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows) && io.KeyCtrl && io.MouseWheel != 0.0f)
         {
             adjust_zoom(io.MouseWheel > 0.0f ? 0.1f : -0.1f);
         }
-
-        const std::string current_text = editor.GetText();
         const bool dirty = current_text != last_saved_text;
         if (current_text != last_seen_text)
         {
@@ -1436,37 +2012,28 @@ enum class FileDialogMode
                 status = "Autosaved";
             }
         }
-        UpdateWindowTitle(window, file_path, dirty);
-
-        int cursor_line = 0;
-        int cursor_column = 0;
-        editor.GetCursorPosition(cursor_line, cursor_column);
         const char* theme_name =
             editor.GetPalette() == TextEditor::PaletteId::VsCodeDark ? "VSCode Dark" :
             editor.GetPalette() == TextEditor::PaletteId::Mariana ? "Mariana" :
             editor.GetPalette() == TextEditor::PaletteId::Light ? "Light" :
             editor.GetPalette() == TextEditor::PaletteId::RetroBlue ? "Retro Blue" : "Dark";
-        const char* font_name = font_choice == EditorFontChoice::DroidSans ? "Droid Sans" : "Default";
+        const std::string font_name = selected_font_name();
+        const char* gif_state = gif_recorder.IsRecording() ? "REC" : "Off";
 
         if (show_output_panel)
         {
-            ImGui::Separator();
-            ImGui::Text("Console%s", command_running ? " [running]" : "");
-            if (!last_command_label.empty())
+            const ImGuiConsole::RenderResult console_result =
+                console.Render("Console",
+                               last_command_label.empty() ? nullptr : last_command_label.c_str(),
+                               command_running,
+                               output_panel_height);
+            if (console_result.hidden)
             {
-                ImGui::SameLine();
-                ImGui::TextDisabled("%s", last_command_label.c_str());
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Hide"))
-            {
-                console_visible = false;
                 settings.console_visible = false;
                 SaveSettings(settings);
                 status = "Console hidden";
             }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Clear"))
+            if (console_result.cleared)
             {
                 command_output.clear();
                 std::lock_guard<std::mutex> lock(command_state->mutex);
@@ -1475,31 +2042,19 @@ enum class FileDialogMode
                 last_command_line.clear();
                 status = "Output cleared";
             }
-            ImGui::BeginChild("##bugl_output", ImVec2(-1.0f, output_panel_height), true, ImGuiWindowFlags_HorizontalScrollbar);
-            if (command_output.empty())
+            if (console_result.copied)
             {
-                ImGui::TextUnformatted("No messages.");
+                status = "Console copied";
             }
-            else
-            {
-                const bool should_follow_output =
-                    command_running ||
-                    ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - ImGui::GetTextLineHeightWithSpacing() * 2.0f;
-                RenderAnsiConsoleText(command_output);
-                if (should_follow_output)
-                {
-                    ImGui::SetScrollHereY(1.0f);
-                }
-            }
-            ImGui::EndChild();
         }
 
         ImGui::Separator();
-        ImGui::Text("BuLang | Theme: %s | Font: %s | Zoom: %d%% | Autosave: %s | Tool: %s | Lines: %d | Cursor: %d:%d | %s | Status: %s",
+        ImGui::Text("BuLang | Theme: %s | Font: %s | Zoom: %d%% | Autosave: %s | GIF: %s | Tool: %s | Lines: %d | Cursor: %d:%d | %s | Status: %s",
                     theme_name,
-                    font_name,
+                    font_name.c_str(),
                     static_cast<int>(editor.GetFontScale() * 100.0f),
                     settings.autosave_enabled ? "On" : "Off",
+                    gif_state,
                     command_running ? "Running" : "Idle",
                     editor.GetLineCount(),
                     cursor_line + 1,
@@ -1516,9 +2071,18 @@ enum class FileDialogMode
         glClearColor(0.09f, 0.10f, 0.12f, 1.00f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        if (gif_recorder.IsRecording())
+        {
+            gif_recorder.CaptureFrame(display_w, display_h, status);
+        }
         SDL_GL_SwapWindow(window);
+        UpdateWindowTitle(window, file_path, dirty, gif_recorder.IsRecording());
     }
 
+    if (gif_recorder.IsRecording())
+    {
+        gif_recorder.Stop(status);
+    }
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();

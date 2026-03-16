@@ -161,15 +161,21 @@ bool Interpreter::loadPluginByName(const char *name)
 {
     char lowercaseName[MAX_PATH_LEN];
     char filename[MAX_PATH_LEN];
+    char debugFilename[MAX_PATH_LEN];
     char fullPath[MAX_PATH_LEN];
     char firstLoadError[MAX_PATH_LEN] = {0};
     bool sawLoadFailure = false;
 
     // Plugin files are always lowercase: libbu_<name>.so / .dll / .dylib
+    // Some debug builds append a trailing 'd' before the extension.
     toLowerAscii(lowercaseName, sizeof(lowercaseName), name);
     snprintf(filename, sizeof(filename), "libbu_%s%s", lowercaseName, OsGetLibraryExtension());
+    snprintf(debugFilename, sizeof(debugFilename), "libbu_%sd%s", lowercaseName, OsGetLibraryExtension());
 
     if (tryLoadDefaultPluginLocations(this, filename, fullPath, sizeof(fullPath)))
+        return true;
+
+    if (strcmp(debugFilename, filename) != 0 && tryLoadDefaultPluginLocations(this, debugFilename, fullPath, sizeof(fullPath)))
         return true;
 
     for (int i = 0; i < pluginSearchPathCount; i++)
@@ -184,13 +190,26 @@ bool Interpreter::loadPluginByName(const char *name)
             strncpy(firstLoadError, lastPluginError, sizeof(firstLoadError) - 1);
             firstLoadError[sizeof(firstLoadError) - 1] = '\0';
         }
+
+        if (strcmp(debugFilename, filename) != 0)
+        {
+            joinPath(fullPath, sizeof(fullPath), basePath, debugFilename);
+            if (loadPlugin(fullPath))
+                return true;
+            if (!sawLoadFailure && fileExists(fullPath) && lastPluginError[0] != '\0')
+            {
+                sawLoadFailure = true;
+                strncpy(firstLoadError, lastPluginError, sizeof(firstLoadError) - 1);
+                firstLoadError[sizeof(firstLoadError) - 1] = '\0';
+            }
+        }
     }
 
     if (sawLoadFailure)
         snprintf(lastPluginError, sizeof(lastPluginError), "%s", firstLoadError);
     else
         snprintf(lastPluginError, sizeof(lastPluginError),
-                 "Could not find plugin '%s' (%s)", name, filename);
+                 "Could not find plugin '%s' (%s or %s)", name, filename, debugFilename);
     return false;
 }
 
