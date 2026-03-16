@@ -9,7 +9,6 @@ option(BUGL_PORTABLE_RELEASE "Build release binaries without CPU-specific native
 option(BUGL_STRIP_RELEASE "Strip symbols from release binaries when supported" ON)
 option(BUGL_IMGUI_DEMO "Build Dear ImGui demo window support" OFF)
 option(BUGL_ENABLE_COMPILER_CACHE "Use compiler cache launcher (sccache/ccache) when available" ON)
-option(BUGL_BUILD_EDITOR "Build BuEditor (ImGui + SDL2 editor app)" ON)
 
 if(BUGL_ENABLE_COMPILER_CACHE)
     if(NOT CMAKE_C_COMPILER_LAUNCHER AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
@@ -33,7 +32,7 @@ if(CLANG_TIDY_EXE)
         tidy
         COMMAND ${CLANG_TIDY_EXE}
         -p=${CMAKE_BINARY_DIR}
-        ${CMAKE_SOURCE_DIR}/libwdiv/src/*.cpp
+        ${CMAKE_SOURCE_DIR}/libbu/src/*.cpp
         ${CMAKE_SOURCE_DIR}/main/src/*.cpp
         COMMENT "Running clang-tidy"
     )
@@ -107,9 +106,6 @@ add_subdirectory(vendor/SDL)
 
 add_subdirectory(libbu)
 add_subdirectory(main)
-if(BUGL_BUILD_EDITOR)
-    add_subdirectory(BuEditor)
-endif()
 add_subdirectory(BuOde)
 add_subdirectory(BuBox2d)
 add_subdirectory(BuJolt)
