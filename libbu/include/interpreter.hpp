@@ -489,13 +489,49 @@ struct VMHooks
   void (*onDestroy)(Interpreter *vm,Process *p, int exitCode) = nullptr;
 };
 
+struct DebugLocation
+{
+  const char *functionName{nullptr};
+  int line{-1};
+  int instruction{-1};
+};
+
+struct DebugFrameInfo
+{
+  const char *functionName{nullptr};
+  int line{-1};
+  int instruction{-1};
+  int slotCount{0};
+};
+
+struct DebugGlobalInfo
+{
+  const char *name{nullptr};
+  Value value{};
+};
+
+enum class DebugPauseReason : uint8
+{
+  NONE = 0,
+  BREAKPOINT,
+  STEP,
+  MANUAL
+};
+
+struct DebugPauseState
+{
+  DebugPauseReason reason{DebugPauseReason::NONE};
+  DebugLocation location{};
+};
+
 struct ProcessResult
 {
   enum Reason : uint8
   {
     PROCESS_FRAME, // frame(N)
     CALL_RETURN,   // return to native C++ caller boundary
-    PROCESS_DONE,    // return/end
+    PROCESS_DONE,  // return/end
+    DEBUG_BREAK,
     ERROR
   };
 
@@ -702,6 +738,15 @@ class Interpreter
   int callReturnTargetFrameCount_{-1};
   bool hasFatalError_;
   bool debugMode_;
+  bool shutdownSummaryEnabled_{true};
+  bool debuggerEnabled_{false};
+  bool debuggerPaused_{false};
+  bool debuggerStepMode_{false};
+  bool debuggerPauseRequested_{false};
+  DebugPauseState debuggerPauseState_{};
+  DebugLocation debuggerStepStart_{};
+  DebugLocation debuggerSkipOnce_{};
+  Vector<int> debugBreakpoints_;
 
   Compiler *compiler;
   FileLoaderCallback fileLoaderCallback_ = nullptr;
@@ -737,6 +782,9 @@ class Interpreter
   void checkGC();
   void blackenObject(GCObject *obj);
   void traceReferences();
+  bool debugShouldPauseBeforeInstruction(ProcessExec *fiber, CallFrame *frame, uint8 *ip);
+  void ensureGlobalsArraySize(size_t size);
+  void ensureGlobalNameArraySize(size_t size);
 
   void resetFiber();
   void initFiber(ProcessExec *fiber, Function *func);
@@ -1047,6 +1095,8 @@ public:
 
   void setDebugMode(bool enabled) { debugMode_ = enabled; }
   bool isDebugMode() const { return debugMode_; }
+  void setShutdownSummaryEnabled(bool enabled) { shutdownSummaryEnabled_ = enabled; }
+  bool isShutdownSummaryEnabled() const { return shutdownSummaryEnabled_; }
 
   void setFileLoader(FileLoaderCallback loader, void *userdata = nullptr);
 
@@ -1192,6 +1242,31 @@ public:
   void addPluginSearchPath(const char *path);           // Add search path for plugins
   void unloadAllPlugins();                              // Cleanup all loaded plugins
   const char *getLastPluginError() const;               // Get last plugin error message
+
+  void enableDebugger(bool enabled);
+  bool isDebuggerEnabled() const { return debuggerEnabled_; }
+  void addDebugBreakpoint(int line);
+  void removeDebugBreakpoint(int line);
+  void clearDebugBreakpoints();
+  bool hasDebugBreakpoint(int line) const;
+  bool isDebugPaused() const { return debuggerPaused_; }
+  DebugPauseState getDebugPauseState() const { return debuggerPauseState_; }
+  void requestDebugPause();
+  void continueDebug();
+  void stepDebug();
+  bool prepareSourceRun(const char *source, bool dump = false);
+  bool continueExecution();
+  bool isMainProcessFinished() const;
+
+  bool getCurrentLocation(DebugLocation *out) const;
+  int getCallFrameCount() const;
+  bool getCallFrameInfo(int frameIndexFromTop, DebugFrameInfo *out) const;
+  bool getFrameSlotValue(int frameIndexFromTop, int slotIndex, Value *out) const;
+  int getGlobalCount() const;
+  bool getGlobalInfo(int index, DebugGlobalInfo *out) const;
+  void dumpCallFrames(FILE *output = stdout) const;
+  void dumpFrameLocals(int frameIndexFromTop = 0, FILE *output = stdout) const;
+  void dumpGlobals(FILE *output = stdout) const;
 
   void printStack();
   void disassemble();

@@ -219,6 +219,9 @@ ProcessResult Interpreter::run_process(Process *process)
 
     for (;;)
     {
+        STORE_FRAME();
+        if (debugShouldPauseBeforeInstruction(fiber, frame, ip))
+            return {ProcessResult::DEBUG_BREAK, 0};
 
 #if DEBUG_TRACE_STACK
         // Mostra stack
@@ -1226,6 +1229,12 @@ ProcessResult Interpreter::run_process(Process *process)
                 printf("> ");
                 printValue(callee);
                 printf("\n");
+                return {ProcessResult::PROCESS_DONE, 0};
+            }
+
+            if (fiber->frameCount <= 0)
+            {
+                fiber->state = ProcessState::DEAD;
                 return {ProcessResult::PROCESS_DONE, 0};
             }
 
@@ -3872,9 +3881,10 @@ ProcessResult Interpreter::run_process(Process *process)
 
             Function *method;
 
-            if (compareString(methodName, staticNames[(int)StaticNames::INIT]))
+
+            if (compare_strings(methodName, staticNames[(int)StaticNames::INIT]))
             {
-                method = ownerClass->superclass->constructor; // ← USA ownerClass!
+                method = ownerClass->superclass->constructor; //  USA ownerClass!
                 if (!method)
                 {
                     runtimeError("Superclass has no init()");

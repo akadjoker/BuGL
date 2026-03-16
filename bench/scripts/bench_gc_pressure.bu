@@ -1,0 +1,29 @@
+var __bench_result = 0;
+var __bench_ops = 20000;
+
+class Pair
+{
+    var a;
+    var b;
+
+    def init(a, b)
+    {
+        self.a = a;
+        self.b = b;
+    }
+}
+
+def bench()
+{
+    var i = 0;
+    var total = 0;
+    while (i < 20000)
+    {
+        var p = Pair(i, i + 1);
+        total = total + p.a;
+        i = i + 1;
+    }
+    _gc();
+    __bench_result = total;
+    return total;
+}

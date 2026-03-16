@@ -108,6 +108,8 @@ void Info(const char *fmt, ...);
 void Error(const char *fmt, ...);
 void Print(const char *fmt, ...);
 void Trace(int severity, const char *fmt, ...);
+void SetLogMinimumSeverity(int severity);
+int GetLogMinimumSeverity();
 
 #define INFO(fmt, ...) Log(0, fmt, ##__VA_ARGS__)
 #define WARNING(fmt, ...) Log(1, fmt, ##__VA_ARGS__)

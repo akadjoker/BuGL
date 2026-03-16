@@ -1,0 +1,23 @@
+var __bench_result = 0;
+var __bench_ops = 100000;
+var g_total = 0;
+var g_step = 3;
+
+def bench()
+{
+    var i = 0;
+    g_total = 0;
+    g_step = 3;
+    while (i < __bench_ops)
+    {
+        g_total = g_total + 1;
+        g_step = g_step + 1;
+        if (g_step > 16)
+        {
+            g_step = 3;
+        }
+        i = i + 1;
+    }
+    __bench_result = g_total;
+    return g_total;
+}

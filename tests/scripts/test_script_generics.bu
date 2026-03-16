@@ -1,0 +1,49 @@
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+class ScriptWidget
+{
+    var value;
+
+    def init(value)
+    {
+        self.value = value;
+    }
+}
+
+def identity(T, marker)
+{
+    return T;
+}
+
+class Holder
+{
+    def init()
+    {
+    }
+
+    def method(T)
+    {
+        return T;
+    }
+}
+
+var holder = Holder();
+var ctorFn = identity<ScriptWidget>(0);
+var ctorMethod = holder.method<ScriptWidget>();
+
+var a = ctorFn(42);
+var b = ctorMethod(99);
+
+if (__test_pass && classname(a) != "ScriptWidget") fail("generic function constructor");
+if (__test_pass && classname(b) != "ScriptWidget") fail("generic method constructor");
+if (__test_pass && a.value != 42) fail("generic function instance state");
+if (__test_pass && b.value != 99) fail("generic method instance state");
+if (__test_pass && typeid(ScriptWidget) != typeid(a)) fail("typeid function instance");
+if (__test_pass && typeid(ScriptWidget) != typeid(b)) fail("typeid method instance");

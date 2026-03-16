@@ -1,0 +1,68 @@
+require "bindings_debug";
+
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+def expect(cond, msg)
+{
+    if (!cond)
+    {
+        fail(msg);
+        return false;
+    }
+    return true;
+}
+
+def expectEq(actual, expected, msg)
+{
+    if (actual != expected)
+    {
+        fail(format("{} expected={} actual={}", msg, expected, actual));
+        return false;
+    }
+    return true;
+}
+
+var debugMarker = 41;
+
+def frameHasValue(value)
+{
+    var count = _dbgFrameSlots(0);
+    var i = 0;
+    while (i < count)
+    {
+        if (_dbgLocal(i) == value)
+            return true;
+        i = i + 1;
+    }
+    return false;
+}
+
+def innerProbe(extra)
+{
+    if (!expectEq(_dbgCurrentFunction(), "innerProbe", "current function")) return;
+    if (!expect(_dbgCurrentLine() > 0, "current line available")) return;
+    if (!expect(_dbgFrameCount() >= 2, "frame count includes caller")) return;
+    if (!expectEq(_dbgFrameFunction(0), "innerProbe", "top frame function")) return;
+    if (!expectEq(_dbgFrameFunction(1), "outerProbe", "parent frame function")) return;
+    if (!expect(_dbgFrameLine(0) > 0, "top frame line")) return;
+    if (!expect(_dbgFrameSlots(0) >= 1, "top frame slots")) return;
+    if (!expect(frameHasValue(extra), "current frame exposes local slot values")) return;
+    if (!expectEq(_dbgGlobal("debugMarker"), 41, "global read from c++")) return;
+    if (!expect(_dbgGlobalCount() >= 1, "global count")) return;
+    return extra + 1;
+}
+
+def outerProbe(seed)
+{
+    return innerProbe(seed);
+}
+
+var result = outerProbe(9);
+if (__test_pass && !expectEq(result, 10, "nested call result")) return;

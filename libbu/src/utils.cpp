@@ -5,8 +5,11 @@
 #include "platform.hpp"
 
 
+#include <atomic>
 
 #define BUFFER_SIZE 64
+
+static std::atomic<int> g_logMinimumSeverity{0};
 
 const char *doubleToString(double value)
 {
@@ -27,6 +30,9 @@ const char *longToString(long value)
 
 static void Log(int severity, const char *fmt, va_list args)
 {
+	if (severity < g_logMinimumSeverity.load())
+		return;
+
 	const char *type;
 	const char *color;
 	switch (severity)
@@ -120,6 +126,16 @@ void Print( const char *fmt, ...)
 	va_end(args);
 }
 
+void SetLogMinimumSeverity(int severity)
+{
+	g_logMinimumSeverity.store(severity);
+}
+
+int GetLogMinimumSeverity()
+{
+	return g_logMinimumSeverity.load();
+}
+
 char *LoadTextFile(const char *fileName)
 {
     char *text = nullptr;
@@ -137,7 +153,7 @@ char *LoadTextFile(const char *fileName)
             if (fileSize > 0)
             {
                 size_t size = static_cast<size_t>(fileSize);
-                text = (char *)aAlloc(size + 1);  // malloc em vez de realloc(NULL)
+                text = (char *)aAlloc(size + 1); 
                 
                 if (text != nullptr)
                 {

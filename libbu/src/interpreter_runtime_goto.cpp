@@ -352,10 +352,11 @@ ProcessResult Interpreter::run_process(Process *process)
         }                                                                              \
     } while (0)
 
-#define DISPATCH()                         \
-    do                                     \
-    {                                      \
-                goto *dispatch_table[READ_BYTE()]; \
+#define DISPATCH()                               \
+    do                                           \
+    {                                            \
+        uint8 _opcode = READ_BYTE();             \
+        goto *dispatch_table[_opcode];           \
     } while (0)
 
 #define ENTER_CALL_FRAME_DISPATCH(_targetFunc, _closure, _argc, _overflowMsg) \
@@ -1710,7 +1711,7 @@ op_get_property:
         }
         else
 
-            if (object.isClassInstance())
+        if (object.isClassInstance())
         {
             ClassInstance *instance = object.asClassInstance();
 
@@ -1741,7 +1742,7 @@ op_get_property:
         }
         else
 
-            if (object.isNativeClassInstance())
+        if (object.isNativeClassInstance())
         {
 
             NativeClassInstance *instance = object.asNativeClassInstance();

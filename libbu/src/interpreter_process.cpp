@@ -479,6 +479,12 @@ void Interpreter::run_process_step(Process *proc)
         return;
     }
 
+    if (result.reason == ProcessResult::DEBUG_BREAK)
+    {
+        proc->state = ProcessState::SUSPENDED;
+        return;
+    }
+
     if (result.reason == ProcessResult::PROCESS_DONE)
     {
         proc->state = ProcessState::DEAD;

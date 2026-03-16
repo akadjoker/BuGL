@@ -1,0 +1,32 @@
+var __bench_result = 0;
+var __bench_ops = 300000;
+
+class Counter
+{
+    var value;
+    var step;
+
+    def init()
+    {
+        self.value = 0;
+        self.step = 2;
+    }
+}
+
+def bench()
+{
+    var i = 0;
+    var counter = Counter();
+    while (i < __bench_ops)
+    {
+        counter.value = counter.value + 1;
+        counter.step = counter.step + 1;
+        if (counter.step > 16)
+        {
+            counter.step = 2;
+        }
+        i = i + 1;
+    }
+    __bench_result = counter.value;
+    return counter.value;
+}

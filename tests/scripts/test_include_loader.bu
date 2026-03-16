@@ -1,0 +1,16 @@
+include "helpers/test_helpers.bu";
+
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+if (__test_pass && helperFib(6) != 8) fail("include recursion");
+
+var counter = HelperCounter(10);
+if (__test_pass && counter.add(5) != 15) fail("included class method");
+if (__test_pass && counter.value != 15) fail("included class state");

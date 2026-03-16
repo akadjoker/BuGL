@@ -1,0 +1,49 @@
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+def expect(cond, msg)
+{
+    if (!cond)
+    {
+        fail(msg);
+        return false;
+    }
+    return true;
+}
+
+def expectEq(actual, expected, msg)
+{
+    if (actual != expected)
+    {
+        fail(format("{} expected={} actual={}", msg, expected, actual));
+        return false;
+    }
+    return true;
+}
+
+_gcProbeReset();
+
+var ephemeral = GcEphemeralProbe(21);
+if (!expect(ephemeral.isPayloadAlive(), "ephemeral payload starts alive")) return;
+ephemeral = nil;
+_gc();
+
+if (!expectEq(_gcProbeEphemeralDtorCount(), 1, "ephemeral wrapper destroyed by gc")) return;
+if (!expectEq(_gcProbeEphemeralAutoPayloadCount(), 1, "ephemeral payload auto-destroyed by gc")) return;
+
+var persistent = GcPersistentProbe(77);
+if (!expect(persistent.isPayloadAlive(), "persistent payload starts alive")) return;
+if (!expect(persistent.destroyPayload(), "persistent payload manual destroy returns true")) return;
+if (!expect(!persistent.isPayloadAlive(), "persistent payload marked dead after manual destroy")) return;
+
+_gc();
+persistent = nil;
+_gc();
+
+if (!expectEq(_gcProbePersistentAutoPayloadCount(), 0, "persistent payload not auto-destroyed by gc")) return;

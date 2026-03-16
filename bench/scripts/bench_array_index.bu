@@ -1,0 +1,18 @@
+var __bench_result = 0;
+var __bench_ops = 300000;
+
+def bench()
+{
+    var xs = [1, 2, 3, 4, 5, 6, 7, 8];
+    var i = 0;
+    var total = 0;
+    while (i < __bench_ops)
+    {
+        xs[0] = xs[0] + 1;
+        total = xs[0];
+        xs[1] = total;
+        i = i + 1;
+    }
+    __bench_result = total;
+    return total;
+}

@@ -17,6 +17,7 @@ Interpreter::Interpreter()
   compiler = new Compiler(this);
 #endif
   debugMode_ = false;
+  shutdownSummaryEnabled_ = true;
   hasFatalError_ = false;
 
   setPrivateTable();
@@ -243,6 +244,12 @@ void Interpreter::reset()
   currentProcess = nullptr;
   currentTime = 0.0f;
   hasFatalError_ = false;
+  debuggerPaused_ = false;
+  debuggerStepMode_ = false;
+  debuggerPauseRequested_ = false;
+  debuggerPauseState_ = {};
+  debuggerStepStart_ = {};
+  debuggerSkipOnce_ = {};
 
 #if !BU_RUNTIME_ONLY
   if (compiler)
@@ -255,17 +262,20 @@ void Interpreter::reset()
 Interpreter::~Interpreter()
 {
   //dumpToFile("main.dump");
-  Info("VM shutdown");
-  Info("Memory allocated : %s", formatBytes(totalAllocated));
-  Info("Classes          : %zu", getTotalClasses());
-  Info("Structs          : %zu", getTotalStructs());
-  Info("Arrays           : %zu", getTotalArrays());
-  Info("Maps             : %zu", getTotalMaps());
-  Info("Native classes   : %zu", getTotalNativeClasses());
-  Info("Native structs   : %zu", getTotalNativeStructs());
-  Info("Buffers          : %zu", totalBuffers);
-  Info("Processes        : %zu", aliveProcesses.size());
-  Info("Globals          : %zu", globalsArray.size());
+  if (shutdownSummaryEnabled_)
+  {
+    Info("VM shutdown");
+    Info("Memory allocated : %s", formatBytes(totalAllocated));
+    Info("Classes          : %zu", getTotalClasses());
+    Info("Structs          : %zu", getTotalStructs());
+    Info("Arrays           : %zu", getTotalArrays());
+    Info("Maps             : %zu", getTotalMaps());
+    Info("Native classes   : %zu", getTotalNativeClasses());
+    Info("Native structs   : %zu", getTotalNativeStructs());
+    Info("Buffers          : %zu", totalBuffers);
+    Info("Processes        : %zu", aliveProcesses.size());
+    Info("Globals          : %zu", globalsArray.size());
+  }
 
   freeInstances();
   freeRunningProcesses();
@@ -294,6 +304,7 @@ Interpreter::~Interpreter()
   openUpvalues = nullptr;
   // Info("Heap stats:");
   // arena.Stats();
+  
   arena.Clear();
   // Info("String Heap stats:");
   stringPool.clear();
@@ -580,7 +591,7 @@ int Interpreter::addGlobal(const char *name, Value value)
     // Já existe: só atualiza o valor
     if (index >= globalsArray.size())
     {
-      globalsArray.resize(index + 1);
+      ensureGlobalsArraySize(index + 1);
     }
     if (globalsArray[index].isNative() || globalsArray[index].isNativeProcess() ||
         globalsArray[index].isNativeClass() || globalsArray[index].isNativeStruct())
@@ -591,7 +602,7 @@ int Interpreter::addGlobal(const char *name, Value value)
 
     if (index >= globalIndexToName_.size())
     {
-      globalIndexToName_.resize(index + 1);
+      ensureGlobalNameArraySize(index + 1);
     }
     globalIndexToName_[index] = str;
     return index;
@@ -630,7 +641,7 @@ bool Interpreter::setGlobal(const char *name, Value value)
 
   if (index >= globalsArray.size())
   {
-    globalsArray.resize(index + 1);
+    ensureGlobalsArraySize(index + 1);
   }
 
   if (globalsArray[index].isNative() || globalsArray[index].isNativeProcess() ||
@@ -642,7 +653,7 @@ bool Interpreter::setGlobal(const char *name, Value value)
   globalsArray[index] = value;
   if (index >= globalIndexToName_.size())
   {
-    globalIndexToName_.resize(index + 1);
+    ensureGlobalNameArraySize(index + 1);
   }
   globalIndexToName_[index] = str;
   return true;
@@ -713,6 +724,32 @@ static void OsVPrintf(const char *fmt, va_list args)
   char buffer[1024];
   vsnprintf(buffer, sizeof(buffer), fmt, args);
   OsPrintf("%s", buffer);
+}
+
+void Interpreter::ensureGlobalsArraySize(size_t size)
+{
+  const size_t oldSize = globalsArray.size();
+  if (oldSize >= size)
+    return;
+
+  globalsArray.resize(size);
+  for (size_t i = oldSize; i < size; ++i)
+  {
+    globalsArray[i] = makeNil();
+  }
+}
+
+void Interpreter::ensureGlobalNameArraySize(size_t size)
+{
+  const size_t oldSize = globalIndexToName_.size();
+  if (oldSize >= size)
+    return;
+
+  globalIndexToName_.resize(size);
+  for (size_t i = oldSize; i < size; ++i)
+  {
+    globalIndexToName_[i] = nullptr;
+  }
 }
 
 void Interpreter::runtimeError(const char *format, ...)
@@ -875,7 +912,7 @@ Function *Interpreter::compile(const char *source)
 
   if (globalsArray.size() < globalIndexToName_.size())
   {
-    globalsArray.resize(globalIndexToName_.size());
+    ensureGlobalsArraySize(globalIndexToName_.size());
   }
   
   Function *mainFunc = proc->frames[0].func;
@@ -904,7 +941,7 @@ Function *Interpreter::compileExpression(const char *source)
 
   if (globalsArray.size() < globalIndexToName_.size())
   {
-    globalsArray.resize(globalIndexToName_.size());
+    ensureGlobalsArraySize(globalIndexToName_.size());
   }
   
   Function *mainFunc = proc->frames[0].func;
@@ -940,7 +977,7 @@ bool Interpreter::run(const char *source, bool _dump)
 
   if (globalsArray.size() < globalIndexToName_.size())
   {
-    globalsArray.resize(globalIndexToName_.size());
+    ensureGlobalsArraySize(globalIndexToName_.size());
   }
 
   if (_dump)
@@ -987,7 +1024,7 @@ bool Interpreter::compile(const char *source, bool dump)
 
   if (globalsArray.size() < globalIndexToName_.size())
   {
-    globalsArray.resize(globalIndexToName_.size());
+    ensureGlobalsArraySize(globalIndexToName_.size());
   }
 
   if (dump)

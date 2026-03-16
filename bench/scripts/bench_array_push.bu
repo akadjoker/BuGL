@@ -1,0 +1,15 @@
+var __bench_result = 0;
+var __bench_ops = 100000;
+
+def bench()
+{
+    var xs = [];
+    var i = 0;
+    while (i < 100000)
+    {
+        xs.push(i);
+        i = i + 1;
+    }
+    __bench_result = xs.length();
+    return xs.length();
+}

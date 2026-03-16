@@ -1,0 +1,14 @@
+var __bench_result = 0;
+var __bench_ops = 300000;
+
+def bench()
+{
+    var i = 0;
+    while (i < __bench_ops)
+    {
+        _gcProbeReset();
+        i = i + 1;
+    }
+    __bench_result = i;
+    return i;
+}

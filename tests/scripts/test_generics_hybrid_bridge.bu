@@ -1,0 +1,56 @@
+require "bindings_bridge";
+
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+class HybridWidget:TestBridgePersistent
+{
+    var seed;
+
+    def init(seed)
+    {
+        self.seed = seed;
+        self.nativeValue = seed + 100;
+    }
+}
+
+def identity(T, marker)
+{
+    return T;
+}
+
+class Holder
+{
+    def init()
+    {
+    }
+
+    def make(T)
+    {
+        return T;
+    }
+}
+
+var holder = Holder();
+var ctorFn = identity<HybridWidget>(0);
+var ctorMethod = holder.make<HybridWidget>();
+
+var a = ctorFn(3);
+var b = ctorMethod(7);
+
+if (__test_pass && classname(a) != "HybridWidget") fail("generic function hybrid classname");
+if (__test_pass && classname(b) != "HybridWidget") fail("generic method hybrid classname");
+if (__test_pass && a.seed != 3) fail("generic function hybrid init");
+if (__test_pass && b.seed != 7) fail("generic method hybrid init");
+if (__test_pass && a.nativeValue != 103) fail("generic function hybrid native property");
+if (__test_pass && b.nativeValue != 107) fail("generic method hybrid native property");
+if (__test_pass && !a.isPersistentNative) fail("hybrid persistent flag");
+if (__test_pass && typeid(HybridWidget) != typeid(a)) fail("hybrid typeid function");
+if (__test_pass && typeid(HybridWidget) != typeid(b)) fail("hybrid typeid method");
+if (__test_pass && a.bumpNative(2) != 105) fail("hybrid native method after generic create");

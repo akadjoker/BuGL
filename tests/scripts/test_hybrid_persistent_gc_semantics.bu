@@ -1,0 +1,54 @@
+require "bindings_bridge";
+
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+def expectEq(actual, expected, msg)
+{
+    if (actual != expected)
+    {
+        fail(format("{} expected={} actual={}", msg, expected, actual));
+        return false;
+    }
+    return true;
+}
+
+_bridgeReset();
+
+class PersistentHybrid:TestBridgePersistent
+{
+    def init(seed)
+    {
+        self.nativeValue = seed;
+    }
+}
+
+class EphemeralHybrid:TestBridgeEphemeral
+{
+    def init(seed)
+    {
+        self.nativeValue = seed;
+    }
+}
+
+var persistentObj = PersistentHybrid(11);
+var ephemeralObj = EphemeralHybrid(22);
+
+if (!expectEq(_bridgePersistentCtorCount(), 1, "persistent hybrid native ctor count")) return;
+if (!expectEq(_bridgeEphemeralCtorCount(), 1, "ephemeral hybrid native ctor count")) return;
+
+persistentObj = nil;
+ephemeralObj = nil;
+_gc();
+_gc();
+
+// Current runtime semantics: hybrid script classes are still GC-managed ClassInstance objects,
+// even when their native superclass is marked persistent.
+if (!expectEq(_bridgePersistentDtorCount(), 1, "persistent hybrid destructor on GC")) return;
+if (!expectEq(_bridgeEphemeralDtorCount(), 1, "ephemeral hybrid destructor on GC")) return;

@@ -1,0 +1,79 @@
+require "bindings_bridge";
+
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+def expect(cond, msg)
+{
+    if (!cond)
+    {
+        fail(msg);
+        return false;
+    }
+    return true;
+}
+
+def expectEq(actual, expected, msg)
+{
+    if (actual != expected)
+    {
+        fail(format("{} expected={} actual={}", msg, expected, actual));
+        return false;
+    }
+    return true;
+}
+
+_bridgeReset();
+
+var globalHits = 0;
+var globalLast = 0;
+
+def globalSink(value)
+{
+    globalHits = globalHits + 1;
+    globalLast = value;
+}
+
+class ScriptBridge:TestBridgePersistent
+{
+    var scriptValue;
+
+    def init(seed)
+    {
+        self.scriptValue = seed;
+        self.nativeValue = seed * 2;
+    }
+
+    def onEvent(value)
+    {
+        self.scriptValue = self.scriptValue + value;
+    }
+}
+
+var obj = ScriptBridge(5);
+if (!expectEq(obj.scriptValue, 5, "script init value")) return;
+if (!expectEq(obj.nativeValue, 10, "native property after init")) return;
+if (!expect(obj.isPersistentNative, "persistent flag visible from script")) return;
+if (!expectEq(obj.bumpNative(3), 13, "native method result")) return;
+if (!expectEq(obj.nativeValue, 13, "native property after bump")) return;
+
+if (!expect(_bridgeInvoke(obj, 7), "C++ invoke on script method")) return;
+if (!expectEq(obj.scriptValue, 12, "script method side effect")) return;
+if (!expectEq(_bridgeCallbackCount(), 1, "callback count")) return;
+if (!expectEq(_bridgeLastEventValue(), 7, "last callback value")) return;
+
+if (!expect(_bridgeCallGlobal("globalSink", 42), "C++ invoke global function")) return;
+if (!expectEq(globalHits, 1, "global callback count")) return;
+if (!expectEq(globalLast, 42, "global callback value")) return;
+if (!expectEq(_bridgeGlobalCallCount(), 1, "native global call count")) return;
+
+var created = _bridgeCreate("ScriptBridge", 9);
+if (!expect(classname(created) == "ScriptBridge", "C++ created class instance")) return;
+if (!expectEq(created.scriptValue, 9, "C++ create ran init")) return;
+if (!expectEq(created.nativeValue, 18, "C++ create initialized native state")) return;

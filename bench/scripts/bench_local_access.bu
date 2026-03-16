@@ -1,0 +1,21 @@
+var __bench_result = 0;
+var __bench_ops = 100000;
+
+def bench()
+{
+    var i = 0;
+    var total = 0;
+    var step = 3;
+    while (i < __bench_ops)
+    {
+        total = total + 1;
+        step = step + 1;
+        if (step > 16)
+        {
+            step = 3;
+        }
+        i = i + 1;
+    }
+    __bench_result = total;
+    return total;
+}

@@ -1,0 +1,21 @@
+def helperFib(n)
+{
+    if (n < 2) return n;
+    return helperFib(n - 1) + helperFib(n - 2);
+}
+
+class HelperCounter
+{
+    var value;
+
+    def init(start)
+    {
+        self.value = start;
+    }
+
+    def add(step)
+    {
+        self.value = self.value + step;
+        return self.value;
+    }
+}

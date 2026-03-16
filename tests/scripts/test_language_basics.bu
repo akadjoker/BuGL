@@ -1,0 +1,45 @@
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+var a = 1 + 2 * 3;
+if (__test_pass && a != 7) fail("operator precedence");
+
+var b = (1 + 2) * 3;
+if (__test_pass && b != 9) fail("grouped expression");
+
+var c = 10;
+c = c + 5;
+if (__test_pass && c != 15) fail("assignment");
+
+var logic = true && false || true;
+if (__test_pass && !logic) fail("boolean logic");
+
+var total = 0;
+for (var i = 0; i < 5; i = i + 1)
+{
+    total = total + i;
+}
+if (__test_pass && total != 10) fail("for loop");
+
+var j = 0;
+var sum = 0;
+while (j < 4)
+{
+    sum = sum + j;
+    j = j + 1;
+}
+if (__test_pass && sum != 6) fail("while loop");
+
+var xs = [1, 2, 3];
+xs.push(4);
+if (__test_pass && xs.length() != 4) fail("array length");
+if (__test_pass && xs[3] != 4) fail("array index");
+
+var text = format("{}-{}", "lexer", "vm");
+if (__test_pass && text != "lexer-vm") fail("format builtin");

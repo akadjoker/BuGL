@@ -374,8 +374,6 @@ void Interpreter::runGC()
 #endif
 
     gcInProgress = false;
-
-    // gcInProgress = false;
 }
 
 size_t Interpreter::countObjects() const

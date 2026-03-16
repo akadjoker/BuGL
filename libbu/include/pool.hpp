@@ -113,7 +113,4 @@ public:
     size_t size() const { return pool.size(); }
 };
 
-inline bool compareString(String *a, String *b)
-{
-    return compare_strings(a, b);
-}
+ 

@@ -1,0 +1,42 @@
+require "bindings_debug";
+
+var __test_pass = true;
+var __test_message = "ok";
+
+def fail(msg)
+{
+    __test_pass = false;
+    __test_message = msg;
+}
+
+def expect(cond, msg)
+{
+    if (!cond)
+    {
+        fail(msg);
+        return false;
+    }
+    return true;
+}
+
+def expectEq(actual, expected, msg)
+{
+    if (actual != expected)
+    {
+        fail(format("{} expected={} actual={}", msg, expected, actual));
+        return false;
+    }
+    return true;
+}
+
+if (!expect(_dbgGlobal("a") == nil, "a defaults to nil before init")) return;
+if (!expect(_dbgGlobal("b") == nil, "b defaults to nil before init")) return;
+if (!expect(_dbgGlobal("text") == nil, "text defaults to nil before init")) return;
+
+var a = 10;
+var b = 20;
+var text = "ready";
+
+if (!expectEq(_dbgGlobal("a"), 10, "a after init")) return;
+if (!expectEq(_dbgGlobal("b"), 20, "b after init")) return;
+if (!expectEq(_dbgGlobal("text"), "ready", "text after init")) return;

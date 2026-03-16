@@ -72,6 +72,10 @@ target_include_directories(libbu PUBLIC include src ${CMAKE_SOURCE_DIR}/vendor/m
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     message(STATUS "🐛 Debug mode - sanitizers enabled")
 
+    target_compile_definitions(libbu PRIVATE
+        USE_COMPUTED_GOTO=0
+    )
+
     if (UNIX)
         target_compile_options(libbu PRIVATE
             -fsanitize=address

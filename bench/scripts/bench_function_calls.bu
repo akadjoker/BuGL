@@ -1,0 +1,20 @@
+var __bench_result = 0;
+var __bench_ops = 300000;
+
+def addOne(value)
+{
+    return value + 1;
+}
+
+def bench()
+{
+    var i = 0;
+    var total = 0;
+    while (i < 300000)
+    {
+        total = addOne(total);
+        i = i + 1;
+    }
+    __bench_result = total;
+    return total;
+}
