@@ -810,10 +810,15 @@ bool Interpreter::throwException(Value error)
 
     fiber->stackTop = handler.stackRestore; // Limpa a stack!
 
+    // Unwind call frames back to the frame that registered this try handler
+    fiber->frameCount = handler.frameRestore;
+
     if (handler.catchIP != nullptr && !handler.catchConsumed)
     {
       handler.catchConsumed = true;
       push(error);
+      // Update the restored frame's ip so LOAD_FRAME() picks it up
+      fiber->frames[fiber->frameCount - 1].ip = handler.catchIP;
       fiber->ip = handler.catchIP;
       return true;
     }
@@ -822,6 +827,8 @@ bool Interpreter::throwException(Value error)
       handler.pendingError = error;
       handler.hasPendingError = true;
       handler.inFinally = true;
+      // Update the restored frame's ip so LOAD_FRAME() picks it up
+      fiber->frames[fiber->frameCount - 1].ip = handler.finallyIP;
       fiber->ip = handler.finallyIP;
       return true;
     }

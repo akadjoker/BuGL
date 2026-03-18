@@ -1,0 +1,5 @@
+// Test: unterminated string literal
+// Expected: compile error
+
+var x = "hello world
+print(x)

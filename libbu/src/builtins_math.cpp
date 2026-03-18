@@ -491,19 +491,6 @@ int native_math_ping_pong(Interpreter *vm, int argCount, Value *args)
     return 1;
 }
 
-// abs(value) -> absolute value
- int native_abs(Interpreter *vm, int argCount, Value *args)
-{
-    if (argCount != 1 || !args[0].isNumber())
-    {
-        Error("abs expects 1 number argument");
-        vm->pushDouble(0);
-        return 1;
-    }
-    vm->pushDouble(fabs(args[0].asNumber()));
-    return 1;
-}
-
 void Interpreter::registerMath()
 {
 
@@ -538,7 +525,6 @@ void Interpreter::registerMath()
         .addFunction("repeat", native_math_repeat, 2)
         .addFunction("ping_pong", native_math_ping_pong, 2)
 
-        .addFunction("abs", native_abs, 1)
         .addFunction("clamp", native_clamp, 3)
         .addFunction("min", native_min, 2)
         .addFunction("max", native_max, 2)

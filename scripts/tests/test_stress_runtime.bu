@@ -1,0 +1,128 @@
+// ============================================
+// test_stress_runtime.bu — data structures, types, coercion, limits
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// ==== 1. Empty array operations ====
+var empty = [];
+assert(empty.length() == 0, "empty array length");
+
+// ==== 2. Nested arrays ====
+var nested = [[1, 2], [3, [4, 5]], []];
+assert(nested.length() == 3, "nested length");
+assert(nested[0][1] == 2, "nested[0][1]");
+assert(nested[1][1][0] == 4, "nested[1][1][0]");
+assert(nested[2].length() == 0, "nested empty sub");
+
+// ==== 3. Array with mixed types ====
+var mixed = [1, "two", true, nil, 3.14, [1]];
+assert(mixed.length() == 6, "mixed length");
+assert(mixed[0] == 1, "mixed int");
+assert(mixed[1] == "two", "mixed string");
+assert(mixed[2] == true, "mixed bool");
+assert(mixed[3] == nil, "mixed nil");
+
+// ==== 4. Map with many keys ====
+var big_map = {};
+for (var i = 0; i < 100; i += 1) {
+    big_map[f"key_{i}"] = i * i;
+}
+assert(big_map["key_0"] == 0, "map key_0");
+assert(big_map["key_50"] == 2500, "map key_50");
+assert(big_map["key_99"] == 9801, "map key_99");
+
+// ==== 5. String edge cases ====
+var empty_str = "";
+assert(empty_str.length() == 0, "empty string length");
+assert(empty_str + "hello" == "hello", "empty + str");
+assert("hello" + empty_str == "hello", "str + empty");
+
+// ==== 6. Boolean coercion in conditions ====
+var truthy_test = "";
+if (1) { truthy_test += "1"; }
+if ("hello") { truthy_test += "2"; }
+if (0) { truthy_test += "X"; }
+if ("") { truthy_test += "Y"; }
+if (nil) { truthy_test += "Z"; }
+assert(truthy_test == "12", "truthy/falsy");
+
+// ==== 7. Array push/pop stress ====
+var stress_arr = [];
+for (var i = 0; i < 200; i += 1) {
+    stress_arr.push(i);
+}
+assert(stress_arr.length() == 200, "push 200");
+assert(stress_arr[199] == 199, "push last val");
+
+for (var i = 0; i < 100; i += 1) {
+    stress_arr.pop();
+}
+assert(stress_arr.length() == 100, "pop 100");
+assert(stress_arr[99] == 99, "post-pop last val");
+
+// ==== 8. String concatenation stress ====
+var big_str = "";
+for (var i = 0; i < 100; i += 1) {
+    big_str += "x";
+}
+assert(big_str.length() == 100, "string concat 100");
+
+// ==== 9. Deeply nested function calls (not recursive) ====
+def f1(x) { return x + 1; }
+def f2(x) { return f1(f1(x)); }
+def f3(x) { return f2(f2(x)); }
+def f4(x) { return f3(f3(x)); }
+def f5(x) { return f4(f4(x)); }
+
+// f1 adds 1, f2 adds 2, f3 adds 4, f4 adds 8, f5 adds 16
+assert(f1(0) == 1, "f1 chain");
+assert(f2(0) == 2, "f2 chain");
+assert(f3(0) == 4, "f3 chain");
+assert(f4(0) == 8, "f4 chain");
+assert(f5(0) == 16, "f5 chain");
+
+// ==== 10. Variable shadowing in nested scopes ====
+var x = "outer";
+{
+    var x = "inner1";
+    {
+        var x = "inner2";
+        assert(x == "inner2", "shadow inner2");
+    }
+    assert(x == "inner1", "shadow inner1");
+}
+assert(x == "outer", "shadow outer");
+
+// ==== 11. Comparison edge cases ====
+assert(nil == nil, "nil==nil");
+assert(nil != false, "nil!=false");
+assert(nil != 0, "nil!=0");
+assert(0 == 0.0, "0==0.0");
+
+// ==== 12. Negative zero ====
+var neg_zero = -0;
+assert(neg_zero == 0, "-0==0");
+
+// ==== 13. Integer overflow wrapping ====
+var big = 2147483647;   // INT_MAX
+var bigger = big + 1;   // wraps to INT_MIN
+assert(bigger < big, "int overflow wraps");
+
+// ==== Summary ====
+print(f"=== test_stress_runtime: {passed}/{passed + failed} ===");
+if (failed > 0) {
+    print(f"FAILED: {failed} tests");
+    exit(1);
+}

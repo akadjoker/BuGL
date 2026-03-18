@@ -91,6 +91,7 @@ RenderBatch::RenderBatch()
       colora(255),
       use_matrix(false),
       programId(0),
+      vaoId(0),
       vboId(0),
       eboId(0),
       whiteTextureId(0),
@@ -220,14 +221,29 @@ bool RenderBatch::createDeviceObjects()
     if (!compileShaderProgram())
         return false;
 
+    glGenVertexArrays(1, &vaoId);
     glGenBuffers(1, &vboId);
     glGenBuffers(1, &eboId);
-    if (vboId == 0 || eboId == 0)
+    if (vaoId == 0 || vboId == 0 || eboId == 0)
     {
-        LogError("[Batch] failed to create VBO/EBO");
+        LogError("[Batch] failed to create VAO/VBO/EBO");
         destroyDeviceObjects();
         return false;
     }
+
+    // Set up VAO with vertex layout
+    glBindVertexArray(vaoId);
+    glBindBuffer(GL_ARRAY_BUFFER, vboId);
+    glEnableVertexAttribArray((GLuint)aPosLocation);
+    glEnableVertexAttribArray((GLuint)aUvLocation);
+    glEnableVertexAttribArray((GLuint)aColorLocation);
+    glVertexAttribPointer((GLuint)aPosLocation,   3, GL_FLOAT,         GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex, x));
+    glVertexAttribPointer((GLuint)aUvLocation,    2, GL_FLOAT,         GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex, u));
+    glVertexAttribPointer((GLuint)aColorLocation, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof(Vertex), (const void*)offsetof(Vertex, r));
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, eboId);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
     glGenTextures(1, &whiteTextureId);
     if (whiteTextureId == 0)
@@ -271,6 +287,13 @@ void RenderBatch::destroyDeviceObjects()
     {
         glDeleteBuffers(1, &vboId);
         vboId = 0;
+    }
+
+    if (vaoId != 0)
+    {
+        glBindVertexArray(0);
+        glDeleteVertexArrays(1, &vaoId);
+        vaoId = 0;
     }
 
     if (programId != 0)
@@ -389,20 +412,14 @@ void RenderBatch::Render()
     if (uTextureLocation >= 0)
         glUniform1i(uTextureLocation, 0);
 
+    // Upload vertex data and bind VAO
+    glBindVertexArray(vaoId);
     glBindBuffer(GL_ARRAY_BUFFER, vboId);
     glBufferData(GL_ARRAY_BUFFER,
                  (GLsizeiptr)(vertices.size() * sizeof(Vertex)),
                  vertices.data(),
                  GL_DYNAMIC_DRAW);
 
-    glEnableVertexAttribArray((GLuint)aPosLocation);
-    glEnableVertexAttribArray((GLuint)aUvLocation);
-    glEnableVertexAttribArray((GLuint)aColorLocation);
-    glVertexAttribPointer((GLuint)aPosLocation,   3, GL_FLOAT,         GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex, x));
-    glVertexAttribPointer((GLuint)aUvLocation,    2, GL_FLOAT,         GL_FALSE, sizeof(Vertex), (const void*)offsetof(Vertex, u));
-    glVertexAttribPointer((GLuint)aColorLocation, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof(Vertex), (const void*)offsetof(Vertex, r));
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, eboId);
     glActiveTexture(GL_TEXTURE0);
 
     unsigned int activeTex = 0xFFFFFFFFu;
@@ -435,11 +452,7 @@ void RenderBatch::Render()
         }
     }
 
-    glDisableVertexAttribArray((GLuint)aPosLocation);
-    glDisableVertexAttribArray((GLuint)aUvLocation);
-    glDisableVertexAttribArray((GLuint)aColorLocation);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
 
@@ -471,12 +484,13 @@ bool RenderBatch::ensureIndexCapacity(std::size_t vertexCount)
         quadIndices[bi + 5] = base + 3;
     }
 
+    glBindVertexArray(vaoId);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, eboId);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                  (GLsizeiptr)(quadIndices.size() * sizeof(unsigned int)),
                  quadIndices.data(),
                  GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
     return true;
 }
 
@@ -1500,4 +1514,265 @@ void RenderBatch::ThickSpline(const Vector2 *points, int pointCount, float thick
         Vertex2f(v3.x, v3.y);
         Vertex2f(v2.x, v2.y);
     }
+}
+
+// ---------------------------------------------------------------------------
+// New 2D texture / shape functions
+// ---------------------------------------------------------------------------
+
+void RenderBatch::TexturedRect(unsigned int textureId, float x, float y, float width, float height)
+{
+    Quad(textureId, x, y, width, height);
+}
+
+void RenderBatch::Sprite(unsigned int textureId, float srcX, float srcY, float srcW, float srcH,
+                         float dstX, float dstY, float dstW, float dstH,
+                         float texWidth, float texHeight)
+{
+    const float safeW = (texWidth > 0.0f) ? texWidth : 1.0f;
+    const float safeH = (texHeight > 0.0f) ? texHeight : 1.0f;
+
+    const float u0 = srcX / safeW;
+    const float v0 = srcY / safeH;
+    const float u1 = (srcX + srcW) / safeW;
+    const float v1 = (srcY + srcH) / safeH;
+
+    SetTexture(textureId);
+    SetMode(QUAD);
+
+    TexCoord2f(u0, v0); Vertex2f(dstX, dstY);
+    TexCoord2f(u1, v0); Vertex2f(dstX + dstW, dstY);
+    TexCoord2f(u1, v1); Vertex2f(dstX + dstW, dstY + dstH);
+    TexCoord2f(u0, v1); Vertex2f(dstX, dstY + dstH);
+}
+
+void RenderBatch::SpriteEx(unsigned int textureId, float srcX, float srcY, float srcW, float srcH,
+                           float dstX, float dstY, float dstW, float dstH,
+                           float angle, float originX, float originY,
+                           bool flipH, bool flipV,
+                           float texWidth, float texHeight)
+{
+    const float safeW = (texWidth > 0.0f) ? texWidth : 1.0f;
+    const float safeH = (texHeight > 0.0f) ? texHeight : 1.0f;
+
+    float u0 = srcX / safeW;
+    float v0 = srcY / safeH;
+    float u1 = (srcX + srcW) / safeW;
+    float v1 = (srcY + srcH) / safeH;
+
+    if (flipH) { float tmp = u0; u0 = u1; u1 = tmp; }
+    if (flipV) { float tmp = v0; v0 = v1; v1 = tmp; }
+
+    // 4 corners relative to origin
+    const float lx = -originX;
+    const float rx = dstW - originX;
+    const float ty = -originY;
+    const float by = dstH - originY;
+
+    const float rad = angle * (PI / 180.0f);
+    const float ca = cosf(rad);
+    const float sa = sinf(rad);
+
+    // Rotate each corner around origin then translate to dst position
+    const float cx = dstX + originX;
+    const float cy = dstY + originY;
+
+    const float x0 = cx + lx * ca - ty * sa;
+    const float y0 = cy + lx * sa + ty * ca;
+    const float x1 = cx + rx * ca - ty * sa;
+    const float y1 = cy + rx * sa + ty * ca;
+    const float x2 = cx + rx * ca - by * sa;
+    const float y2 = cy + rx * sa + by * ca;
+    const float x3 = cx + lx * ca - by * sa;
+    const float y3 = cy + lx * sa + by * ca;
+
+    SetTexture(textureId);
+    SetMode(TRIANGLES);
+
+    TexCoord2f(u0, v0); Vertex2f(x0, y0);
+    TexCoord2f(u1, v0); Vertex2f(x1, y1);
+    TexCoord2f(u1, v1); Vertex2f(x2, y2);
+
+    TexCoord2f(u0, v0); Vertex2f(x0, y0);
+    TexCoord2f(u1, v1); Vertex2f(x2, y2);
+    TexCoord2f(u0, v1); Vertex2f(x3, y3);
+}
+
+void RenderBatch::NineSlice(unsigned int textureId, float x, float y, float width, float height,
+                            float borderLeft, float borderTop, float borderRight, float borderBottom,
+                            float texWidth, float texHeight)
+{
+    const float safeW = (texWidth > 0.0f) ? texWidth : 1.0f;
+    const float safeH = (texHeight > 0.0f) ? texHeight : 1.0f;
+
+    // Clamp borders so they don't exceed the destination or texture size
+    if (borderLeft + borderRight > width) { borderLeft = borderRight = width * 0.5f; }
+    if (borderTop + borderBottom > height) { borderTop = borderBottom = height * 0.5f; }
+
+    // UV coordinates for the 3x3 grid
+    const float uL = 0.0f;
+    const float uML = borderLeft / safeW;
+    const float uMR = (safeW - borderRight) / safeW;
+    const float uR = 1.0f;
+
+    const float vT = 0.0f;
+    const float vMT = borderTop / safeH;
+    const float vMB = (safeH - borderBottom) / safeH;
+    const float vB = 1.0f;
+
+    // Pixel positions for the 3x3 grid
+    const float pxL = x;
+    const float pxML = x + borderLeft;
+    const float pxMR = x + width - borderRight;
+    const float pxR = x + width;
+
+    const float pyT = y;
+    const float pyMT = y + borderTop;
+    const float pyMB = y + height - borderBottom;
+    const float pyB = y + height;
+
+    SetTexture(textureId);
+
+    // Helper lambda to draw one slice
+    auto drawSlice = [&](float sx, float sy, float sw, float sh,
+                         float su0, float sv0, float su1, float sv1)
+    {
+        if (sw <= 0.0f || sh <= 0.0f)
+            return;
+        SetMode(QUAD);
+        TexCoord2f(su0, sv0); Vertex2f(sx, sy);
+        TexCoord2f(su1, sv0); Vertex2f(sx + sw, sy);
+        TexCoord2f(su1, sv1); Vertex2f(sx + sw, sy + sh);
+        TexCoord2f(su0, sv1); Vertex2f(sx, sy + sh);
+    };
+
+    // Top row: TL, TC, TR
+    drawSlice(pxL,  pyT,  borderLeft,             borderTop,              uL,  vT,  uML, vMT);
+    drawSlice(pxML, pyT,  pxMR - pxML,            borderTop,              uML, vT,  uMR, vMT);
+    drawSlice(pxMR, pyT,  borderRight,             borderTop,              uMR, vT,  uR,  vMT);
+
+    // Middle row: ML, MC, MR
+    drawSlice(pxL,  pyMT, borderLeft,             pyMB - pyMT,            uL,  vMT, uML, vMB);
+    drawSlice(pxML, pyMT, pxMR - pxML,            pyMB - pyMT,            uML, vMT, uMR, vMB);
+    drawSlice(pxMR, pyMT, borderRight,             pyMB - pyMT,            uMR, vMT, uR,  vMB);
+
+    // Bottom row: BL, BC, BR
+    drawSlice(pxL,  pyMB, borderLeft,             borderBottom,           uL,  vMB, uML, vB);
+    drawSlice(pxML, pyMB, pxMR - pxML,            borderBottom,           uML, vMB, uMR, vB);
+    drawSlice(pxMR, pyMB, borderRight,             borderBottom,           uMR, vMB, uR,  vB);
+}
+
+void RenderBatch::ThickLine2D(float x1, float y1, float x2, float y2, float thickness)
+{
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    const float len = sqrtf(dx * dx + dy * dy);
+    if (len <= 0.0001f)
+        return;
+
+    dx /= len;
+    dy /= len;
+    const float halfThick = thickness * 0.5f;
+    const float px = -dy * halfThick;
+    const float py = dx * halfThick;
+
+    SetTexture(0);
+    SetMode(TRIANGLES);
+
+    Vertex2f(x1 + px, y1 + py);
+    Vertex2f(x1 - px, y1 - py);
+    Vertex2f(x2 + px, y2 + py);
+
+    Vertex2f(x1 - px, y1 - py);
+    Vertex2f(x2 - px, y2 - py);
+    Vertex2f(x2 + px, y2 + py);
+}
+
+void RenderBatch::Ring(int centerX, int centerY, float innerRadius, float outerRadius,
+                       float startAngle, float endAngle, int segments, bool fill)
+{
+    if (innerRadius < 0.0f) innerRadius = 0.0f;
+    if (outerRadius <= innerRadius) return;
+    segments = std::max(4, segments);
+
+    const float startRad = startAngle * (PI / 180.0f);
+    const float endRad = endAngle * (PI / 180.0f);
+    const float step = (endRad - startRad) / (float)segments;
+    const float cx = (float)centerX;
+    const float cy = (float)centerY;
+
+    SetTexture(0);
+
+    if (fill)
+    {
+        SetMode(TRIANGLES);
+        float angle = startRad;
+        for (int i = 0; i < segments; ++i)
+        {
+            const float a0 = angle;
+            const float a1 = angle + step;
+            const float cos0 = cosf(a0);
+            const float sin0 = sinf(a0);
+            const float cos1 = cosf(a1);
+            const float sin1 = sinf(a1);
+
+            // Outer edge
+            const float ox0 = cx + cos0 * outerRadius;
+            const float oy0 = cy + sin0 * outerRadius;
+            const float ox1 = cx + cos1 * outerRadius;
+            const float oy1 = cy + sin1 * outerRadius;
+            // Inner edge
+            const float ix0 = cx + cos0 * innerRadius;
+            const float iy0 = cy + sin0 * innerRadius;
+            const float ix1 = cx + cos1 * innerRadius;
+            const float iy1 = cy + sin1 * innerRadius;
+
+            // Two triangles per segment
+            Vertex2f(ix0, iy0);
+            Vertex2f(ox0, oy0);
+            Vertex2f(ox1, oy1);
+
+            Vertex2f(ix0, iy0);
+            Vertex2f(ox1, oy1);
+            Vertex2f(ix1, iy1);
+
+            angle = a1;
+        }
+    }
+    else
+    {
+        SetMode(LINES);
+        float angle = startRad;
+        for (int i = 0; i < segments; ++i)
+        {
+            const float a0 = angle;
+            const float a1 = angle + step;
+
+            // Outer ring
+            Vertex2f(cx + cosf(a0) * outerRadius, cy + sinf(a0) * outerRadius);
+            Vertex2f(cx + cosf(a1) * outerRadius, cy + sinf(a1) * outerRadius);
+            // Inner ring
+            Vertex2f(cx + cosf(a0) * innerRadius, cy + sinf(a0) * innerRadius);
+            Vertex2f(cx + cosf(a1) * innerRadius, cy + sinf(a1) * innerRadius);
+
+            angle = a1;
+        }
+        // Connect start
+        Vertex2f(cx + cosf(startRad) * innerRadius, cy + sinf(startRad) * innerRadius);
+        Vertex2f(cx + cosf(startRad) * outerRadius, cy + sinf(startRad) * outerRadius);
+        // Connect end
+        Vertex2f(cx + cosf(endRad) * innerRadius, cy + sinf(endRad) * innerRadius);
+        Vertex2f(cx + cosf(endRad) * outerRadius, cy + sinf(endRad) * outerRadius);
+    }
+}
+
+void RenderBatch::Arc(int centerX, int centerY, float radius, float startAngle, float endAngle,
+                      float thickness, int segments)
+{
+    if (thickness <= 0.0f || radius <= 0.0f)
+        return;
+
+    const float innerRadius = std::max(0.0f, radius - thickness * 0.5f);
+    const float outerRadius = radius + thickness * 0.5f;
+    Ring(centerX, centerY, innerRadius, outerRadius, startAngle, endAngle, segments, true);
 }

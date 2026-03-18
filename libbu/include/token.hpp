@@ -154,6 +154,9 @@ enum TokenType
     
     
 
+    // F-String interpolation
+    TOKEN_FSTRING,
+
     // Special
     TOKEN_EOF,
     TOKEN_ERROR,

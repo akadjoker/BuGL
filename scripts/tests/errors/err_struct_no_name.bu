@@ -1,0 +1,5 @@
+// BAD: struct with no name
+struct {
+    x, y
+}
+print("should not reach here");

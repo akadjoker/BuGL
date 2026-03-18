@@ -1,0 +1,79 @@
+// ============================================
+// test_math_builtins.bu — Math builtins & utility functions
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+def approx(a, b)
+{
+    var diff = a - b;
+    if (diff < 0) diff = -diff;
+    return diff < 0.001;
+}
+
+// abs
+assert(abs(-5) == 5, "abs neg");
+assert(abs(5) == 5, "abs pos");
+assert(abs(0) == 0, "abs zero");
+
+// floor / ceil
+assert(floor(3.7) == 3, "floor 3.7");
+assert(floor(-1.2) == -2, "floor -1.2");
+assert(ceil(3.2) == 4, "ceil 3.2");
+assert(ceil(-1.8) == -1, "ceil -1.8");
+
+// sqrt
+assert(approx(sqrt(4), 2.0), "sqrt 4");
+assert(approx(sqrt(9), 3.0), "sqrt 9");
+assert(approx(sqrt(2), 1.414), "sqrt 2");
+
+// pow
+assert(pow(2, 10) == 1024, "pow 2^10");
+assert(pow(3, 3) == 27, "pow 3^3");
+assert(approx(pow(4, 0.5), 2.0), "pow 4^0.5");
+
+// sin / cos
+assert(approx(sin(0), 0.0), "sin 0");
+assert(approx(cos(0), 1.0), "cos 0");
+
+// Trigonometric identity: sin^2 + cos^2 = 1
+var angle = 1.23;
+var s2 = sin(angle) * sin(angle);
+var c2 = cos(angle) * cos(angle);
+assert(approx(s2 + c2, 1.0), "sin^2+cos^2=1");
+
+// log / exp
+assert(approx(exp(0), 1.0), "exp 0");
+assert(approx(log(1), 0.0), "log 1");
+assert(approx(log(exp(3.0)), 3.0), "log(exp(3))");
+
+// deg / rad conversion
+assert(approx(rad(180), 3.14159), "rad 180");
+assert(approx(deg(3.14159), 180.0), "deg pi");
+
+// atan2
+assert(approx(atan2(1, 0), rad(90)), "atan2(1,0)");
+assert(approx(atan2(0, 1), 0.0), "atan2(0,1)");
+
+// clock (just verify it returns a number > 0)
+var t = clock();
+assert(t >= 0, "clock >= 0");
+
+// len on various types
+assert(len("abc") == 3, "len string");
+assert(len([1, 2]) == 2, "len array");
+assert(len("") == 0, "len empty string");
+assert(len([]) == 0, "len empty array");
+
+print(f"test_math_builtins: {passed} passed, {failed} failed");

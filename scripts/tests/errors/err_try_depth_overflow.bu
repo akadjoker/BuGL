@@ -1,0 +1,24 @@
+// Test: try/catch nesting beyond TRY_MAX (4)
+// Expected: runtime error "Try-catch nesting too deep"
+
+try {
+    try {
+        try {
+            try {
+                try {
+                    print("too deep");
+                } catch (e) {
+                    print(e);
+                }
+            } catch (e) {
+                print(e);
+            }
+        } catch (e) {
+            print(e);
+        }
+    } catch (e) {
+        print(e);
+    }
+} catch (e) {
+    print(e);
+}

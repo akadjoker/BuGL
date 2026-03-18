@@ -1,0 +1,7 @@
+// Test: class inheriting from itself
+// Expected: compile error
+
+class Ouroboros : Ouroboros
+    def init()
+    end
+end

@@ -52,7 +52,9 @@
 #define BU_ENABLE_JSON 1
 #define BU_ENABLE_REGEX 1
 #define BU_ENABLE_ZIP 1
-#define BU_ENABLE_TIME 1
+#define BU_ENABLE_CRYPTO 1
+#define BU_ENABLE_NN 1
+#define BU_ENABLE_MINIDNN 1
 
 #ifndef BU_ENABLE_BYTECODE_DUMP
 #if defined(OS_LINUX) || defined(OS_WINDOWS)

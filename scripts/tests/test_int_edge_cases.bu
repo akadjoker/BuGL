@@ -1,0 +1,57 @@
+// ============================================
+// test_int_edge_cases.bu — integer overflow, INT_MIN, edge cases
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// ==== 1. INT_MIN / -1 (was a SIGFPE crash before fix) ====
+var a = -2147483647;
+a = a - 1;                // a = INT_MIN = -2147483648
+var int_min = -2147483647 - 1;  // compute INT_MIN without literal overflow
+assert(a == int_min, "INT_MIN value");
+
+var div_result = a / -1;  // Should promote to double, not crash
+assert(div_result > 0, "INT_MIN / -1 positive");
+
+// ==== 2. INT_MIN % -1 (was also SIGFPE crash) ====
+var mod_result = a % -1;  // Should be 0
+assert(mod_result == 0, "INT_MIN % -1 == 0");
+
+// ==== 3. INT_MAX ====
+var mx = 2147483647;
+assert(mx == 2147483647, "INT_MAX value");
+
+// ==== 4. INT_MAX + 1 wraps ====
+var overflow = mx + 1;
+assert(overflow < 0, "INT_MAX+1 wraps negative");
+
+// ==== 5. Division that produces exact int ====
+assert(10 / 2 == 5, "exact div");
+assert(10 / 3 != 3, "inexact div is float");
+
+// ==== 6. Modulo edge cases ====
+assert(0 % 5 == 0, "0 % 5");
+assert(5 % 1 == 0, "5 % 1");
+assert(-7 % 3 == -1, "negative modulo");
+
+// ==== 7. Bitwise edge cases ====
+assert(~0 == -1, "bitwise not 0");
+assert(1 << 31 < 0, "1<<31 is negative (INT_MIN)");
+
+// ==== Summary ====
+print(f"=== test_int_edge_cases: {passed}/{passed + failed} ===");
+if (failed > 0) {
+    print(f"FAILED: {failed} tests");
+    exit(1);
+}

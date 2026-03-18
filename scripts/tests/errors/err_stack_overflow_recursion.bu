@@ -1,0 +1,8 @@
+// Test: infinite recursion must produce clean error, not crash
+// Expected: runtime error "Stack overflow"
+
+def bomb() {
+    bomb();
+}
+
+bomb();

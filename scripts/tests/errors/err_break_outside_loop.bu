@@ -1,0 +1,4 @@
+// Test: break outside of any loop  
+// Expected: compile error
+
+break

@@ -78,6 +78,7 @@ void Lexer::initKeywords()
         {"goto", TOKEN_GOTO},
         {"gosub", TOKEN_GOSUB},
         {"struct", TOKEN_STRUCT},
+        {"enum", TOKEN_ENUM},
         {"class", TOKEN_CLASS},
         {"self", TOKEN_SELF},
         {"super", TOKEN_SUPER},
@@ -331,6 +332,13 @@ Token Lexer::identifier()
 
     std::string text = source.substr(start, current - start);
 
+    // Check for f-string: f"..."
+    if (text == "f" && peek() == '"')
+    {
+        advance(); // consume the opening "
+        return fstring();
+    }
+
     auto it = keywords.find(text);
     if (it != keywords.end())
     {
@@ -572,6 +580,145 @@ Token Lexer::verbatimString()
     }
 
     return errorToken("Unterminated verbatim string");
+}
+
+Token Lexer::fstring()
+{
+    // Called after consuming f"
+    // Stores the raw content between quotes, preserving {expr} markers
+    // Escape sequences in literal parts are processed here
+    // The compiler will split on { } to find expressions
+    const size_t MAX_STRING_LENGTH = 10000;
+    size_t startPos = current;
+    std::string value;
+
+    while (peek() != '"' && !isAtEnd())
+    {
+        if (current - startPos > MAX_STRING_LENGTH)
+        {
+            return errorToken("F-string too long (max 10000 chars)");
+        }
+
+        char c = peek();
+
+        // Preserve { and } markers for the compiler
+        if (c == '{')
+        {
+            // {{ is an escaped literal {
+            if (peekNext() == '{')
+            {
+                advance(); // first {
+                advance(); // second {
+                value += '\x01'; // sentinel for literal {
+                value += '{';
+                continue;
+            }
+            // Pass through { and everything until matching }
+            value += advance(); // {
+            int braceDepth = 1;
+            while (braceDepth > 0 && !isAtEnd())
+            {
+                char inner = peek();
+                if (inner == '{') braceDepth++;
+                else if (inner == '}') braceDepth--;
+                if (braceDepth > 0)
+                    value += advance();
+                else
+                    value += advance(); // closing }
+            }
+            if (braceDepth > 0)
+            {
+                return errorToken("Unterminated expression in f-string");
+            }
+            continue;
+        }
+
+        if (c == '}')
+        {
+            // }} is an escaped literal }
+            if (peekNext() == '}')
+            {
+                advance(); // first }
+                advance(); // second }
+                value += '\x01'; // sentinel for literal }
+                value += '}';
+                continue;
+            }
+            return errorToken("Unexpected '}' in f-string (use '}}' for literal)");
+        }
+
+        // Process escape sequences in literal parts (same as regular strings)
+        if (c == '\\')
+        {
+            advance(); // consume backslash
+            if (isAtEnd())
+            {
+                return errorToken("Unterminated f-string");
+            }
+
+            char next = advance();
+            switch (next)
+            {
+            case 'n':  value += '\n'; break;
+            case 't':  value += '\t'; break;
+            case 'r':  value += '\r'; break;
+            case '\\': value += '\\'; break;
+            case '"':  value += '"';  break;
+            case '0':  value += '\0'; break;
+            case 'a':  value += '\a'; break;
+            case 'b':  value += '\b'; break;
+            case 'f':  value += '\f'; break;
+            case 'v':  value += '\v'; break;
+            case 'e':  value += '\33'; break;
+            case '{':  value += '{';  break;
+            case '}':  value += '}';  break;
+            case 'x':
+            {
+                int hex1 = readHexDigit();
+                if (hex1 == -1) return errorToken("Invalid hex escape \\x in f-string");
+                advance();
+                int hex2 = readHexDigit();
+                if (hex2 == -1) return errorToken("Invalid hex escape \\x in f-string");
+                advance();
+                value += (char)((hex1 << 4) | hex2);
+                break;
+            }
+            case 'u':
+            {
+                int codepoint = 0;
+                for (int i = 0; i < 4; i++)
+                {
+                    int hex = readHexDigit();
+                    if (hex == -1) return errorToken("Invalid unicode escape \\u in f-string");
+                    advance();
+                    codepoint = (codepoint << 4) | hex;
+                }
+                if (codepoint > 0x10FFFF) return errorToken("Unicode codepoint out of range");
+                if (codepoint >= 0xD800 && codepoint <= 0xDFFF) return errorToken("Invalid unicode surrogate");
+                uint8_t bytes[4];
+                int numBytes = Utf8Encode(codepoint, bytes);
+                if (numBytes <= 0) return errorToken("Invalid unicode encoding");
+                for (int i = 0; i < numBytes; i++) value += (char)bytes[i];
+                break;
+            }
+            default:
+                value += '\\';
+                value += next;
+                break;
+            }
+            continue;
+        }
+
+        value += advance();
+    }
+
+    if (isAtEnd())
+    {
+        return errorToken("Unterminated f-string");
+    }
+
+    advance(); // consume closing "
+    return makeToken(TOKEN_FSTRING, value);
 }
 // ============================================
 // MAIN API: scanToken()

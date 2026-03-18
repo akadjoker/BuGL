@@ -2,6 +2,7 @@
 #include "interpreter.hpp"
 #include "value.hpp"
 #include "opcode.hpp"
+#include <algorithm>
 
 void Compiler::expression()
 {
@@ -287,6 +288,136 @@ void Compiler::string(bool canAssign)
 {
     (void)canAssign;
     emitConstant(vm_->makeString(previous.lexeme.c_str()));
+}
+
+void Compiler::fstringExpression(bool canAssign)
+{
+    (void)canAssign;
+
+    // previous.lexeme contains the raw f-string content with {expr} markers
+    // We parse it into segments: literal strings and {expressions}
+    // Result: "literal" + str(expr) + "literal" + str(expr) + ...
+    // We use OP_ADD for concatenation (already handles string + any type)
+    // and OP_TOSTRING to convert expression results to string
+
+    const std::string &content = previous.lexeme;
+    size_t len = content.length();
+    size_t pos = 0;
+    int segmentCount = 0;
+
+    while (pos < len)
+    {
+        // Find next { that starts an expression (skip sentinel \x01{ which is an escaped literal)
+        size_t braceStart = pos;
+        while (braceStart < len)
+        {
+            braceStart = content.find('{', braceStart);
+            if (braceStart == std::string::npos) break;
+            // Check if preceded by sentinel \x01 — that means it's a literal {
+            if (braceStart > 0 && content[braceStart - 1] == '\x01')
+            {
+                braceStart++; // skip this one, keep searching
+                continue;
+            }
+            break;
+        }
+
+        if (braceStart == std::string::npos)
+        {
+            // Rest is literal text — strip sentinels
+            std::string literal = content.substr(pos);
+            // Remove sentinel chars
+            literal.erase(std::remove(literal.begin(), literal.end(), '\x01'), literal.end());
+            if (!literal.empty() || segmentCount == 0)
+            {
+                emitConstant(vm_->makeString(literal.c_str()));
+                if (segmentCount > 0) emitByte(OP_ADD);
+                segmentCount++;
+            }
+            break;
+        }
+
+        // Emit literal part before the {
+        if (braceStart > pos)
+        {
+            std::string literal = content.substr(pos, braceStart - pos);
+            // Remove sentinel chars
+            literal.erase(std::remove(literal.begin(), literal.end(), '\x01'), literal.end());
+            emitConstant(vm_->makeString(literal.c_str()));
+            if (segmentCount > 0) emitByte(OP_ADD);
+            segmentCount++;
+        }
+
+        // Find matching }
+        size_t braceEnd = braceStart + 1;
+        int depth = 1;
+        while (braceEnd < len && depth > 0)
+        {
+            if (content[braceEnd] == '{') depth++;
+            else if (content[braceEnd] == '}') depth--;
+            if (depth > 0) braceEnd++;
+        }
+
+        if (depth != 0)
+        {
+            error("Unterminated expression in f-string");
+            return;
+        }
+
+        // Extract expression source
+        std::string exprSrc = content.substr(braceStart + 1, braceEnd - braceStart - 1);
+
+        if (exprSrc.empty())
+        {
+            error("Empty expression in f-string");
+            return;
+        }
+
+        // Compile the expression using a sub-lexer
+        // Save current lexer/parser state
+        Lexer *savedLexer = lexer;
+        std::vector<Token> savedTokens = tokens;
+        int savedCursor = cursor;
+        Token savedCurrent = current;
+        Token savedPrevious = previous;
+
+        // Create a sub-lexer for the expression
+        Lexer subLexer(exprSrc);
+        lexer = &subLexer;
+        tokens = lexer->scanAll();
+        cursor = 0;
+
+        // Prime the parser with first token
+        if (!tokens.empty())
+        {
+            current = tokens[0];
+            cursor = 1;
+        }
+
+        // Compile the expression
+        expression();
+
+        // Convert to string
+        emitByte(OP_TOSTRING);
+
+        // Restore lexer/parser state
+        lexer = savedLexer;
+        tokens = savedTokens;
+        cursor = savedCursor;
+        current = savedCurrent;
+        previous = savedPrevious;
+
+        if (segmentCount > 0) emitByte(OP_ADD);
+        segmentCount++;
+
+        pos = braceEnd + 1; // skip past }
+    }
+
+    // Handle empty f-string: f""
+    if (segmentCount == 0)
+    {
+        emitConstant(vm_->makeString(""));
+    }
 }
 
 void Compiler::literal(bool canAssign)

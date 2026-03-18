@@ -1,0 +1,296 @@
+// ================================================================
+// Tutorial 05 — Introduction to Shaders (OpenGL 3.3 Core)
+//
+// What you will learn:
+//   - Switching from fixed-function to programmable pipeline
+//   - Writing GLSL vertex and fragment shaders (#version 330 core)
+//   - Compiling and linking a shader program
+//   - Creating VAOs (Vertex Array Objects) and VBOs (Vertex Buffer Objects)
+//   - Uploading vertex data with Float32Array / Uint16Array
+//   - Using glVertexAttribPointer for interleaved data
+//   - Passing uniforms (time, matrices) to shaders
+//   - MatrixPerspective, MatrixLookAt, MatrixMultiply, MatrixToBuffer
+//
+// Controls: Arrow keys to orbit camera, ESC to quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+// ================================================================
+// SECTION 1: OpenGL 3.3 Core Profile Setup
+// ================================================================
+// In core profile, the fixed-function pipeline (glBegin/glEnd) is removed.
+// Everything must go through shaders and VBOs.
+
+SetGLVersion(3, 3, SDL_GL_CONTEXT_PROFILE_CORE);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("Tutorial 05 — Shaders", 1024, 768, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glEnable(GL_DEPTH_TEST);
+glClearColor(0.06, 0.06, 0.1, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+
+// ================================================================
+// SECTION 2: GLSL Shader Source Code
+// ================================================================
+// Vertex shader: transforms positions and passes color + UV to fragment shader
+// Fragment shader: outputs final pixel color
+
+var vs_src =
+"#version 330 core\n" +
+"layout(location = 0) in vec3 aPos;\n" +         // Vertex position
+"layout(location = 1) in vec3 aColor;\n" +        // Vertex color
+"layout(location = 2) in vec2 aUV;\n" +           // Texture coordinate
+"uniform mat4 uMVP;\n" +                          // Model-View-Projection matrix
+"uniform float uTime;\n" +                        // Animation time
+"out vec3 vColor;\n" +                            // Pass to fragment shader
+"out vec2 vUV;\n" +
+"out float vWave;\n" +
+"void main() {\n" +
+"    // Add a gentle wave to the Y position based on time\n" +
+"    float wave = sin(aPos.x * 2.0 + uTime * 2.0) * 0.15;\n" +
+"    vec3 pos = aPos + vec3(0.0, wave, 0.0);\n" +
+"    gl_Position = uMVP * vec4(pos, 1.0);\n" +
+"    vColor = aColor;\n" +
+"    vUV    = aUV;\n" +
+"    vWave  = wave;\n" +                          // Pass wave offset for coloring
+"}\n";
+
+var fs_src =
+"#version 330 core\n" +
+"in vec3 vColor;\n" +
+"in vec2 vUV;\n" +
+"in float vWave;\n" +
+"out vec4 FragColor;\n" +
+"uniform float uTime;\n" +
+"void main() {\n" +
+"    // Create a procedural pattern from UV coordinates\n" +
+"    float checker = step(0.5, fract(vUV.x * 4.0)) *\n" +
+"                    step(0.5, fract(vUV.y * 4.0));\n" +
+"    checker = checker + step(0.5, 1.0 - fract(vUV.x * 4.0)) *\n" +
+"                        step(0.5, 1.0 - fract(vUV.y * 4.0));\n" +
+"    checker = clamp(checker, 0.0, 1.0);\n" +
+"    // Mix vertex color with the procedural pattern\n" +
+"    vec3 patternColor = mix(vColor, vColor * 0.4, checker * 0.5);\n" +
+"    // Add a subtle glow based on the wave offset\n" +
+"    patternColor += vec3(0.1, 0.2, 0.4) * (vWave + 0.15) * 2.0;\n" +
+"    FragColor = vec4(patternColor, 1.0);\n" +
+"}\n";
+
+// ================================================================
+// SECTION 3: Compile and Link Shader Program
+// ================================================================
+// This is the standard compile-check-link pattern.
+
+def compileShader(shaderType, source) {
+    var shader = glCreateShader(shaderType);
+    glShaderSource(shader, source);
+    glCompileShader(shader);
+    if (glGetShaderiv(shader, GL_COMPILE_STATUS) == 0) {
+        print("SHADER COMPILE ERROR: " + glGetShaderInfoLog(shader));
+        Close();
+    }
+    return shader;
+}
+
+def linkProgram(vsSrc, fsSrc) {
+    var vs = compileShader(GL_VERTEX_SHADER, vsSrc);
+    var fs = compileShader(GL_FRAGMENT_SHADER, fsSrc);
+    var program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+    if (glGetProgramiv(program, GL_LINK_STATUS) == 0) {
+        print("SHADER LINK ERROR: " + glGetProgramInfoLog(program));
+        Close();
+    }
+    // Shaders can be deleted after linking — the program keeps them
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return program;
+}
+
+var prog = linkProgram(vs_src, fs_src);
+
+// Get uniform locations (used to send data to shaders each frame)
+var uMVP  = glGetUniformLocation(prog, "uMVP");
+var uTime = glGetUniformLocation(prog, "uTime");
+
+// ================================================================
+// SECTION 4: Vertex Data — A grid of quads
+// ================================================================
+// We build a grid mesh with interleaved vertex data:
+//   position (vec3) + color (vec3) + uv (vec2) = 8 floats per vertex
+//
+// Grid layout (gridN x gridN quads = (gridN+1) x (gridN+1) vertices):
+//
+//   v6---v7---v8
+//   |  3 |  4 |
+//   v3---v4---v5
+//   |  1 |  2 |
+//   v0---v1---v2
+
+var gridN = 12;  // 12x12 quads = 144 quads = 288 triangles
+var gridSize = 6.0;
+var cellSize = gridSize / gridN;
+var halfGrid = gridSize / 2.0;
+
+// Build vertex array: (gridN+1)^2 vertices, 8 floats each
+var vertCount = (gridN + 1) * (gridN + 1);
+var verts = Float32Array(vertCount * 8);
+
+for (var iz = 0; iz <= gridN; iz = iz + 1) {
+    for (var ix = 0; ix <= gridN; ix = ix + 1) {
+        var x = -halfGrid + ix * cellSize;
+        var z = -halfGrid + iz * cellSize;
+        var u = ix / gridN;
+        var v = iz / gridN;
+        // Color: gradient across the grid (red→blue X, green→yellow Z)
+        var r = ix / gridN;
+        var g = 0.3 + 0.4 * (iz / gridN);
+        var b = 1.0 - (ix / gridN);
+        // Position
+        verts.add(x, 0.0, z);
+        // Color
+        verts.add(r, g, b);
+        // UV
+        verts.add(u, v);
+    }
+}
+
+// Build index array: 2 triangles per quad
+var idxCount = gridN * gridN * 6;
+var indices = Uint16Array(idxCount);
+
+for (var iz = 0; iz < gridN; iz = iz + 1) {
+    for (var ix = 0; ix < gridN; ix = ix + 1) {
+        var topLeft     = iz * (gridN + 1) + ix;
+        var topRight    = topLeft + 1;
+        var bottomLeft  = topLeft + (gridN + 1);
+        var bottomRight = bottomLeft + 1;
+        // Two triangles per quad
+        indices.add(topLeft, bottomLeft, topRight);
+        indices.add(topRight, bottomLeft, bottomRight);
+    }
+}
+
+// ================================================================
+// SECTION 5: Upload to GPU with VAO + VBO + EBO
+// ================================================================
+// A VAO stores the vertex format. A VBO holds vertex data. An EBO holds indices.
+
+var vao = glGenVertexArrays();
+var vbo = glGenBuffers();
+var ebo = glGenBuffers();
+
+glBindVertexArray(vao);
+
+// Upload vertex data
+glBindBuffer(GL_ARRAY_BUFFER, vbo);
+glBufferData(GL_ARRAY_BUFFER, verts.byteLength(), verts, GL_STATIC_DRAW);
+
+// Upload index data
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.byteLength(), indices, GL_STATIC_DRAW);
+
+// Define vertex attribute layout (interleaved: 8 floats per vertex)
+var stride = 8 * 4;  // 8 floats * 4 bytes each = 32 bytes per vertex
+
+// Attribute 0: position (3 floats at offset 0)
+glEnableVertexAttribArray(0);
+glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0);
+
+// Attribute 1: color (3 floats at offset 12 bytes)
+glEnableVertexAttribArray(1);
+glVertexAttribPointer(1, 3, GL_FLOAT, false, stride, 3 * 4);
+
+// Attribute 2: uv (2 floats at offset 24 bytes)
+glEnableVertexAttribArray(2);
+glVertexAttribPointer(2, 2, GL_FLOAT, false, stride, 6 * 4);
+
+glBindVertexArray(0);
+
+// ================================================================
+// SECTION 6: Camera & Main Loop
+// ================================================================
+var deg2rad = 0.017453292519943295;
+var camAngleX = 35.0;
+var camAngleY = 45.0;
+var camDist   = 8.0;
+var time = 0.0;
+
+// Pre-allocate a buffer for the MVP matrix (avoids allocation per frame)
+var bufMVP = MatrixToBuffer(MatrixIdentity());
+
+while (Running()) {
+    var dt = GetDeltaTime();
+    time = time + dt;
+
+    // Camera orbit controls
+    if (IsKeyDown(KEY_ESCAPE)) { Close(); }
+    if (IsKeyDown(KEY_LEFT))   camAngleY = camAngleY + 60.0 * dt;
+    if (IsKeyDown(KEY_RIGHT))  camAngleY = camAngleY - 60.0 * dt;
+    if (IsKeyDown(KEY_UP))     camAngleX = camAngleX + 40.0 * dt;
+    if (IsKeyDown(KEY_DOWN))   camAngleX = camAngleX - 40.0 * dt;
+    if (IsKeyDown(KEY_W))      camDist = camDist - 4.0 * dt;
+    if (IsKeyDown(KEY_S))      camDist = camDist + 4.0 * dt;
+    if (camAngleX > 85.0) camAngleX = 85.0;
+    if (camAngleX < 5.0)  camAngleX = 5.0;
+    if (camDist < 2.0) camDist = 2.0;
+    if (camDist > 20.0) camDist = 20.0;
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    // Build Model-View-Projection matrix using GLM helpers
+    var aspect = GetWidth() / GetHeight();
+    var proj = MatrixPerspective(60.0 * deg2rad, aspect, 0.1, 100.0);
+
+    // Camera position from spherical coordinates
+    var radX = camAngleX * deg2rad;
+    var radY = camAngleY * deg2rad;
+    var eyeX = camDist * cos(radX) * sin(radY);
+    var eyeY = camDist * sin(radX);
+    var eyeZ = camDist * cos(radX) * cos(radY);
+    var eye = Vector3(eyeX, eyeY, eyeZ);
+    var tgt = Vector3(0.0, 0.0, 0.0);
+    var up  = Vector3(0.0, 1.0, 0.0);
+    var view = MatrixLookAt(eye, tgt, up);
+
+    // Model matrix: identity (grid is at origin)
+    var model = MatrixIdentity();
+
+    // MVP = model * view * proj (BuGL multiplies in this order)
+    var mvp = MatrixMultiply(MatrixMultiply(model, view), proj);
+    MatrixWriteBuffer(mvp, bufMVP);
+
+    // ── Render ──
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glUseProgram(prog);
+    // Send uniforms to the shader
+    glUniformMatrix4fv(uMVP, 1, false, bufMVP);
+    glUniform1f(uTime, time);
+
+    // Draw the grid
+    glBindVertexArray(vao);
+    glDrawElements(GL_TRIANGLES, idxCount, GL_UNSIGNED_SHORT, 0);
+    glBindVertexArray(0);
+
+    glUseProgram(0);
+    Flip();
+}
+
+// ================================================================
+// SECTION 7: Cleanup
+// ================================================================
+glDeleteBuffers(vbo);
+glDeleteBuffers(ebo);
+glDeleteVertexArrays(vao);
+glDeleteProgram(prog);
+Close();

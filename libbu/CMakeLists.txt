@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(bu)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -64,7 +64,13 @@ if(MINGW)
     target_link_options(libbu PRIVATE -shared-libgcc)
 endif()
 
-target_include_directories(libbu PUBLIC include src ${CMAKE_SOURCE_DIR}/vendor/miniz/include)
+target_include_directories(libbu PUBLIC 
+    include 
+    src 
+    ${CMAKE_SOURCE_DIR}/vendor/miniz/include
+    ${CMAKE_SOURCE_DIR}/vendor/eigen
+    ${CMAKE_SOURCE_DIR}/vendor/MiniDNN/include
+)
 
 # ============================================
 # Compiler Flags - DEBUG

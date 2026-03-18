@@ -105,6 +105,25 @@ public:
     void TexturedTriangle(const Vector2 &p1, const Vector2 &p2, const Vector2 &p3,
                           const Vector2 &uv1, const Vector2 &uv2, const Vector2 &uv3,
                           unsigned int textureId);
+
+    // --- New 2D texture / shape functions ---
+    void TexturedRect(unsigned int textureId, float x, float y, float width, float height);
+    void Sprite(unsigned int textureId, float srcX, float srcY, float srcW, float srcH,
+                float dstX, float dstY, float dstW, float dstH,
+                float texWidth, float texHeight);
+    void SpriteEx(unsigned int textureId, float srcX, float srcY, float srcW, float srcH,
+                  float dstX, float dstY, float dstW, float dstH,
+                  float angle, float originX, float originY,
+                  bool flipH, bool flipV,
+                  float texWidth, float texHeight);
+    void NineSlice(unsigned int textureId, float x, float y, float width, float height,
+                   float borderLeft, float borderTop, float borderRight, float borderBottom,
+                   float texWidth, float texHeight);
+    void ThickLine2D(float x1, float y1, float x2, float y2, float thickness);
+    void Ring(int centerX, int centerY, float innerRadius, float outerRadius,
+              float startAngle, float endAngle, int segments, bool fill = true);
+    void Arc(int centerX, int centerY, float radius, float startAngle, float endAngle,
+             float thickness, int segments = 32);
     void BezierQuadratic(const Vector2 &p0, const Vector2 &p1, const Vector2 &p2, int segments = 20);
     void BezierCubic(const Vector2 &p0, const Vector2 &p1, const Vector2 &p2, const Vector2 &p3, int segments = 30);
     void CatmullRomSpline(const Vector2 *points, int pointCount, int segments = 20);
@@ -183,6 +202,7 @@ private:
     std::vector<DrawCall> draws;
     std::vector<unsigned int> quadIndices;
     unsigned int programId;
+    unsigned int vaoId;
     unsigned int vboId;
     unsigned int eboId;
     unsigned int whiteTextureId;

@@ -1,0 +1,5 @@
+// Test: method on wrong type
+// Expected: clean runtime error
+
+var x = 42;
+x.push(1);

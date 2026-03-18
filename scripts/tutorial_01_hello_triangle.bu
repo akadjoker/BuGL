@@ -1,0 +1,61 @@
+// ================================================================
+// Tutorial 01 — Hello Triangle (OpenGL 2.1 Immediate Mode)
+//
+// You will learn:
+//   - Creating a window with Init()
+//   - Main loop with Running() / Flip()
+//   - glClearColor, glClear
+//   - glBegin / glEnd with GL_TRIANGLES
+//   - glColor3f, glVertex2f
+//   - Normalized coordinates (-1..+1)
+//
+// Result: a color-interpolated triangle in the center of the screen
+// ESC to quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+
+// 1. Set up OpenGL 2.1 (compatibility profile — allows glBegin/glEnd)
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
+// 2. Create window
+if (!Init("Tutorial 01 — Hello Triangle", 800, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+// 3. Background color (dark blue)
+glClearColor(0.1, 0.1, 0.2, 1.0);
+
+// 4. Main loop
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    // Update viewport when window is resized
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    // Clear the screen
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // ── Draw a triangle with per-vertex colors ──
+    glBegin(GL_TRIANGLES);
+        // Top vertex — red
+        glColor3f(1.0, 0.0, 0.0);
+        glVertex2f(0.0, 0.7);
+
+        // Bottom-left vertex — green
+        glColor3f(0.0, 1.0, 0.0);
+        glVertex2f(-0.6, -0.5);
+
+        // Bottom-right vertex — blue
+        glColor3f(0.0, 0.0, 1.0);
+        glVertex2f(0.6, -0.5);
+    glEnd();
+
+    // Swap buffers (double buffering)
+    Flip();
+}
+
+Close();

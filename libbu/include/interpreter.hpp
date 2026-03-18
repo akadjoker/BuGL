@@ -505,10 +505,11 @@ struct ProcessResult
 
 struct TryHandler
 {
-  static constexpr int MAX_PENDING_RETURNS = 16;
+  static constexpr int MAX_PENDING_RETURNS = 4;
   uint8_t *catchIP;
   uint8_t *finallyIP;
   Value *stackRestore;
+  int frameRestore;        // frameCount when OP_TRY was executed (for unwinding across function calls)
   bool inFinally;
   bool hasPendingError;
   Value pendingError;
@@ -518,7 +519,7 @@ struct TryHandler
   bool hasPendingReturn;
 
   TryHandler() : catchIP(nullptr), finallyIP(nullptr),
-                 stackRestore(nullptr), inFinally(false),
+                 stackRestore(nullptr), frameRestore(0), inFinally(false),
                  hasPendingError(false), pendingReturnCount(0)
   {
     pendingError.as.byte = 0;
@@ -1120,6 +1121,8 @@ public:
   void registerRegex();
   void registerZip();
   void registerSocket();
+  void registerCrypto();
+  void registerNN();
   void registerAll();
 
   Function *addFunction(const char *name, int arity = 0);

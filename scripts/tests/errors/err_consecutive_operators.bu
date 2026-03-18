@@ -1,0 +1,4 @@
+// Test: consecutive operators without operand
+// Expected: compile error
+
+var x = 1 + * 2

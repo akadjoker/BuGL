@@ -1445,6 +1445,171 @@ namespace SDLBindings
             handle->batch.TexCoord2f((float)args[0].asNumber(), (float)args[1].asNumber());
             return 0;
         }
+
+        // ─── New 2D texture / shape bindings ──────────────────────────────────
+
+        static int batch_textured_rect(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            (void)vm;
+            BatchHandle *handle = as_batch(instance);
+            if (!handle || argCount != 5)
+            {
+                Error("Batch.texturedRect() expects (textureId, x, y, width, height)");
+                return 0;
+            }
+            for (int i = 0; i < 5; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.texturedRect() expects numeric args"); return 0; }
+            }
+            handle->batch.TexturedRect((u32)args[0].asInt(),
+                                       (float)args[1].asNumber(), (float)args[2].asNumber(),
+                                       (float)args[3].asNumber(), (float)args[4].asNumber());
+            return 0;
+        }
+
+        static int batch_sprite(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            (void)vm;
+            BatchHandle *handle = as_batch(instance);
+            if (!handle || argCount != 11)
+            {
+                Error("Batch.sprite() expects (textureId, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH, texWidth, texHeight)");
+                return 0;
+            }
+            for (int i = 0; i < 11; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.sprite() expects numeric args"); return 0; }
+            }
+            handle->batch.Sprite((u32)args[0].asInt(),
+                                 (float)args[1].asNumber(), (float)args[2].asNumber(),
+                                 (float)args[3].asNumber(), (float)args[4].asNumber(),
+                                 (float)args[5].asNumber(), (float)args[6].asNumber(),
+                                 (float)args[7].asNumber(), (float)args[8].asNumber(),
+                                 (float)args[9].asNumber(), (float)args[10].asNumber());
+            return 0;
+        }
+
+        static int batch_sprite_ex(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            (void)vm;
+            BatchHandle *handle = as_batch(instance);
+            if (!handle || argCount != 16)
+            {
+                Error("Batch.spriteEx() expects (textureId, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH, angle, originX, originY, flipH, flipV, texWidth, texHeight)");
+                return 0;
+            }
+            for (int i = 0; i < 12; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.spriteEx() expects numeric args for first 12 params"); return 0; }
+            }
+            bool flipH = false, flipV = false;
+            if (!read_boolish(args[12], &flipH, "Batch.spriteEx()", 13)) return 0;
+            if (!read_boolish(args[13], &flipV, "Batch.spriteEx()", 14)) return 0;
+            if (!args[14].isNumber() || !args[15].isNumber())
+            {
+                Error("Batch.spriteEx() expects numeric texWidth/texHeight");
+                return 0;
+            }
+            handle->batch.SpriteEx((u32)args[0].asInt(),
+                                   (float)args[1].asNumber(), (float)args[2].asNumber(),
+                                   (float)args[3].asNumber(), (float)args[4].asNumber(),
+                                   (float)args[5].asNumber(), (float)args[6].asNumber(),
+                                   (float)args[7].asNumber(), (float)args[8].asNumber(),
+                                   (float)args[9].asNumber(),
+                                   (float)args[10].asNumber(), (float)args[11].asNumber(),
+                                   flipH, flipV,
+                                   (float)args[14].asNumber(), (float)args[15].asNumber());
+            return 0;
+        }
+
+        static int batch_nine_slice(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            (void)vm;
+            BatchHandle *handle = as_batch(instance);
+            if (!handle || argCount != 11)
+            {
+                Error("Batch.nineSlice() expects (textureId, x, y, width, height, borderLeft, borderTop, borderRight, borderBottom, texWidth, texHeight)");
+                return 0;
+            }
+            for (int i = 0; i < 11; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.nineSlice() expects numeric args"); return 0; }
+            }
+            handle->batch.NineSlice((u32)args[0].asInt(),
+                                    (float)args[1].asNumber(), (float)args[2].asNumber(),
+                                    (float)args[3].asNumber(), (float)args[4].asNumber(),
+                                    (float)args[5].asNumber(), (float)args[6].asNumber(),
+                                    (float)args[7].asNumber(), (float)args[8].asNumber(),
+                                    (float)args[9].asNumber(), (float)args[10].asNumber());
+            return 0;
+        }
+
+        static int batch_thick_line2d(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            (void)vm;
+            BatchHandle *handle = as_batch(instance);
+            if (!handle || argCount != 5)
+            {
+                Error("Batch.thickLine2D() expects (x1, y1, x2, y2, thickness)");
+                return 0;
+            }
+            for (int i = 0; i < 5; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.thickLine2D() expects numeric args"); return 0; }
+            }
+            handle->batch.ThickLine2D((float)args[0].asNumber(), (float)args[1].asNumber(),
+                                      (float)args[2].asNumber(), (float)args[3].asNumber(),
+                                      (float)args[4].asNumber());
+            return 0;
+        }
+
+        static int batch_ring(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            BatchHandle *handle = as_batch(instance);
+            bool fill = true;
+            if (!handle || argCount < 7 || argCount > 8)
+            {
+                Error("Batch.ring() expects (x, y, innerRadius, outerRadius, startAngle, endAngle, segments[, fill])");
+                return 0;
+            }
+            for (int i = 0; i < 7; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.ring() expects numeric args"); return 0; }
+            }
+            if (argCount == 8 && !read_boolish(args[7], &fill, "Batch.ring()", 8))
+                return 0;
+
+            handle->batch.Ring(args[0].asInt(), args[1].asInt(),
+                               (float)args[2].asNumber(), (float)args[3].asNumber(),
+                               (float)args[4].asNumber(), (float)args[5].asNumber(),
+                               args[6].asInt(), fill);
+            return 0;
+        }
+
+        static int batch_arc(Interpreter *vm, void *instance, int argCount, Value *args)
+        {
+            BatchHandle *handle = as_batch(instance);
+            int segments = 32;
+            if (!handle || argCount < 6 || argCount > 7)
+            {
+                Error("Batch.arc() expects (x, y, radius, startAngle, endAngle, thickness[, segments])");
+                return 0;
+            }
+            for (int i = 0; i < 6; ++i)
+            {
+                if (!args[i].isNumber()) { Error("Batch.arc() expects numeric args"); return 0; }
+            }
+            if (argCount == 7)
+            {
+                if (!args[6].isNumber()) { Error("Batch.arc() segments must be numeric"); return 0; }
+                segments = args[6].asInt();
+            }
+            handle->batch.Arc(args[0].asInt(), args[1].asInt(),
+                              (float)args[2].asNumber(),
+                              (float)args[3].asNumber(), (float)args[4].asNumber(),
+                              (float)args[5].asNumber(), segments);
+            return 0;
+        }
     }
 
         // ─── SpriteFont ───────────────────────────────────────────────────────
@@ -1680,6 +1845,13 @@ namespace SDLBindings
         vm.addNativeMethod(batchClass, "vertex2f", batch_vertex2f);
         vm.addNativeMethod(batchClass, "vertex3f", batch_vertex3f);
         vm.addNativeMethod(batchClass, "texCoord2f", batch_texcoord2f);
+        vm.addNativeMethod(batchClass, "texturedRect", batch_textured_rect);
+        vm.addNativeMethod(batchClass, "sprite", batch_sprite);
+        vm.addNativeMethod(batchClass, "spriteEx", batch_sprite_ex);
+        vm.addNativeMethod(batchClass, "nineSlice", batch_nine_slice);
+        vm.addNativeMethod(batchClass, "thickLine2D", batch_thick_line2d);
+        vm.addNativeMethod(batchClass, "ring", batch_ring);
+        vm.addNativeMethod(batchClass, "arc", batch_arc);
 
         module.addInt("BATCH_LINES", kBatchModeLines)
               .addInt("BATCH_TRIANGLES", kBatchModeTriangles)

@@ -1,0 +1,9 @@
+// BAD: function with unclosed { then a while loop after
+def broken() {
+    var x = 10;
+    // missing }
+
+while (true) {
+    break;
+}
+print("should not reach here");

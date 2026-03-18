@@ -1,0 +1,5 @@
+// Test: calling nil as a function
+// Expected: runtime error about calling non-callable
+
+var x = nil;
+x();

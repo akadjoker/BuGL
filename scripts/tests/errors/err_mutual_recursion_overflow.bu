@@ -1,0 +1,12 @@
+// Test: mutual recursion overflow - indirect infinite recursion
+// Expected: runtime error "Stack overflow"
+
+def bomb_a(n) {
+    return bomb_b(n);
+}
+
+def bomb_b(n) {
+    return bomb_a(n);
+}
+
+bomb_a(1);

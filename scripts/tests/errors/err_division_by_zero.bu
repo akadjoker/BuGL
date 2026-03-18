@@ -1,0 +1,4 @@
+// Test: division by zero
+// Expected: "Division by zero" error (catchable or runtime)
+
+var x = 10 / 0;

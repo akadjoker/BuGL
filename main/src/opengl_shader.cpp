@@ -878,6 +878,164 @@ namespace SDLBindings
         return 0;
     }
 
+    // =====================================================
+    // INTEGER UNIFORMS
+    // =====================================================
+
+    int native_glUniform2i(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 3) { Error("glUniform2i expects (location, x, y)"); return 0; }
+        glUniform2i((GLint)args[0].asNumber(), (GLint)args[1].asNumber(), (GLint)args[2].asNumber());
+        return 0;
+    }
+
+    int native_glUniform3i(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 4) { Error("glUniform3i expects (location, x, y, z)"); return 0; }
+        glUniform3i((GLint)args[0].asNumber(), (GLint)args[1].asNumber(), (GLint)args[2].asNumber(), (GLint)args[3].asNumber());
+        return 0;
+    }
+
+    int native_glUniform4i(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 5) { Error("glUniform4i expects (location, x, y, z, w)"); return 0; }
+        glUniform4i((GLint)args[0].asNumber(), (GLint)args[1].asNumber(), (GLint)args[2].asNumber(), (GLint)args[3].asNumber(), (GLint)args[4].asNumber());
+        return 0;
+    }
+
+    // =====================================================
+    // FLOAT VECTOR UNIFORMS (1fv, 2fv, 3fv, 4fv)
+    // =====================================================
+
+    int native_glUniform1fv(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 3)
+        {
+            Error("glUniform1fv expects (location, count, data)");
+            return 0;
+        }
+        GLint location = (GLint)args[0].asNumber();
+        GLsizei count = (GLsizei)args[1].asNumber();
+        if (count < 0) { Error("glUniform1fv count must be >= 0"); return 0; }
+
+        const GLvoid *ptr = nullptr;
+        std::vector<unsigned char> scratch;
+        size_t bytes = (size_t)count * sizeof(float);
+        if (!resolveModernUploadDataArg(args[2], (GLsizeiptr)bytes, "glUniform1fv", &ptr, scratch))
+            return 0;
+        glUniform1fv(location, count, (const GLfloat *)ptr);
+        return 0;
+    }
+
+    int native_glUniform2fv(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 3)
+        {
+            Error("glUniform2fv expects (location, count, data)");
+            return 0;
+        }
+        GLint location = (GLint)args[0].asNumber();
+        GLsizei count = (GLsizei)args[1].asNumber();
+        if (count < 0) { Error("glUniform2fv count must be >= 0"); return 0; }
+
+        const GLvoid *ptr = nullptr;
+        std::vector<unsigned char> scratch;
+        size_t bytes = (size_t)count * 2 * sizeof(float);
+        if (!resolveModernUploadDataArg(args[2], (GLsizeiptr)bytes, "glUniform2fv", &ptr, scratch))
+            return 0;
+        glUniform2fv(location, count, (const GLfloat *)ptr);
+        return 0;
+    }
+
+    int native_glUniform3fv(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 3)
+        {
+            Error("glUniform3fv expects (location, count, data)");
+            return 0;
+        }
+        GLint location = (GLint)args[0].asNumber();
+        GLsizei count = (GLsizei)args[1].asNumber();
+        if (count < 0) { Error("glUniform3fv count must be >= 0"); return 0; }
+
+        const GLvoid *ptr = nullptr;
+        std::vector<unsigned char> scratch;
+        size_t bytes = (size_t)count * 3 * sizeof(float);
+        if (!resolveModernUploadDataArg(args[2], (GLsizeiptr)bytes, "glUniform3fv", &ptr, scratch))
+            return 0;
+        glUniform3fv(location, count, (const GLfloat *)ptr);
+        return 0;
+    }
+
+    int native_glUniform4fv(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 3)
+        {
+            Error("glUniform4fv expects (location, count, data)");
+            return 0;
+        }
+        GLint location = (GLint)args[0].asNumber();
+        GLsizei count = (GLsizei)args[1].asNumber();
+        if (count < 0) { Error("glUniform4fv count must be >= 0"); return 0; }
+
+        const GLvoid *ptr = nullptr;
+        std::vector<unsigned char> scratch;
+        size_t bytes = (size_t)count * 4 * sizeof(float);
+        if (!resolveModernUploadDataArg(args[2], (GLsizeiptr)bytes, "glUniform4fv", &ptr, scratch))
+            return 0;
+        glUniform4fv(location, count, (const GLfloat *)ptr);
+        return 0;
+    }
+
+    // =====================================================
+    // MATRIX UNIFORMS (2fv, 3fv)
+    // =====================================================
+
+    int native_glUniformMatrix2fv(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("glUniformMatrix2fv expects (location, count, transpose, data)");
+            return 0;
+        }
+        GLint location = (GLint)args[0].asNumber();
+        GLsizei count = (GLsizei)args[1].asNumber();
+        GLboolean transpose = args[2].asBool() ? GL_TRUE : GL_FALSE;
+        if (count < 0) { Error("glUniformMatrix2fv count must be >= 0"); return 0; }
+
+        const GLvoid *ptr = nullptr;
+        std::vector<unsigned char> scratch;
+        size_t bytes = (size_t)count * 4 * sizeof(float);
+        if (!resolveModernUploadDataArg(args[3], (GLsizeiptr)bytes, "glUniformMatrix2fv", &ptr, scratch))
+            return 0;
+        glUniformMatrix2fv(location, count, transpose, (const GLfloat *)ptr);
+        return 0;
+    }
+
+    int native_glUniformMatrix3fv(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("glUniformMatrix3fv expects (location, count, transpose, data)");
+            return 0;
+        }
+        GLint location = (GLint)args[0].asNumber();
+        GLsizei count = (GLsizei)args[1].asNumber();
+        GLboolean transpose = args[2].asBool() ? GL_TRUE : GL_FALSE;
+        if (count < 0) { Error("glUniformMatrix3fv count must be >= 0"); return 0; }
+
+        const GLvoid *ptr = nullptr;
+        std::vector<unsigned char> scratch;
+        size_t bytes = (size_t)count * 9 * sizeof(float);
+        if (!resolveModernUploadDataArg(args[3], (GLsizeiptr)bytes, "glUniformMatrix3fv", &ptr, scratch))
+            return 0;
+        glUniformMatrix3fv(location, count, transpose, (const GLfloat *)ptr);
+        return 0;
+    }
+
     int native_glUniformMatrix4fv(Interpreter *vm, int argc, Value *args)
     {
         if (argc != 4)
@@ -1024,6 +1182,15 @@ namespace SDLBindings
             .addFunction("glUniform2f", native_glUniform2f, 3)
             .addFunction("glUniform3f", native_glUniform3f, 4)
             .addFunction("glUniform4f", native_glUniform4f, 5)
+            .addFunction("glUniform2i", native_glUniform2i, 3)
+            .addFunction("glUniform3i", native_glUniform3i, 4)
+            .addFunction("glUniform4i", native_glUniform4i, 5)
+            .addFunction("glUniform1fv", native_glUniform1fv, 3)
+            .addFunction("glUniform2fv", native_glUniform2fv, 3)
+            .addFunction("glUniform3fv", native_glUniform3fv, 3)
+            .addFunction("glUniform4fv", native_glUniform4fv, 3)
+            .addFunction("glUniformMatrix2fv", native_glUniformMatrix2fv, 4)
+            .addFunction("glUniformMatrix3fv", native_glUniformMatrix3fv, 4)
             .addFunction("glUniformMatrix4fv", native_glUniformMatrix4fv, 4)
             .addFunction("glDrawElements", native_glDrawElements, 4)
             .addFunction("glActiveTexture", native_glActiveTexture, 1)
@@ -1045,6 +1212,10 @@ namespace SDLBindings
             .addInt("GL_TEXTURE1", GL_TEXTURE1)
             .addInt("GL_TEXTURE2", GL_TEXTURE2)
             .addInt("GL_TEXTURE3", GL_TEXTURE3);
+
+#ifdef GL_GEOMETRY_SHADER
+        module.addInt("GL_GEOMETRY_SHADER", GL_GEOMETRY_SHADER);
+#endif
 
 #ifdef GL_VERTEX_ARRAY_BINDING
         module.addInt("GL_VERTEX_ARRAY_BINDING", GL_VERTEX_ARRAY_BINDING);

@@ -1,0 +1,63 @@
+// ============================================
+// test_operators.bu — Arithmetic, comparison, logic, bitwise
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// Arithmetic
+assert(2 + 3 == 5, "add");
+assert(10 - 4 == 6, "sub");
+assert(3 * 7 == 21, "mul");
+assert(15 / 3 == 5, "div");
+assert(17 % 5 == 2, "mod");
+assert(-5 == 0 - 5, "negate");
+
+// Comparison
+assert(1 < 2, "less");
+assert(2 > 1, "greater");
+assert(3 <= 3, "leq");
+assert(3 >= 3, "geq");
+assert(5 == 5, "eq");
+assert(5 != 6, "neq");
+
+// Logic
+if (true && true) { assert(true, "and tt"); } else { assert(false, "and tt"); }
+if (true && false) { assert(false, "and tf"); } else { assert(true, "and tf"); }
+if (true || false) { assert(true, "or tf"); } else { assert(false, "or tf"); }
+if (false || false) { assert(false, "or ff"); } else { assert(true, "or ff"); }
+assert(!false, "not false");
+assert(!!true, "not not true");
+
+// Bitwise
+assert((0xFF & 0x0F) == 0x0F, "bitand");
+assert((0xF0 | 0x0F) == 0xFF, "bitor");
+assert((0xFF ^ 0x0F) == 0xF0, "bitxor");
+assert(~0 == -1, "bitnot");
+assert((1 << 4) == 16, "shl");
+assert((16 >> 4) == 1, "shr");
+
+// String concat
+assert("hello" + " " + "world" == "hello world", "string concat");
+
+// Ternary
+var val = (true) ? "yes" : "no";
+assert(val == "yes", "ternary true");
+val = (false) ? "yes" : "no";
+assert(val == "no", "ternary false");
+
+// Precedence
+assert(2 + 3 * 4 == 14, "precedence mul before add");
+assert((2 + 3) * 4 == 20, "precedence grouping");
+
+print(f"test_operators: {passed} passed, {failed} failed");

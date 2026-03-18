@@ -1,0 +1,194 @@
+// ============================================
+// test_class_stress.bu — classes, inheritance, method dispatch
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// ==== 1. Basic class with fields and methods ====
+class Point
+{
+    var x = 0;
+    var y = 0;
+
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+
+    def magnitude() {
+        return sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    def add(other) {
+        return Point(self.x + other.x, self.y + other.y);
+    }
+}
+
+var p1 = Point(3, 4);
+assert(p1.x == 3, "point x");
+assert(p1.y == 4, "point y");
+assert(p1.magnitude() == 5.0, "point magnitude");
+
+var p2 = Point(1, 1);
+var p3 = p1.add(p2);
+assert(p3.x == 4, "point add x");
+assert(p3.y == 5, "point add y");
+
+// ==== 2. Inheritance ====
+class Shape
+{
+    var name = "shape";
+
+    def init(name) {
+        self.name = name;
+    }
+
+    def describe() {
+        return "I am a " + self.name;
+    }
+}
+
+class Circle : Shape
+{
+    var radius = 0;
+
+    def init(r) {
+        super.init("circle");
+        self.radius = r;
+    }
+
+    def area() {
+        return 3.14159 * self.radius * self.radius;
+    }
+}
+
+var c = Circle(5);
+assert(c.name == "circle", "inherit name");
+assert(c.describe() == "I am a circle", "inherit method");
+assert(c.radius == 5, "child field");
+
+// ==== 3. Method override ====
+class Animal
+{
+    var sound = "";
+
+    def init(sound) {
+        self.sound = sound;
+    }
+
+    def speak() {
+        return self.sound;
+    }
+}
+
+class Dog : Animal
+{
+    def init() {
+        super.init("woof");
+    }
+
+    def speak() {
+        return "Dog says: " + self.sound;
+    }
+}
+
+var dog = Dog();
+assert(dog.speak() == "Dog says: woof", "method override");
+assert(dog.sound == "woof", "inherited field");
+
+// ==== 4. Multiple instances don't share state ====
+var a = Point(1, 2);
+var b = Point(3, 4);
+a.x = 100;
+assert(a.x == 100, "instance a.x");
+assert(b.x == 3, "instance b.x isolated");
+
+// ==== 5. Class with many fields ====
+class BigClass
+{
+    var f1 = 1;
+    var f2 = 2;
+    var f3 = 3;
+    var f4 = 4;
+    var f5 = 5;
+    var f6 = 6;
+    var f7 = 7;
+    var f8 = 8;
+
+    def init() {}
+
+    def sum() {
+        return self.f1 + self.f2 + self.f3 + self.f4 + self.f5 + self.f6 + self.f7 + self.f8;
+    }
+}
+
+var big = BigClass();
+assert(big.sum() == 36, "8-field sum");
+
+// ==== 6. Many instances in loop ====
+var instances = [];
+for (var i = 0; i < 50; i += 1) {
+    instances.push(Point(i, i * 2));
+}
+assert(instances[0].x == 0, "loop instance 0.x");
+assert(instances[49].x == 49, "loop instance 49.x");
+assert(instances[49].y == 98, "loop instance 49.y");
+assert(instances.length() == 50, "loop instance count");
+
+// ==== 7. Method chaining via self return ====
+class Builder
+{
+    var parts = [];
+
+    def init() {
+        self.parts = [];
+    }
+
+    def add(part) {
+        self.parts.push(part);
+        return self;
+    }
+
+    def count() {
+        return self.parts.length();
+    }
+}
+
+var builder = Builder();
+builder.add("a").add("b").add("c");
+assert(builder.count() == 3, "chain count");
+assert(builder.parts[0] == "a", "chain first");
+assert(builder.parts[2] == "c", "chain last");
+
+// ==== 8. Class as factory ====
+class Factory
+{
+    def init() {}
+
+    def create_point(x, y) {
+        return Point(x, y);
+    }
+}
+
+var factory = Factory();
+var fp = factory.create_point(7, 8);
+assert(fp.x == 7, "factory x");
+assert(fp.y == 8, "factory y");
+
+// ==== Summary ====
+print(f"=== test_class_stress: {passed}/{passed + failed} ===");
+if (failed > 0) {
+    print(f"FAILED: {failed} tests");
+    exit(1);
+}

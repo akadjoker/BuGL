@@ -1,0 +1,94 @@
+// ============================================
+// test_functions.bu — Functions, closures, recursion
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// Basic function
+def add(a, b) { return a + b; }
+assert(add(2, 3) == 5, "basic def");
+
+// No return (implicit nil)
+def noop() { }
+assert(noop() == nil, "implicit nil return");
+
+// Multiple returns via early return
+def abs_val(x)
+{
+    if (x < 0) return -x;
+    return x;
+}
+assert(abs_val(-7) == 7, "early return neg");
+assert(abs_val(3) == 3, "early return pos");
+
+// Recursion
+def fib(n)
+{
+    if (n <= 1) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+assert(fib(0) == 0, "fib(0)");
+assert(fib(1) == 1, "fib(1)");
+assert(fib(10) == 55, "fib(10)");
+
+// Factorial
+def fact(n)
+{
+    if (n <= 1) return 1;
+    return n * fact(n - 1);
+}
+assert(fact(5) == 120, "fact(5)");
+
+// Closures
+def make_counter()
+{
+    var count = 0;
+    def inc() {
+        count += 1;
+        return count;
+    }
+    return inc;
+}
+
+var counter = make_counter();
+assert(counter() == 1, "closure call 1");
+assert(counter() == 2, "closure call 2");
+assert(counter() == 3, "closure call 3");
+
+// Closure captures
+def make_adder(x)
+{
+    def adder(y) { return x + y; }
+    return adder;
+}
+var add5 = make_adder(5);
+var add10 = make_adder(10);
+assert(add5(3) == 8, "closure adder 5+3");
+assert(add10(3) == 13, "closure adder 10+3");
+
+// Higher-order
+def apply(fn, val) { return fn(val); }
+def double(x) { return x * 2; }
+assert(apply(double, 7) == 14, "higher order");
+
+// Variadic-like with default via nil check
+def greet(name)
+{
+    if (name == nil) return "Hello, stranger!";
+    return f"Hello, {name}!";
+}
+assert(greet("Ana") == "Hello, Ana!", "greet with arg");
+assert(greet(nil) == "Hello, stranger!", "greet nil");
+
+print(f"test_functions: {passed} passed, {failed} failed");

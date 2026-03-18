@@ -31,6 +31,8 @@ namespace JoltBindings
               .addInt("JOLT_SUBTYPE_HINGE", (int)EConstraintSubType::Hinge)
               .addInt("JOLT_SUBTYPE_DISTANCE", (int)EConstraintSubType::Distance)
               .addInt("JOLT_SUBTYPE_SLIDER", (int)EConstraintSubType::Slider)
+              .addInt("JOLT_SUBTYPE_FIXED", (int)EConstraintSubType::Fixed)
+              .addInt("JOLT_SUBTYPE_CONE", (int)EConstraintSubType::Cone)
               .addInt("JOLT_SUBTYPE_VEHICLE", (int)EConstraintSubType::Vehicle)
               .addInt("JOLT_TRANSMISSION_AUTO", (int)ETransmissionMode::Auto)
               .addInt("JOLT_TRANSMISSION_MANUAL", (int)ETransmissionMode::Manual)

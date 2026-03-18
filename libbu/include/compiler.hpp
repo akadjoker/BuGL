@@ -323,6 +323,7 @@ private:
   // Parse functions (prefix)
   void number(bool canAssign);
   void string(bool canAssign);
+  void fstringExpression(bool canAssign);
   void literal(bool canAssign);
   void grouping(bool canAssign);
   void unary(bool canAssign);
@@ -401,6 +402,7 @@ private:
   bool isProcessFunction(const char *name) const;
 
   void structDeclaration();
+  void enumDeclaration();
   void arrayLiteral(bool canAssign);
   void subscript(bool canAssign);
   void mapLiteral(bool canAssign);

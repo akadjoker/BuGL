@@ -1,0 +1,5 @@
+// Test: set index on non-indexable type
+// Expected: runtime error
+
+var x = 42;
+x[0] = 10;

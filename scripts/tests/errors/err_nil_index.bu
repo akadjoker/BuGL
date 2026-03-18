@@ -1,0 +1,5 @@
+// Test: indexing nil should produce clean runtime error
+// Expected: "Cannot index this type"
+
+var x = nil;
+var y = x[0];

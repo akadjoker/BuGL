@@ -1,0 +1,5 @@
+// BAD: for with missing parts
+for () {
+    break;
+}
+print("should not reach here");

@@ -1,0 +1,4 @@
+// Test: missing expression after operator (trailing operator)
+// Expected: compile error
+
+var x = 1 +

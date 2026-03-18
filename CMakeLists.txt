@@ -106,6 +106,11 @@ add_subdirectory(vendor/SDL)
 
 add_subdirectory(libbu)
 add_subdirectory(main)
+
+# Language test suite (lightweight: only needs libbu)
+enable_testing()
+add_subdirectory(tests)
+
 add_subdirectory(BuOde)
 add_subdirectory(BuBox2d)
 add_subdirectory(BuJolt)
@@ -114,6 +119,7 @@ add_subdirectory(BuOpenSteer)
 add_subdirectory(BuRecast)
 add_subdirectory(BuMicroPather)
 add_subdirectory(BuAssimp)
+add_subdirectory(BuMeshOpt)
  
 
  

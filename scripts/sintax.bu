@@ -1,0 +1,801 @@
+// =================================================================
+// sintax.bu -- BuLang Language Syntax Reference
+// One block per feature, showing all the syntax of the language
+// =================================================================
+
+
+// =================================================================
+// 1. COMMENTS
+// =================================================================
+
+// Single-line comment
+
+/* Multi-line
+   block
+   comment */
+
+
+// =================================================================
+// 2. VARIABLES & DATA TYPES
+// =================================================================
+
+// nil
+var nothing = nil;
+
+// booleans
+var yes = true;
+var no = false;
+
+// integers (decimal and hexadecimal)
+var age = 42;
+var mask = 0xFF;
+var flags = 0x1A3F;
+
+// doubles (floating point)
+var pi = 3.14159;
+var half = 0.5;
+
+// strings
+var greeting = "Hello, World!";
+var empty_str = "";
+
+// arrays (mixed types allowed)
+var numbers = [1, 2, 3, 4, 5];
+var mixed = [1, "two", true, nil, 3.14];
+var empty_arr = [];
+
+// maps (string keys, any values)
+var person = {name: "Alice", age: 30, active: true};
+var scores = {"player 1": 100, "player 2": 200};
+var empty_map = {};
+
+// nested structures
+var data = {
+    users: ["Alice", "Bob"],
+    config: {
+        debug: true,
+        level: 5
+    }
+};
+
+// multiple variable declaration
+var x = 1, y = 2, z = 3;
+var a, b, c;  // all nil
+
+
+// =================================================================
+// 3. OPERATORS
+// =================================================================
+
+// arithmetic
+var sum = 10 + 5;       // 15
+var diff = 10 - 5;      // 5
+var prod = 3 * 7;       // 21
+var quot = 15 / 3;      // 5
+var remainder = 17 % 5; // 2
+var neg = -42;           // unary negate
+
+// comparison
+var eq  = (5 == 5);   // true
+var neq = (5 != 6);   // true
+var lt  = (1 < 2);    // true
+var gt  = (2 > 1);    // true
+var lte = (3 <= 3);   // true
+var gte = (3 >= 3);   // true
+
+// logical (short-circuit)
+var and_r = true && false;  // false
+var or_r  = true || false;  // true
+var not_r = !false;         // true
+
+// bitwise
+var band = 0xFF & 0x0F;  // 0x0F
+var bor  = 0xF0 | 0x0F;  // 0xFF
+var bxor = 0xFF ^ 0x0F;  // 0xF0
+var bnot = ~0;            // -1
+var shl  = 1 << 8;       // 256
+var shr  = 256 >> 4;     // 16
+
+// compound assignment
+var v = 10;
+v += 5;   // 15
+v -= 3;   // 12
+v *= 2;   // 24
+v /= 4;   // 6
+v %= 4;   // 2
+
+// increment / decrement
+var i = 0;
+i++;       // postfix increment
+i--;       // postfix decrement
+++i;       // prefix increment
+--i;       // prefix decrement
+
+// ternary
+var result = (age >= 18) ? "adult" : "minor";
+
+// string concatenation
+var full = "Hello" + " " + "World";
+
+
+// =================================================================
+// 4. STRINGS
+// =================================================================
+
+// escape sequences
+var newline = "line1\nline2";
+var tab = "col1\tcol2";
+var quote = "she said \"hello\"";
+var backslash = "path\\to\\file";
+
+// verbatim strings (no escape processing, supports multiline)
+var shader = @"#version 330 core
+void main() {
+    gl_Position = vec4(0.0);
+}
+";
+
+var path = @"C:\Users\data\file.txt";
+
+// f-strings (interpolation)
+var name = "BuLang";
+var version = 2;
+var msg = f"Welcome to {name} v{version}!";
+var math = f"2 + 3 = {2 + 3}";
+var braces = f"Use {{braces}} like this";
+
+// string methods
+var s = "  Hello World  ";
+s.length();                              // 15
+s.trim();                                // "Hello World"
+"hello".upper();                         // "HELLO"
+"HELLO".lower();                         // "hello"
+"Hello World".replace("World", "BuLang"); // "Hello BuLang"
+"Hello".sub(1, 4);                       // "ell" (start, end)
+"Hello".at(0);                           // "H"
+"Hello".contains("ell");                 // true
+"Hello World".startswith("Hello");       // true
+"Hello World".endswith("World");         // true
+"Hello World".indexof("World");          // 6
+"ha".repeat(3);                          // "hahaha"
+"abc".concat("def");                     // "abcdef"
+
+
+// =================================================================
+// 5. ARRAYS
+// =================================================================
+
+var arr = [10, 20, 30, 40, 50];
+
+// access and mutation
+var first = arr[0];     // 10
+arr[2] = 99;            // set index 2
+
+// methods
+arr.push(60);           // append
+var last = arr.pop();   // remove & return last
+arr.first();            // first element
+arr.last();             // last element
+arr.back();             // same as last()
+arr.length();           // count
+arr.find(20);           // index of value, -1 if not found
+arr.contains(30);       // true/false
+arr.insert(1, 15);      // insert at index
+arr.remove(1);          // remove at index
+arr.slice(1, 3);        // sub-array [start, end)
+arr.concat([70, 80]);   // merge arrays
+arr.reverse();          // reverse in-place
+arr.fill(0);            // fill all with value
+arr.clear();            // empty the array
+
+// nested arrays
+var matrix = [[1, 2], [3, 4], [5, 6]];
+var cell = matrix[1][0]; // 3
+
+
+// =================================================================
+// 6. MAPS
+// =================================================================
+
+var m = {name: "BuLang", year: 2026, active: true};
+
+// access
+var n = m["name"];       // "BuLang"
+m["new_key"] = 42;      // dynamic set
+
+// methods
+m.has("name");           // true
+m.keys();                // array of keys
+m.values();              // array of values
+m.length();              // number of entries
+m.remove("new_key");     // remove entry
+m.clear();               // remove all
+
+
+// =================================================================
+// 7. IF / ELIF / ELSE
+// =================================================================
+
+var score = 85;
+
+if (score >= 90) {
+    print("A");
+} elif (score >= 80) {
+    print("B");
+} elif (score >= 70) {
+    print("C");
+} else {
+    print("F");
+}
+
+
+// =================================================================
+// 8. WHILE LOOP
+// =================================================================
+
+var count = 0;
+while (count < 5) {
+    count++;
+}
+
+// while + break
+while (true) {
+    if (count >= 10) break;
+    count++;
+}
+
+// while + continue
+var total = 0;
+var idx = 0;
+while (idx < 10) {
+    idx++;
+    if (idx % 2 == 0) continue;  // skip even
+    total += idx;
+}
+
+
+// =================================================================
+// 9. DO-WHILE LOOP
+// =================================================================
+
+var dw = 0;
+do {
+    dw++;
+} while (dw < 5);
+
+// runs at least once even if condition is false
+do {
+    print("runs once");
+} while (false);
+
+
+// =================================================================
+// 10. FOR LOOP (C-style)
+// =================================================================
+
+for (var j = 0; j < 10; j++) {
+    // j goes 0..9
+}
+
+// decrement
+for (var k = 10; k > 0; k -= 2) {
+    // k goes 10, 8, 6, 4, 2
+}
+
+// infinite (exit via break)
+for (;;) {
+    break;
+}
+
+
+// =================================================================
+// 11. FOREACH
+// =================================================================
+
+var items = ["apple", "banana", "cherry"];
+foreach (item in items) {
+    print(item);
+}
+
+// foreach with break
+foreach (item in [1, 2, 3, 4, 5]) {
+    if (item > 3) break;
+}
+
+// foreach with continue
+foreach (item in [1, 2, 3, 4, 5]) {
+    if (item % 2 == 0) continue;
+    print(item);  // prints 1, 3, 5
+}
+
+
+// =================================================================
+// 12. LOOP (infinite)
+// =================================================================
+
+var lp = 0;
+loop {
+    lp++;
+    if (lp >= 5) break;
+}
+
+
+// =================================================================
+// 13. SWITCH / CASE
+// =================================================================
+
+var code = 2;
+switch (code) {
+    case 1:
+        print("one");
+    case 2:
+        print("two");     // matches here, no fall-through
+    case 3:
+        print("three");
+    default:
+        print("other");
+}
+
+// switch with strings
+var cmd = "start";
+switch (cmd) {
+    case "start":
+        print("starting...");
+    case "stop":
+        print("stopping...");
+    default:
+        print("unknown command");
+}
+
+
+// =================================================================
+// 14. FUNCTIONS (def)
+// =================================================================
+
+// basic function
+def add(a, b) {
+    return a + b;
+}
+var r = add(2, 3);  // 5
+
+// no return = implicit nil
+def greet(who) {
+    print(f"Hello, {who}!");
+}
+
+// early return
+def abs_val(x) {
+    if (x < 0) return -x;
+    return x;
+}
+
+// recursion
+def factorial(n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+var f5 = factorial(5);  // 120
+
+// nested function
+def outer() {
+    def inner(x) { return x * x; }
+    return inner(5);  // 25
+}
+
+// multi-return
+def swap(a, b) {
+    return (b, a);
+}
+var (sa, sb) = swap(1, 2);  // sa=2, sb=1
+
+def get_rgb() {
+    return (255, 128, 0);
+}
+var (r2, g, b2) = get_rgb();
+
+
+// =================================================================
+// 15. CLOSURES & HIGHER-ORDER FUNCTIONS
+// =================================================================
+
+// closure captures enclosing variable
+def make_counter() {
+    var count = 0;
+    def inc() {
+        count += 1;
+        return count;
+    }
+    return inc;
+}
+var counter = make_counter();
+counter();  // 1
+counter();  // 2
+counter();  // 3
+
+// closure factory
+def make_adder(x) {
+    def adder(y) { return x + y; }
+    return adder;
+}
+var add5 = make_adder(5);
+var add10 = make_adder(10);
+add5(3);   // 8
+add10(7);  // 17
+
+// function as value
+var fn = add;
+fn(10, 20);  // 30
+
+// higher-order function
+def apply(fn, val) { return fn(val); }
+def double(x) { return x * 2; }
+apply(double, 7);  // 14
+
+
+// =================================================================
+// 16. CLASSES
+// =================================================================
+
+class Point {
+    var x, y;
+
+    def init(x, y) {
+        self.x = x;
+        self.y = y;
+    }
+
+    def toString() {
+        return f"({self.x}, {self.y})";
+    }
+
+    def add(other) {
+        return Point(self.x + other.x, self.y + other.y);
+    }
+}
+
+var p1 = Point(3, 4);
+print(p1.x);            // 3
+print(p1.toString());   // (3, 4)
+
+var p2 = Point(1, 2);
+var p3 = p1.add(p2);    // Point(4, 6)
+
+// field default values
+class Config {
+    var width = 800;
+    var height = 600;
+    var title = "Untitled";
+
+    def init() { }
+}
+var cfg = Config();
+print(cfg.width);   // 800
+
+// method chaining (return self)
+class Builder {
+    var result;
+
+    def init() { self.result = ""; }
+
+    def append(s) {
+        self.result = self.result + s;
+        return self;
+    }
+
+    def build() {
+        return self.result;
+    }
+}
+var text = Builder().append("hello").append(" ").append("world").build();
+
+
+// =================================================================
+// 17. INHERITANCE
+// =================================================================
+
+class Animal {
+    var name;
+
+    def init(name) {
+        self.name = name;
+    }
+
+    def speak() {
+        return f"{self.name} makes a sound";
+    }
+}
+
+class Dog : Animal {
+    var breed;
+
+    def init(name, breed) {
+        super.init(name);
+        self.breed = breed;
+    }
+
+    def speak() {
+        return f"{self.name} barks!";
+    }
+}
+
+var dog = Dog("Rex", "Labrador");
+print(dog.speak());      // Rex barks!
+print(dog.name);         // Rex (inherited field)
+print(dog.breed);        // Labrador
+
+
+// =================================================================
+// 18. STRUCTS
+// =================================================================
+
+// lightweight value types (no methods)
+struct Vec2 { x, y }
+
+var v1 = Vec2(10, 20);
+print(v1.x);    // 10
+v1.x = 99;      // mutation
+
+// with var keyword
+struct Color { var r, g, b; }
+
+var red = Color(255, 0, 0);
+
+// structs in arrays
+var vertices = [Vec2(0, 0), Vec2(1, 0), Vec2(0, 1)];
+
+
+// =================================================================
+// 19. ENUMS
+// =================================================================
+
+// auto-increment from 0
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right
+}
+print(Direction.Up);     // 0
+print(Direction.Right);  // 3
+
+// explicit values
+enum HttpStatus {
+    OK = 200,
+    NotFound = 404,
+    Error = 500
+}
+
+var status = HttpStatus.OK;
+if (status == HttpStatus.OK) {
+    print("All good");
+}
+
+// enums in f-strings
+print(f"Status: {HttpStatus.NotFound}");  // Status: 404
+
+
+// =================================================================
+// 20. TRY / CATCH / FINALLY / THROW
+// =================================================================
+
+// basic try/catch
+try {
+    throw "something went wrong";
+} catch (e) {
+    print(f"Caught: {e}");
+}
+
+// finally always runs
+try {
+    throw "error";
+} catch (e) {
+    print("handling error");
+} finally {
+    print("cleanup always runs");
+}
+
+// throw any value (strings, ints, arrays...)
+try {
+    throw 42;
+} catch (e) {
+    print(f"Got number: {e}");
+}
+
+// throw from function
+def divide(a, b) {
+    if (b == 0) throw "division by zero";
+    return a / b;
+}
+
+try {
+    var result2 = divide(10, 0);
+} catch (e) {
+    print(e);  // "division by zero"
+}
+
+// nested try/catch with rethrow
+try {
+    try {
+        throw "inner";
+    } catch (e) {
+        print(f"inner caught: {e}");
+        throw "rethrown";
+    }
+} catch (e) {
+    print(f"outer caught: {e}");
+}
+
+// runtime errors are catchable
+try {
+    var bad = 1 / 0;
+} catch (e) {
+    print("caught div by zero");
+}
+
+
+// =================================================================
+// 21. COMPOUND ASSIGNMENT ON PROPERTIES & SUBSCRIPTS
+// =================================================================
+
+var pt = Point(10, 20);
+pt.x += 5;    // 15
+pt.y *= 2;    // 40
+pt.x++;       // 16
+
+var arr2 = [10, 20, 30];
+arr2[1] += 5;  // 25
+
+var map2 = {score: 100};
+map2["score"] -= 25;  // 75
+
+
+// =================================================================
+// 22. MIXED TYPE ARITHMETIC
+// =================================================================
+
+var mi = 5 + 3.14;    // int + double = double (8.14)
+var m2 = 3 * 2.5;     // 7.5
+var m3 = 10 / 3;      // 3 (int / int = int, truncated)
+var m4 = 10.0 / 3.0;  // 3.333... (double / double = double)
+
+
+// =================================================================
+// 23. TRUTHINESS
+// =================================================================
+
+// Falsy: false, nil, 0
+// Truthy: everything else (including empty string, empty array)
+
+if (1) { print("1 is truthy"); }
+if ("hello") { print("non-empty string is truthy"); }
+if (!nil) { print("nil is falsy"); }
+if (!0) { print("0 is falsy"); }
+
+
+// =================================================================
+// 24. BUILT-IN FUNCTIONS
+// =================================================================
+
+// print
+print("hello", 42, true);
+
+// len
+len("abc");       // 3
+len([1, 2, 3]);   // 3
+
+// clock
+var t = clock();  // seconds since start
+
+// math
+sin(0);           cos(0);           tan(0);
+asin(0);          acos(1);          atan(0);
+atan2(1, 0);
+sqrt(4);          pow(2, 10);
+abs(-5);          floor(3.7);       ceil(3.2);
+log(1);           exp(1);
+deg(3.14159);     rad(180);
+
+
+// =================================================================
+// 25. BLOCK SCOPING
+// =================================================================
+
+var outer_var = "outer";
+{
+    var inner_var = "inner";
+    print(inner_var);    // ok
+    print(outer_var);    // ok (sees outer scope)
+}
+// inner_var is no longer accessible here
+
+// variable shadowing
+var shadow = "original";
+{
+    var shadow = "shadowed";
+    print(shadow);       // "shadowed"
+}
+print(shadow);           // "original"
+
+
+// =================================================================
+// 26. COMPLEX EXPRESSIONS
+// =================================================================
+
+// nested ternary
+var grade = 85;
+var letter = (grade >= 90) ? "A" :
+             (grade >= 80) ? "B" :
+             (grade >= 70) ? "C" : "F";
+
+// array with expressions
+var computed = [1 + 2, 3 * 4, (true) ? 99 : 0, len("hello")];
+
+// map as dispatch table
+def op_add(a, b) { return a + b; }
+def op_sub(a, b) { return a - b; }
+def op_mul(a, b) { return a * b; }
+
+var ops = {
+    add: op_add,
+    sub: op_sub,
+    mul: op_mul
+};
+var r3 = ops["add"](10, 5);  // 15
+
+
+// =================================================================
+// 27. RECURSIVE DATA STRUCTURE
+// =================================================================
+
+class Node {
+    var value;
+    var next;
+
+    def init(value, next) {
+        self.value = value;
+        self.next = next;
+    }
+}
+
+// linked list: 3 -> 2 -> 1 -> nil
+var list = Node(3, Node(2, Node(1, nil)));
+
+// walk the list
+var node = list;
+while (node != nil) {
+    print(node.value);
+    node = node.next;
+}
+
+
+// =================================================================
+// 28. STATE MACHINE EXAMPLE
+// =================================================================
+
+def run_fsm(commands) {
+    var state = "idle";
+    foreach (cmd in commands) {
+        switch (state) {
+            case "idle":
+                if (cmd == "start") state = "running";
+            case "running":
+                if (cmd == "pause") state = "paused";
+                if (cmd == "stop") state = "idle";
+            case "paused":
+                if (cmd == "resume") state = "running";
+                if (cmd == "stop") state = "idle";
+        }
+        print(f"  {cmd} -> {state}");
+    }
+    return state;
+}
+
+run_fsm(["start", "pause", "resume", "stop"]);
+
+
+// =================================================================
+// END OF SYNTAX REFERENCE
+// =================================================================
+
+print("");
+print("sintax.bu -- All BuLang features demonstrated!");

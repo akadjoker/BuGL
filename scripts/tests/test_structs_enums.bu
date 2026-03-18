@@ -1,0 +1,94 @@
+// ============================================
+// test_structs_enums.bu — Structs & Enums
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// ── Structs ──────────────────────────────────
+
+struct Vec2 { x, y }
+
+var v = Vec2(10, 20);
+assert(v.x == 10, "struct field x");
+assert(v.y == 20, "struct field y");
+
+// Struct mutation
+v.x = 99;
+assert(v.x == 99, "struct set field");
+
+struct Color3 { var r, g, b; }
+
+var c = Color3(255, 128, 0);
+assert(c.r == 255, "struct var r");
+assert(c.g == 128, "struct var g");
+assert(c.b == 0, "struct var b");
+
+// ── Enums ────────────────────────────────────
+
+// Explicit values
+enum Color {
+    Red = 1,
+    Green = 2,
+    Blue = 3
+}
+assert(Color.Red == 1, "enum explicit Red");
+assert(Color.Green == 2, "enum explicit Green");
+assert(Color.Blue == 3, "enum explicit Blue");
+
+// Auto-increment from 0
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right
+}
+assert(Direction.Up == 0, "enum auto Up");
+assert(Direction.Down == 1, "enum auto Down");
+assert(Direction.Left == 2, "enum auto Left");
+assert(Direction.Right == 3, "enum auto Right");
+
+// Mixed explicit values
+enum HttpStatus {
+    OK = 200,
+    NotFound = 404,
+    Error = 500
+}
+assert(HttpStatus.OK == 200, "enum http 200");
+assert(HttpStatus.NotFound == 404, "enum http 404");
+assert(HttpStatus.Error == 500, "enum http 500");
+
+// Enum in expressions
+var status = HttpStatus.OK;
+if (status == HttpStatus.OK) {
+    assert(true, "enum comparison");
+} else {
+    assert(false, "enum comparison");
+}
+
+// Enum in f-string
+assert(f"status={HttpStatus.NotFound}" == "status=404", "enum in f-string");
+
+// Enum in switch
+var msg = "";
+switch (status) {
+    case 200:
+        msg = "ok";
+    case 404:
+        msg = "not found";
+    default:
+        msg = "unknown";
+}
+assert(msg == "ok", "enum switch");
+
+print(f"test_structs_enums: {passed} passed, {failed} failed");

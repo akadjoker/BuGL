@@ -1,0 +1,5 @@
+// Test: method call on nil
+// Expected: runtime error about calling method on nil
+
+var x = nil;
+x.foo();

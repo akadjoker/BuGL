@@ -1,0 +1,4 @@
+// Test: throw without try
+// Expected: runtime error (uncaught exception)
+
+throw "boom";

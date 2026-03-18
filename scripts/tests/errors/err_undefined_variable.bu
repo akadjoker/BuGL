@@ -1,0 +1,4 @@
+// Test: undefined variable access
+// Expected: compile or runtime error, not crash
+
+print(totally_undefined_variable_xyz)

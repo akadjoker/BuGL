@@ -1,0 +1,124 @@
+// ============================================
+// test_classes.bu — Classes, inheritance, methods
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// Basic class
+class Point
+{
+    var x, y;
+
+    def init(x, y)
+    {
+        self.x = x;
+        self.y = y;
+    }
+
+    def toString()
+    {
+        return f"({self.x}, {self.y})";
+    }
+
+    def add(other)
+    {
+        return Point(self.x + other.x, self.y + other.y);
+    }
+}
+
+var p = Point(3, 4);
+assert(p.x == 3, "field x");
+assert(p.y == 4, "field y");
+assert(p.toString() == "(3, 4)", "method toString");
+
+var p2 = Point(1, 2);
+var p3 = p.add(p2);
+assert(p3.x == 4, "method add x");
+assert(p3.y == 6, "method add y");
+
+// Inheritance
+class Animal
+{
+    var name;
+
+    def init(name)
+    {
+        self.name = name;
+    }
+
+    def speak()
+    {
+        return f"{self.name} makes a sound";
+    }
+}
+
+class Dog : Animal
+{
+    var breed;
+
+    def init(name, breed)
+    {
+        super.init(name);
+        self.breed = breed;
+    }
+
+    def speak()
+    {
+        return f"{self.name} barks";
+    }
+}
+
+var dog = Dog("Rex", "Husky");
+assert(dog.name == "Rex", "inherited field");
+assert(dog.breed == "Husky", "own field");
+assert(dog.speak() == "Rex barks", "overridden method");
+
+var animal = Animal("Cat");
+assert(animal.speak() == "Cat makes a sound", "base method");
+
+// Class with computed state
+class Counter
+{
+    var count;
+
+    def init()
+    {
+        self.count = 0;
+    }
+
+    def inc()
+    {
+        self.count += 1;
+        return self.count;
+    }
+
+    def dec()
+    {
+        self.count -= 1;
+        return self.count;
+    }
+
+    def get()
+    {
+        return self.count;
+    }
+}
+
+var c = Counter();
+assert(c.get() == 0, "counter init");
+assert(c.inc() == 1, "counter inc 1");
+assert(c.inc() == 2, "counter inc 2");
+assert(c.dec() == 1, "counter dec");
+
+print(f"test_classes: {passed} passed, {failed} failed");

@@ -1,0 +1,51 @@
+// Test f-string interpolation
+var name = "World";
+var x = 42;
+print(f"Hello {name}!");
+print(f"The answer is {x}");
+print(f"Math: 2 + 3 = {2 + 3}");
+print(f"Empty interpolation test");
+print(f"Escaped braces: {{literal}}");
+
+// Test enum
+enum Color {
+    Red = 1,
+    Green = 2,
+    Blue = 3
+}
+
+print(Color.Red);
+print(Color.Green);
+print(Color.Blue);
+
+// Test enum with auto-increment
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right
+}
+
+print(Direction.Up);
+print(Direction.Down);
+print(Direction.Left);
+print(Direction.Right);
+
+// Test enum with mixed values
+enum Status {
+    OK = 200,
+    NotFound = 404,
+    Error = 500
+}
+
+print(Status.OK);
+print(Status.NotFound);
+print(Status.Error);
+
+// Combined test
+enum Fruit {
+    Apple = 1,
+    Banana = 2,
+    Cherry = 3
+}
+print(f"My favorite fruit is #{Fruit.Cherry}");

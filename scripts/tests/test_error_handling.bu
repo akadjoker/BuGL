@@ -1,0 +1,94 @@
+// ============================================
+// test_error_handling.bu — try/catch/finally, throw
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// Basic try/catch
+var caught = false;
+try {
+    throw "boom";
+} catch (e) {
+    caught = true;
+    assert(e == "boom", "catch message");
+}
+assert(caught, "try/catch basic");
+
+// Try/catch with no throw
+var ran_try = false;
+var ran_catch = false;
+try {
+    ran_try = true;
+} catch (e) {
+    ran_catch = true;
+}
+assert(ran_try, "try runs");
+assert(!ran_catch, "catch not reached");
+
+// Finally always runs
+var finally_ran = false;
+try {
+    throw "err";
+} catch (e) {
+    // consume
+} finally {
+    finally_ran = true;
+}
+assert(finally_ran, "finally after throw");
+
+finally_ran = false;
+try {
+    // no throw
+} catch (e) {
+    // not reached
+} finally {
+    finally_ran = true;
+}
+assert(finally_ran, "finally without throw");
+
+// Throw from function
+def risky(flag)
+{
+    if (flag) throw "danger";
+    return "safe";
+}
+
+assert(risky(false) == "safe", "no throw returns");
+
+var result = "";
+try {
+    risky(true);
+    result = "not reached";
+} catch (e) {
+    result = e;
+}
+assert(result == "danger", "throw from function");
+
+// Nested try/catch
+var outer_catch = "";
+var inner_catch = "";
+try {
+    try {
+        throw "inner";
+    } catch (e) {
+        inner_catch = e;
+        throw "rethrown";
+    }
+} catch (e) {
+    outer_catch = e;
+}
+assert(inner_catch == "inner", "nested inner catch");
+assert(outer_catch == "rethrown", "nested outer catch");
+
+print(f"test_error_handling: {passed} passed, {failed} failed");

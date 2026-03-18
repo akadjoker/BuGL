@@ -1,0 +1,4 @@
+// Test: deeply nested parentheses - compiler recursion depth
+// Expected: compile error or handled gracefully, not stack overflow crash
+
+var x = ((((((((((((((((((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))

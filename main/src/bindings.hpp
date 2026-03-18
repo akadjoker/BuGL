@@ -23,6 +23,9 @@ namespace SDLBindings
     void register_opengl_instancing(ModuleBuilder &module);
     void register_opengl_query(ModuleBuilder &module);
     void register_opengl_ubo(ModuleBuilder &module);
+    void register_opengl_compute(ModuleBuilder &module);
+    void register_opengl_transform_feedback(ModuleBuilder &module);
+    void register_opengl_advanced(ModuleBuilder &module);
     void register_batch(Interpreter &vm, ModuleBuilder &module);
     void register_sdl_opengl(ModuleBuilder &module);
     void register_stb(ModuleBuilder &module);

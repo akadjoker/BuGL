@@ -1,0 +1,7 @@
+// BAD: function with no body, then a while loop
+def broken()
+
+while (true) {
+    break;
+}
+print("should not reach here");

@@ -1,0 +1,114 @@
+// ============================================
+// test_control_flow.bu — if/elif/else, while, for, foreach, switch
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// if / elif / else
+var x = 10;
+if (x > 20) {
+    assert(false, "if > 20");
+} elif (x > 5) {
+    assert(true, "elif > 5");
+} else {
+    assert(false, "else");
+}
+
+// while + break
+var sum = 0;
+var i = 0;
+while (i < 10) {
+    sum += i;
+    i += 1;
+}
+assert(sum == 45, "while sum 0..9");
+
+// while + break
+sum = 0;
+i = 0;
+while (true) {
+    if (i >= 5) break;
+    sum += i;
+    i += 1;
+}
+assert(sum == 10, "while break");
+
+// while + continue
+sum = 0;
+i = 0;
+while (i < 10) {
+    i += 1;
+    if (i % 2 == 0) continue;
+    sum += i;
+}
+assert(sum == 25, "while continue (odd sum)");
+
+// for loop
+sum = 0;
+for (var j = 0; j < 5; j += 1) {
+    sum += j;
+}
+assert(sum == 10, "for loop");
+
+// foreach array
+var arr = [10, 20, 30];
+sum = 0;
+foreach (v in arr) {
+    sum += v;
+}
+assert(sum == 60, "foreach array");
+
+// switch
+var result = "";
+var code = 2;
+switch (code) {
+    case 1:
+        result = "one";
+    case 2:
+        result = "two";
+    case 3:
+        result = "three";
+    default:
+        result = "other";
+}
+assert(result == "two", "switch case 2");
+
+code = 99;
+switch (code) {
+    case 1:
+        result = "one";
+    default:
+        result = "default";
+}
+assert(result == "default", "switch default");
+
+// do..while
+sum = 0;
+i = 0;
+do {
+    sum += i;
+    i += 1;
+} while (i < 5);
+assert(sum == 10, "do while");
+
+// nested loops
+var count = 0;
+for (var a = 0; a < 3; a += 1) {
+    for (var b = 0; b < 3; b += 1) {
+        count += 1;
+    }
+}
+assert(count == 9, "nested for");
+
+print(f"test_control_flow: {passed} passed, {failed} failed");

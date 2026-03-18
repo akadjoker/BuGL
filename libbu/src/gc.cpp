@@ -86,7 +86,8 @@ void Interpreter::markRoots()
 
 void Interpreter::markObject(GCObject *obj)
 {
-    if (obj == nullptr || obj->marked)
+    // OPTIMIZATION: Early exit with likely hint - most objects already marked or null
+    if (__builtin_expect(obj == nullptr || obj->marked, 0))
         return;
     obj->marked = 1;
     grayStack.push(obj);
@@ -94,39 +95,36 @@ void Interpreter::markObject(GCObject *obj)
 
 void Interpreter::markValue(const Value &v)
 {
-    if (v.isStructInstance())
+    // OPTIMIZATION: Use switch for potential jump table instead of if-chain
+    switch (v.type)
     {
-        // printValueNl(v);
+    case ValueType::STRUCTINSTANCE:
         markObject(v.as.sInstance);
-    }
-    else if (v.isClassInstance())
-    {
+        break;
+    case ValueType::CLASSINSTANCE:
         markObject(v.as.sClass);
-    }
-    else if (v.isArray())
-    {
-        // printValueNl(v);
+        break;
+    case ValueType::ARRAY:
         markObject(v.as.array);
-    }
-    else if (v.isMap())
-    {
+        break;
+    case ValueType::MAP:
         markObject(v.as.map);
-    }
-    else if (v.isBuffer())
-    {
+        break;
+    case ValueType::BUFFER:
         markObject(v.as.buffer);
-    }
-    else if (v.isNativeClassInstance())
-    {
+        break;
+    case ValueType::NATIVECLASSINSTANCE:
         markObject(v.as.sClassInstance);
-    }
-    else if (v.isNativeStructInstance())
-    {
+        break;
+    case ValueType::NATIVESTRUCTINSTANCE:
         markObject(v.as.sNativeStruct);
-    }
-    else if (v.isClosure())
-    {
+        break;
+    case ValueType::CLOSURE:
         markObject((GCObject *)v.as.closure);
+        break;
+    default:
+        // Non-object types (INT, DOUBLE, STRING, etc.) - nothing to mark
+        break;
     }
 }
 
@@ -139,18 +137,19 @@ void Interpreter::sweep()
 
     while (*obj)
     {
-        if ((*obj)->marked == 0)
+        GCObject *current = *obj;
+        // OPTIMIZATION: Cache dereference and use likely (most objects survive)
+        if (__builtin_expect(current->marked == 0, 0))
         {
-            GCObject *unreached = *obj;
-            *obj = unreached->next;
-            freeObject(unreached);
+            *obj = current->next;
+            freeObject(current);
             freed++;
         }
         else
         {
             //  Desmarca para próximo ciclo
-            (*obj)->marked = 0;
-            obj = &(*obj)->next;
+            current->marked = 0;
+            obj = &current->next;
         }
     }
 
@@ -233,10 +232,12 @@ void Interpreter::freeObject(GCObject *obj)
 
 void Interpreter::checkGC()
 {
-    if (!enbaledGC)
+    // OPTIMIZATION: Use likely/unlikely for better branch prediction
+    // GC triggers are rare compared to allocations
+    if (__builtin_expect(!enbaledGC, 0))
         return;
 
-    if (totalAllocated > nextGC)
+    if (__builtin_expect(totalAllocated > nextGC, 0))
     {
         runGC();
     }
@@ -285,10 +286,16 @@ void Interpreter::blackenObject(GCObject *obj)
     case GCObjectType::MAP:
     {
         MapInstance *m = static_cast<MapInstance *>(obj);
-        m->table.forEach([this](String *key, Value val)
-                         { 
-                            if(val.isObject())
-                                markValue(val); });
+        // OPTIMIZATION: Direct iteration over entries instead of forEach lambda
+        auto* entries = m->table.entries;
+        size_t cap = m->table.capacity;
+        for (size_t i = 0; i < cap; i++)
+        {
+            if (entries[i].state == 1 && entries[i].value.isObject())  // 1 = FILLED
+            {
+                markValue(entries[i].value);
+            }
+        }
         break;
     }
 
@@ -345,7 +352,11 @@ void Interpreter::runGC()
     size_t objectsBefore = totalArrays + totalClasses + totalStructs + totalMaps + totalBuffers + totalNativeClasses + totalNativeStructs + totalClosures + totalUpvalues;
 #endif
 
+    // OPTIMIZATION: Reserve capacity instead of clear to avoid reallocations
     grayStack.clear();
+    if (grayStack.capacity() < 256) {
+        grayStack.reserve(256);
+    }
 
     markRoots();
 

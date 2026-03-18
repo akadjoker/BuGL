@@ -1,0 +1,160 @@
+// ---------------------------------------------------------------------------
+// Smoke test for the new batch functions:
+//   texturedRect, sprite, spriteEx, nineSlice, thickLine2D, ring, arc
+// ---------------------------------------------------------------------------
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+SDL.SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SDL.SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SDL.SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("Batch New Funcs Smoke", 960, 540, SDL_WINDOW_OPENGL)) return;
+
+glDisable(GL_DEPTH_TEST);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+glClearColor(0.07, 0.08, 0.12, 1.0);
+
+var batch = Batch(1, 32768);
+var ortho = MatrixOrtho(0.0, SDL.GetWidth(), SDL.GetHeight(), 0.0, -1.0, 1.0);
+batch.setMatrix(ortho);
+
+// Create a simple checkerboard texture (8x8, 2 colors) for testing
+var texId = glGenTextures();
+var pixels = @(8 * 8 * 4, 0);
+for (var y = 0; y < 8; y = y + 1) {
+    for (var x = 0; x < 8; x = x + 1) {
+        var i = (y * 8 + x) * 4;
+        var white = ((x + y) % 2 == 0);
+        pixels[i + 0] = white ? 220 : 60;   // R
+        pixels[i + 1] = white ? 220 : 80;   // G
+        pixels[i + 2] = white ? 220 : 120;  // B
+        pixels[i + 3] = 255;                // A
+    }
+}
+glBindTexture(GL_TEXTURE_2D, texId);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+glBindTexture(GL_TEXTURE_2D, 0);
+
+var frames = 0;
+while (SDL.Running()) {
+    frames = frames + 1;
+    var t = frames / 60.0;
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // --- Row 1: Textured functions ---
+
+    // 1) texturedRect — simple fullscreen-UV quad
+    batch.setColor(1.0, 1.0, 1.0, 1.0);
+    batch.texturedRect(texId, 30, 30, 120, 80);
+
+    // 2) sprite — source rect from checkerboard atlas
+    batch.sprite(texId, 0, 0, 4, 4,    // src: top-left 4x4 of 8x8
+                 180, 30, 120, 80,      // dst
+                 8.0, 8.0);             // texture dimensions
+
+    // 3) spriteEx — rotated sprite with origin + flip
+    var angle = t * 60.0;  // slow rotation
+    batch.spriteEx(texId,
+        0, 0, 8, 8,                    // src: full texture
+        380, 30, 100, 100,             // dst
+        angle, 50.0, 50.0,            // rotation + origin at center
+        false, false,                   // no flip
+        8.0, 8.0);                     // tex dims
+
+    // 4) spriteEx — flipped horizontally
+    batch.spriteEx(texId,
+        0, 0, 8, 8,
+        520, 30, 100, 70,
+        0.0, 0.0, 0.0,
+        true, false,
+        8.0, 8.0);
+
+    // 5) spriteEx — flipped vertically
+    batch.spriteEx(texId,
+        0, 0, 8, 8,
+        660, 30, 100, 70,
+        0.0, 0.0, 0.0,
+        false, true,
+        8.0, 8.0);
+
+    // --- Row 2: NineSlice ---
+
+    // 6) nineSlice — small
+    batch.setColor(1.0, 1.0, 1.0, 1.0);
+    batch.nineSlice(texId, 30, 150, 200, 120,
+                    2.0, 2.0, 2.0, 2.0,   // borders
+                    8.0, 8.0);
+
+    // 7) nineSlice — stretched wide
+    batch.nineSlice(texId, 260, 150, 400, 80,
+                    2.0, 2.0, 2.0, 2.0,
+                    8.0, 8.0);
+
+    // --- Row 3: ThickLine2D ---
+
+    // 8) thickLine2D — horizontal
+    batch.setColor(0.95, 0.30, 0.25, 1.0);
+    batch.thickLine2D(30, 310, 250, 310, 6.0);
+
+    // 9) thickLine2D — diagonal
+    batch.setColor(0.25, 0.85, 0.95, 1.0);
+    batch.thickLine2D(30, 340, 250, 290, 4.0);
+
+    // 10) thickLine2D — very thick
+    batch.setColor(0.95, 0.90, 0.25, 0.7);
+    batch.thickLine2D(280, 290, 420, 350, 14.0);
+
+    // --- Row 3-4: Ring + Arc ---
+
+    // 11) ring — filled donut
+    batch.setColor(0.30, 0.90, 0.50, 0.85);
+    batch.ring(550, 330, 25.0, 55.0, 0.0, 360.0, 36, true);
+
+    // 12) ring — wireframe partial
+    batch.setColor(0.90, 0.65, 0.20, 1.0);
+    batch.ring(690, 330, 20.0, 50.0, -45.0, 225.0, 24, false);
+
+    // 13) ring — thin filled sector
+    batch.setColor(0.70, 0.30, 0.95, 0.9);
+    batch.ring(830, 330, 30.0, 45.0, 0.0, 270.0, 32, true);
+
+    // 14) arc — thick arc
+    batch.setColor(0.95, 0.40, 0.60, 1.0);
+    batch.arc(150, 450, 50.0, 0.0, 240.0, 10.0, 28);
+
+    // 15) arc — thin arc / full circle
+    batch.setColor(0.30, 0.80, 1.0, 1.0);
+    batch.arc(320, 450, 40.0, 0.0, 360.0, 3.0, 48);
+
+    // 16) arc — half arc with default segments
+    batch.setColor(1.0, 1.0, 0.40, 1.0);
+    batch.arc(480, 460, 55.0, -90.0, 90.0, 8.0);
+
+    // --- Manual mode test (vertex2f/texCoord2f with VAO) ---
+    batch.setColor(0.5, 1.0, 0.5, 1.0);
+    batch.setTexture(0);
+    batch.setMode(BATCH_TRIANGLES);
+    batch.vertex2f(700, 420);
+    batch.vertex2f(750, 500);
+    batch.vertex2f(650, 500);
+
+    batch.render();
+    SDL.Flip();
+
+    
+}
+
+// Cleanup
+glDeleteTextures(texId);
+SDL.Close();
+print("BATCH_NEW_FUNCS_SMOKE_PASS");

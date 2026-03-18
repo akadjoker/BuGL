@@ -1,0 +1,8 @@
+// BAD: struct with no fields and no closing }
+struct Empty {
+
+var x = 10;
+while (x > 0) {
+    x -= 1;
+}
+print("should not reach here");

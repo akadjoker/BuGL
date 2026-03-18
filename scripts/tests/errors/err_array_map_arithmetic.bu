@@ -1,0 +1,6 @@
+// Test: array + map arithmetic should error cleanly
+// Expected: runtime error about type mismatch
+
+var a = [1, 2, 3];
+var b = {"x": 1};
+var c = a + b;

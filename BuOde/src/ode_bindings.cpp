@@ -1,5 +1,7 @@
 #include "bindings.hpp"
 #include <ode/ode.h>
+#include <vector>
+#include <cstring>
 
 namespace ODEBindings
 {
@@ -2410,6 +2412,555 @@ namespace ODEBindings
         return 0;
     }
 
+    // ─── Body rotation ───────────────────────────────────────────────────
+
+    static int native_dBodySetRotation(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("dBodySetRotation expects (body, yaw, pitch, roll) in radians");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodySetRotation", "body"))
+            return 0;
+        dReal yaw = (dReal)args[1].asNumber();
+        dReal pitch = (dReal)args[2].asNumber();
+        dReal roll = (dReal)args[3].asNumber();
+        dMatrix3 R;
+        dRFromEulerAngles(R, yaw, pitch, roll);
+        dBodySetRotation(b, R);
+        return 0;
+    }
+
+    static int native_dBodySetQuaternion(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 5)
+        {
+            Error("dBodySetQuaternion expects (body, w, x, y, z)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodySetQuaternion", "body"))
+            return 0;
+        dQuaternion q;
+        q[0] = (dReal)args[1].asNumber(); // w
+        q[1] = (dReal)args[2].asNumber(); // x
+        q[2] = (dReal)args[3].asNumber(); // y
+        q[3] = (dReal)args[4].asNumber(); // z
+        dBodySetQuaternion(b, q);
+        return 0;
+    }
+
+    static int native_dBodyGetQuaternion(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetQuaternion expects (body)");
+            return push_nil1(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetQuaternion", "body"))
+        {
+            vm->pushNil(); vm->pushNil(); vm->pushNil(); vm->pushNil();
+            return 4;
+        }
+        const dReal *q = dBodyGetQuaternion(b);
+        vm->pushDouble((double)q[0]); // w
+        vm->pushDouble((double)q[1]); // x
+        vm->pushDouble((double)q[2]); // y
+        vm->pushDouble((double)q[3]); // z
+        return 4;
+    }
+
+    // ─── Body enable / disable ───────────────────────────────────────────
+
+    static int native_dBodyEnable(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyEnable expects (body)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyEnable", "body"))
+            return 0;
+        dBodyEnable(b);
+        return 0;
+    }
+
+    static int native_dBodyDisable(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyDisable expects (body)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyDisable", "body"))
+            return 0;
+        dBodyDisable(b);
+        return 0;
+    }
+
+    static int native_dBodyIsEnabled(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyIsEnabled expects (body)");
+            return push_nil1(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyIsEnabled", "body"))
+            return push_nil1(vm);
+        vm->pushBool(dBodyIsEnabled(b) != 0);
+        return 1;
+    }
+
+    // ─── Body damping ────────────────────────────────────────────────────
+
+    static int native_dBodySetLinearDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 2)
+        {
+            Error("dBodySetLinearDamping expects (body, scale)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodySetLinearDamping", "body"))
+            return 0;
+        dBodySetLinearDamping(b, (dReal)args[1].asNumber());
+        return 0;
+    }
+
+    static int native_dBodyGetLinearDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetLinearDamping expects (body)");
+            return push_nil1(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetLinearDamping", "body"))
+            return push_nil1(vm);
+        vm->pushDouble((double)dBodyGetLinearDamping(b));
+        return 1;
+    }
+
+    static int native_dBodySetAngularDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 2)
+        {
+            Error("dBodySetAngularDamping expects (body, scale)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodySetAngularDamping", "body"))
+            return 0;
+        dBodySetAngularDamping(b, (dReal)args[1].asNumber());
+        return 0;
+    }
+
+    static int native_dBodyGetAngularDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetAngularDamping expects (body)");
+            return push_nil1(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetAngularDamping", "body"))
+            return push_nil1(vm);
+        vm->pushDouble((double)dBodyGetAngularDamping(b));
+        return 1;
+    }
+
+    static int native_dBodySetDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 3)
+        {
+            Error("dBodySetDamping expects (body, linearScale, angularScale)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodySetDamping", "body"))
+            return 0;
+        dBodySetLinearDamping(b, (dReal)args[1].asNumber());
+        dBodySetAngularDamping(b, (dReal)args[2].asNumber());
+        return 0;
+    }
+
+    // ─── Body relative forces ────────────────────────────────────────────
+
+    static int native_dBodyAddRelForce(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("dBodyAddRelForce expects (body, fx, fy, fz)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyAddRelForce", "body"))
+            return 0;
+        dBodyAddRelForce(b, (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber());
+        return 0;
+    }
+
+    static int native_dBodyAddRelTorque(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("dBodyAddRelTorque expects (body, tx, ty, tz)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyAddRelTorque", "body"))
+            return 0;
+        dBodyAddRelTorque(b, (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber());
+        return 0;
+    }
+
+    static int native_dBodyAddForceAtPos(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 7)
+        {
+            Error("dBodyAddForceAtPos expects (body, fx, fy, fz, px, py, pz)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyAddForceAtPos", "body"))
+            return 0;
+        dBodyAddForceAtPos(b,
+                           (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber(),
+                           (dReal)args[4].asNumber(), (dReal)args[5].asNumber(), (dReal)args[6].asNumber());
+        return 0;
+    }
+
+    static int native_dBodyAddForceAtRelPos(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 7)
+        {
+            Error("dBodyAddForceAtRelPos expects (body, fx, fy, fz, px, py, pz)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyAddForceAtRelPos", "body"))
+            return 0;
+        dBodyAddForceAtRelPos(b,
+                              (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber(),
+                              (dReal)args[4].asNumber(), (dReal)args[5].asNumber(), (dReal)args[6].asNumber());
+        return 0;
+    }
+
+    // ─── Body force / torque queries ─────────────────────────────────────
+
+    static int native_dBodyGetForce(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetForce expects (body)");
+            return push_nil3(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetForce", "body"))
+            return push_nil3(vm);
+        const dReal *f = dBodyGetForce(b);
+        vm->pushDouble((double)f[0]);
+        vm->pushDouble((double)f[1]);
+        vm->pushDouble((double)f[2]);
+        return 3;
+    }
+
+    static int native_dBodyGetTorque(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetTorque expects (body)");
+            return push_nil3(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetTorque", "body"))
+            return push_nil3(vm);
+        const dReal *t = dBodyGetTorque(b);
+        vm->pushDouble((double)t[0]);
+        vm->pushDouble((double)t[1]);
+        vm->pushDouble((double)t[2]);
+        return 3;
+    }
+
+    // ─── Body mass query ─────────────────────────────────────────────────
+
+    static int native_dBodyGetMass(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetMass expects (body)");
+            return push_nil1(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetMass", "body"))
+            return push_nil1(vm);
+        dMass m;
+        dBodyGetMass(b, &m);
+        vm->pushDouble((double)m.mass);
+        return 1;
+    }
+
+    // ─── Body max angular speed ──────────────────────────────────────────
+
+    static int native_dBodySetMaxAngularSpeed(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 2)
+        {
+            Error("dBodySetMaxAngularSpeed expects (body, maxSpeed)");
+            return 0;
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodySetMaxAngularSpeed", "body"))
+            return 0;
+        dBodySetMaxAngularSpeed(b, (dReal)args[1].asNumber());
+        return 0;
+    }
+
+    static int native_dBodyGetMaxAngularSpeed(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dBodyGetMaxAngularSpeed expects (body)");
+            return push_nil1(vm);
+        }
+        dBodyID b = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&b, "dBodyGetMaxAngularSpeed", "body"))
+            return push_nil1(vm);
+        vm->pushDouble((double)dBodyGetMaxAngularSpeed(b));
+        return 1;
+    }
+
+    // ─── Ray parameters ─────────────────────────────────────────────────
+
+    static int native_dRaySet(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 7)
+        {
+            Error("dRaySet expects (ray, px, py, pz, dx, dy, dz)");
+            return 0;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dRaySet", "ray"))
+            return 0;
+        dGeomRaySet(g,
+                    (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber(),
+                    (dReal)args[4].asNumber(), (dReal)args[5].asNumber(), (dReal)args[6].asNumber());
+        return 0;
+    }
+
+    static int native_dRayGet(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dRayGet expects (ray)");
+            for (int i = 0; i < 6; ++i) vm->pushNil();
+            return 6;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dRayGet", "ray"))
+        {
+            for (int i = 0; i < 6; ++i) vm->pushNil();
+            return 6;
+        }
+        dVector3 start, dir;
+        dGeomRayGet(g, start, dir);
+        vm->pushDouble((double)start[0]);
+        vm->pushDouble((double)start[1]);
+        vm->pushDouble((double)start[2]);
+        vm->pushDouble((double)dir[0]);
+        vm->pushDouble((double)dir[1]);
+        vm->pushDouble((double)dir[2]);
+        return 6;
+    }
+
+    static int native_dRaySetLength(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 2)
+        {
+            Error("dRaySetLength expects (ray, length)");
+            return 0;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dRaySetLength", "ray"))
+            return 0;
+        dGeomRaySetLength(g, (dReal)args[1].asNumber());
+        return 0;
+    }
+
+    static int native_dRayGetLength(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dRayGetLength expects (ray)");
+            return push_nil1(vm);
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dRayGetLength", "ray"))
+            return push_nil1(vm);
+        vm->pushDouble((double)dGeomRayGetLength(g));
+        return 1;
+    }
+
+    // ─── Geom rotation ──────────────────────────────────────────────────
+
+    static int native_dGeomSetRotation(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("dGeomSetRotation expects (geom, yaw, pitch, roll) in radians");
+            return 0;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomSetRotation", "geom"))
+            return 0;
+        dMatrix3 R;
+        dRFromEulerAngles(R, (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber());
+        dGeomSetRotation(g, R);
+        return 0;
+    }
+
+    static int native_dGeomGetRotation(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dGeomGetRotation expects (geom)");
+            return push_nil12(vm);
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomGetRotation", "geom"))
+            return push_nil12(vm);
+        const dReal *r = dGeomGetRotation(g);
+        for (int i = 0; i < 12; ++i)
+            vm->pushDouble((double)r[i]);
+        return 12;
+    }
+
+    static int native_dGeomSetQuaternion(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 5)
+        {
+            Error("dGeomSetQuaternion expects (geom, w, x, y, z)");
+            return 0;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomSetQuaternion", "geom"))
+            return 0;
+        dQuaternion q;
+        q[0] = (dReal)args[1].asNumber();
+        q[1] = (dReal)args[2].asNumber();
+        q[2] = (dReal)args[3].asNumber();
+        q[3] = (dReal)args[4].asNumber();
+        dGeomSetQuaternion(g, q);
+        return 0;
+    }
+
+    static int native_dGeomGetQuaternion(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dGeomGetQuaternion expects (geom)");
+            vm->pushNil(); vm->pushNil(); vm->pushNil(); vm->pushNil();
+            return 4;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomGetQuaternion", "geom"))
+        {
+            vm->pushNil(); vm->pushNil(); vm->pushNil(); vm->pushNil();
+            return 4;
+        }
+        dQuaternion q;
+        dGeomGetQuaternion(g, q);
+        vm->pushDouble((double)q[0]); // w
+        vm->pushDouble((double)q[1]); // x
+        vm->pushDouble((double)q[2]); // y
+        vm->pushDouble((double)q[3]); // z
+        return 4;
+    }
+
+    // ─── Geom offset ────────────────────────────────────────────────────
+
+    static int native_dGeomSetOffsetPosition(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 4)
+        {
+            Error("dGeomSetOffsetPosition expects (geom, x, y, z)");
+            return 0;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomSetOffsetPosition", "geom"))
+            return 0;
+        dGeomSetOffsetPosition(g, (dReal)args[1].asNumber(), (dReal)args[2].asNumber(), (dReal)args[3].asNumber());
+        return 0;
+    }
+
+    static int native_dGeomGetOffsetPosition(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dGeomGetOffsetPosition expects (geom)");
+            return push_nil3(vm);
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomGetOffsetPosition", "geom"))
+            return push_nil3(vm);
+        const dReal *p = dGeomGetOffsetPosition(g);
+        vm->pushDouble((double)p[0]);
+        vm->pushDouble((double)p[1]);
+        vm->pushDouble((double)p[2]);
+        return 3;
+    }
+
+    // ─── World damping defaults ──────────────────────────────────────────
+
+    static int native_dWorldSetLinearDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 2)
+        {
+            Error("dWorldSetLinearDamping expects (world, scale)");
+            return 0;
+        }
+        dWorldID w = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&w, "dWorldSetLinearDamping", "world"))
+            return 0;
+        dWorldSetLinearDamping(w, (dReal)args[1].asNumber());
+        return 0;
+    }
+
+    static int native_dWorldSetAngularDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 2)
+        {
+            Error("dWorldSetAngularDamping expects (world, scale)");
+            return 0;
+        }
+        dWorldID w = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&w, "dWorldSetAngularDamping", "world"))
+            return 0;
+        dWorldSetAngularDamping(w, (dReal)args[1].asNumber());
+        return 0;
+    }
+
+    static int native_dWorldSetDamping(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 3)
+        {
+            Error("dWorldSetDamping expects (world, linearScale, angularScale)");
+            return 0;
+        }
+        dWorldID w = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&w, "dWorldSetDamping", "world"))
+            return 0;
+        dWorldSetLinearDamping(w, (dReal)args[1].asNumber());
+        dWorldSetAngularDamping(w, (dReal)args[2].asNumber());
+        return 0;
+    }
+
     // ---------------- Geom ----------------
 
     static int native_dCreatePlane(Interpreter *vm, int argc, Value *args)
@@ -2507,6 +3058,223 @@ namespace ODEBindings
         dGeomID g = dCreateRay(s, (dReal)args[1].asNumber());
         vm->pushPointer((void *)g);
         return 1;
+    }
+
+    // ─── TriMesh support ─────────────────────────────────────────────────
+    // ODE trimesh needs persistent vertex/index data (it doesn't copy).
+    // We allocate heap arrays and store them via dGeomSetData so we can free on destroy.
+
+    struct TriMeshUserData
+    {
+        float *vertices;
+        dTriIndex *indices;
+        dTriMeshDataID meshData;
+    };
+
+    static int native_dCreateTriMesh(Interpreter *vm, int argc, Value *args)
+    {
+        // dCreateTriMesh(space, verticesArray, indicesArray)
+        // verticesArray = flat [x,y,z, x,y,z, ...]
+        // indicesArray  = flat [i0,i1,i2, i0,i1,i2, ...]
+        if (argc != 3)
+        {
+            Error("dCreateTriMesh expects (space, verticesArray, indicesArray)");
+            return push_nil1(vm);
+        }
+
+        dSpaceID space = nullptr;
+        if (!read_space_or_nil_arg(args, 0, &space, "dCreateTriMesh"))
+            return push_nil1(vm);
+
+        // Read vertices
+        std::vector<float> verts;
+        if (args[1].isArray())
+        {
+            ArrayInstance *arr = args[1].asArray();
+            if (!arr || arr->values.empty())
+            {
+                Error("dCreateTriMesh arg 2 expects non-empty array of floats");
+                return push_nil1(vm);
+            }
+            verts.reserve(arr->values.size());
+            for (size_t i = 0; i < arr->values.size(); ++i)
+                verts.push_back((float)arr->values[i].asNumber());
+        }
+        else if (args[1].isBuffer())
+        {
+            BufferInstance *buf = args[1].asBuffer();
+            if (!buf || !buf->data || buf->count == 0)
+            {
+                Error("dCreateTriMesh arg 2 expects non-empty buffer");
+                return push_nil1(vm);
+            }
+            if (buf->type == BufferType::FLOAT)
+            {
+                float *p = (float *)buf->data;
+                verts.assign(p, p + buf->count);
+            }
+            else if (buf->type == BufferType::DOUBLE)
+            {
+                double *p = (double *)buf->data;
+                verts.reserve(buf->count);
+                for (int i = 0; i < buf->count; ++i)
+                    verts.push_back((float)p[i]);
+            }
+            else
+            {
+                Error("dCreateTriMesh arg 2 buffer type must be FLOAT or DOUBLE");
+                return push_nil1(vm);
+            }
+        }
+        else
+        {
+            Error("dCreateTriMesh arg 2 expects array or buffer");
+            return push_nil1(vm);
+        }
+
+        // Read indices
+        std::vector<int> idxs;
+        if (args[2].isArray())
+        {
+            ArrayInstance *arr = args[2].asArray();
+            if (!arr || arr->values.empty())
+            {
+                Error("dCreateTriMesh arg 3 expects non-empty array of ints");
+                return push_nil1(vm);
+            }
+            idxs.reserve(arr->values.size());
+            for (size_t i = 0; i < arr->values.size(); ++i)
+                idxs.push_back(arr->values[i].asInt());
+        }
+        else if (args[2].isBuffer())
+        {
+            BufferInstance *buf = args[2].asBuffer();
+            if (!buf || !buf->data || buf->count == 0)
+            {
+                Error("dCreateTriMesh arg 3 expects non-empty buffer");
+                return push_nil1(vm);
+            }
+            if (buf->type == BufferType::INT32)
+            {
+                int32_t *p = (int32_t *)buf->data;
+                idxs.assign(p, p + buf->count);
+            }
+            else if (buf->type == BufferType::UINT32)
+            {
+                uint32_t *p = (uint32_t *)buf->data;
+                idxs.reserve(buf->count);
+                for (int i = 0; i < buf->count; ++i)
+                    idxs.push_back((int)p[i]);
+            }
+            else
+            {
+                Error("dCreateTriMesh arg 3 buffer type must be INT32 or UINT32");
+                return push_nil1(vm);
+            }
+        }
+        else
+        {
+            Error("dCreateTriMesh arg 3 expects array or buffer");
+            return push_nil1(vm);
+        }
+
+        if (verts.size() < 9 || verts.size() % 3 != 0)
+        {
+            Error("dCreateTriMesh vertices must have >= 9 floats and be multiple of 3");
+            return push_nil1(vm);
+        }
+        if (idxs.size() < 3 || idxs.size() % 3 != 0)
+        {
+            Error("dCreateTriMesh indices must have >= 3 and be multiple of 3");
+            return push_nil1(vm);
+        }
+
+        int vertexCount = (int)verts.size() / 3;
+        int indexCount = (int)idxs.size();
+
+        // Allocate persistent data (ODE does NOT copy)
+        float *heapVerts = new float[verts.size()];
+        memcpy(heapVerts, verts.data(), verts.size() * sizeof(float));
+
+        dTriIndex *heapIndices = new dTriIndex[indexCount];
+        for (int i = 0; i < indexCount; ++i)
+            heapIndices[i] = (dTriIndex)idxs[i];
+
+        dTriMeshDataID meshData = dGeomTriMeshDataCreate();
+        dGeomTriMeshDataBuildSingle(meshData,
+                                    heapVerts, 3 * sizeof(float), vertexCount,
+                                    heapIndices, indexCount, 3 * sizeof(dTriIndex));
+
+        dGeomID geom = dCreateTriMesh(space, meshData, nullptr, nullptr, nullptr);
+
+        // Store user data for cleanup
+        TriMeshUserData *ud = new TriMeshUserData{heapVerts, heapIndices, meshData};
+        dGeomSetData(geom, ud);
+
+        vm->pushPointer((void *)geom);
+        return 1;
+    }
+
+    static int native_dDestroyTriMesh(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dDestroyTriMesh expects (geom)");
+            return 0;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dDestroyTriMesh", "geom"))
+            return 0;
+
+        // Free the user data we allocated
+        TriMeshUserData *ud = (TriMeshUserData *)dGeomGetData(g);
+        if (ud)
+        {
+            delete[] ud->vertices;
+            delete[] ud->indices;
+            dGeomTriMeshDataDestroy(ud->meshData);
+            delete ud;
+        }
+        dGeomDestroy(g);
+        return 0;
+    }
+
+    static int native_dGeomTriMeshGetTriangleCount(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1)
+        {
+            Error("dGeomTriMeshGetTriangleCount expects (geom)");
+            return push_nil1(vm);
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomTriMeshGetTriangleCount", "geom"))
+            return push_nil1(vm);
+        vm->pushInt(dGeomTriMeshGetTriangleCount(g));
+        return 1;
+    }
+
+    static int native_dGeomTriMeshGetTriangle(Interpreter *vm, int argc, Value *args)
+    {
+        // dGeomTriMeshGetTriangle(geom, index) -> (v0x,v0y,v0z, v1x,v1y,v1z, v2x,v2y,v2z)
+        if (argc != 2)
+        {
+            Error("dGeomTriMeshGetTriangle expects (geom, index)");
+            for (int i = 0; i < 9; ++i) vm->pushNil();
+            return 9;
+        }
+        dGeomID g = nullptr;
+        if (!read_pointer_arg(args, 0, (void **)&g, "dGeomTriMeshGetTriangle", "geom"))
+        {
+            for (int i = 0; i < 9; ++i) vm->pushNil();
+            return 9;
+        }
+        int index = args[1].asInt();
+        dVector3 v0, v1, v2;
+        dGeomTriMeshGetTriangle(g, index, &v0, &v1, &v2);
+        vm->pushDouble(v0[0]); vm->pushDouble(v0[1]); vm->pushDouble(v0[2]);
+        vm->pushDouble(v1[0]); vm->pushDouble(v1[1]); vm->pushDouble(v1[2]);
+        vm->pushDouble(v2[0]); vm->pushDouble(v2[1]); vm->pushDouble(v2[2]);
+        return 9;
     }
 
     static int native_dGeomDestroy(Interpreter *vm, int argc, Value *args)
@@ -2852,12 +3620,37 @@ namespace ODEBindings
             .addFunction("dBodySetMassCapsuleTotal", native_dBodySetMassCapsuleTotal, 5)
             .addFunction("dBodySetMassCylinderTotal", native_dBodySetMassCylinderTotal, 5)
 
+            .addFunction("dBodySetRotation", native_dBodySetRotation, 4)
+            .addFunction("dBodySetQuaternion", native_dBodySetQuaternion, 5)
+            .addFunction("dBodyGetQuaternion", native_dBodyGetQuaternion, 1)
+            .addFunction("dBodyEnable", native_dBodyEnable, 1)
+            .addFunction("dBodyDisable", native_dBodyDisable, 1)
+            .addFunction("dBodyIsEnabled", native_dBodyIsEnabled, 1)
+            .addFunction("dBodySetLinearDamping", native_dBodySetLinearDamping, 2)
+            .addFunction("dBodyGetLinearDamping", native_dBodyGetLinearDamping, 1)
+            .addFunction("dBodySetAngularDamping", native_dBodySetAngularDamping, 2)
+            .addFunction("dBodyGetAngularDamping", native_dBodyGetAngularDamping, 1)
+            .addFunction("dBodySetDamping", native_dBodySetDamping, 3)
+            .addFunction("dBodyAddRelForce", native_dBodyAddRelForce, 4)
+            .addFunction("dBodyAddRelTorque", native_dBodyAddRelTorque, 4)
+            .addFunction("dBodyAddForceAtPos", native_dBodyAddForceAtPos, 7)
+            .addFunction("dBodyAddForceAtRelPos", native_dBodyAddForceAtRelPos, 7)
+            .addFunction("dBodyGetForce", native_dBodyGetForce, 1)
+            .addFunction("dBodyGetTorque", native_dBodyGetTorque, 1)
+            .addFunction("dBodyGetMass", native_dBodyGetMass, 1)
+            .addFunction("dBodySetMaxAngularSpeed", native_dBodySetMaxAngularSpeed, 2)
+            .addFunction("dBodyGetMaxAngularSpeed", native_dBodyGetMaxAngularSpeed, 1)
+
             .addFunction("dCreatePlane", native_dCreatePlane, 5)
             .addFunction("dCreateBox", native_dCreateBox, 4)
             .addFunction("dCreateSphere", native_dCreateSphere, 2)
             .addFunction("dCreateCapsule", native_dCreateCapsule, 3)
             .addFunction("dCreateCylinder", native_dCreateCylinder, 3)
             .addFunction("dCreateRay", native_dCreateRay, 2)
+            .addFunction("dCreateTriMesh", native_dCreateTriMesh, 3)
+            .addFunction("dDestroyTriMesh", native_dDestroyTriMesh, 1)
+            .addFunction("dGeomTriMeshGetTriangleCount", native_dGeomTriMeshGetTriangleCount, 1)
+            .addFunction("dGeomTriMeshGetTriangle", native_dGeomTriMeshGetTriangle, 2)
             .addFunction("dGeomDestroy", native_dGeomDestroy, 1)
             .addFunction("dGeomSetBody", native_dGeomSetBody, 2)
             .addFunction("dGeomGetBody", native_dGeomGetBody, 1)
@@ -2871,6 +3664,19 @@ namespace ODEBindings
             .addFunction("dGeomEnable", native_dGeomEnable, 1)
             .addFunction("dGeomDisable", native_dGeomDisable, 1)
             .addFunction("dGeomIsEnabled", native_dGeomIsEnabled, 1)
+            .addFunction("dGeomSetRotation", native_dGeomSetRotation, 4)
+            .addFunction("dGeomGetRotation", native_dGeomGetRotation, 1)
+            .addFunction("dGeomSetQuaternion", native_dGeomSetQuaternion, 5)
+            .addFunction("dGeomGetQuaternion", native_dGeomGetQuaternion, 1)
+            .addFunction("dGeomSetOffsetPosition", native_dGeomSetOffsetPosition, 4)
+            .addFunction("dGeomGetOffsetPosition", native_dGeomGetOffsetPosition, 1)
+            .addFunction("dRaySet", native_dRaySet, 7)
+            .addFunction("dRayGet", native_dRayGet, 1)
+            .addFunction("dRaySetLength", native_dRaySetLength, 2)
+            .addFunction("dRayGetLength", native_dRayGetLength, 1)
+            .addFunction("dWorldSetLinearDamping", native_dWorldSetLinearDamping, 2)
+            .addFunction("dWorldSetAngularDamping", native_dWorldSetAngularDamping, 2)
+            .addFunction("dWorldSetDamping", native_dWorldSetDamping, 3)
 
             .addInt("dSphereClass", dSphereClass)
             .addInt("dBoxClass", dBoxClass)

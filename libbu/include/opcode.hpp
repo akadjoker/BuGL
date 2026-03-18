@@ -135,4 +135,7 @@ enum Opcode : uint8
     OP_PROC = 90,    // Convert process ID (int) to Process value
     OP_GET_ID = 91,  // Get first alive process ID by blueprint index
 
+    // String interpolation (92)
+    OP_TOSTRING = 92,  // Convert top-of-stack to string representation
+
 };

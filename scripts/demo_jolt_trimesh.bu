@@ -1,0 +1,349 @@
+// ================================================================
+// BuGL Demo — Jolt Triangle Mesh & Convex Hull
+// Demonstrates:
+//   - createMesh()       : static concave triangle mesh (ramp)
+//   - createConvexHull() : dynamic convex hull bodies
+// Left click  -> spawn convex hull
+// Right click -> spawn sphere
+// R           -> reset
+// ESC         -> quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+import math;
+using math;
+
+require "Jolt";
+import Jolt;
+using Jolt;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL  Jolt TriMesh + ConvexHull Demo", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.06, 0.08, 0.12, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+
+var PI = 3.141592653589793;
+var RAD2DEG = 57.29577951308232;
+var fixedStep = 1.0 / 60.0;
+var accumulator = 0.0;
+
+// ─── Mesh data: a ramp with side walls ───────────────────────────────
+
+var rampVerts = [
+    -2.0, 3.0, -4.0,
+     2.0, 3.0, -4.0,
+     2.0, 0.0,  4.0,
+    -2.0, 0.0,  4.0,
+    -2.0, 0.0, -4.0,
+     2.0, 0.0, -4.0,
+     2.0, 0.0,  4.0,
+    -2.0, 0.0,  4.0
+];
+
+var rampIndices = [
+    0, 1, 2,
+    0, 2, 3,
+    4, 6, 5,
+    4, 7, 6,
+    0, 4, 5,
+    0, 5, 1,
+    0, 3, 7,
+    0, 7, 4,
+    1, 5, 6,
+    1, 6, 2
+];
+
+// ─── Convex hull: irregular rock shape ───────────────────────────────
+
+var rockVerts = [
+     0.0,  0.4,  0.0,
+     0.3,  0.0,  0.2,
+    -0.25, 0.0,  0.3,
+     0.0,  0.0, -0.35,
+     0.35, 0.2,  0.0,
+    -0.3,  0.15, 0.0,
+     0.0,  0.1,  0.35,
+     0.15, 0.35, -0.15,
+    -0.2,  0.3, -0.1,
+     0.0, -0.1,  0.0
+];
+
+// ─── Scene ───────────────────────────────────────────────────────────
+
+var world = nil;
+var meshBody = nil;
+var objects = [];
+var objectLimit = 80;
+
+struct DynObj
+{
+    var body;
+    var kind;
+    var r;
+    var g;
+    var b;
+}
+
+def resetScene()
+{
+    for (var i = 0; i < len(objects); i++)
+    {
+        if (objects[i].body != nil && objects[i].body.isValid())
+            objects[i].body.destroy();
+    }
+    objects = [];
+
+    if (meshBody != nil && meshBody.isValid()) meshBody.destroy();
+    if (world != nil && world.isValid()) world.destroy();
+
+    world = JoltWorld();
+    world.setGravity(Vector3(0.0, -9.81, 0.0));
+
+    meshBody = world.createMesh(rampVerts, rampIndices, Vector3(0.0, 0.0, 0.0));
+    if (meshBody == nil) print("ERROR: createMesh failed!");
+    else print("Ramp mesh created OK");
+
+    world.optimizeBroadPhase();
+}
+
+def spawnConvexHull(px, py, pz)
+{
+    if (len(objects) >= objectLimit)
+    {
+        var old = objects[0];
+        if (old.body != nil && old.body.isValid()) old.body.destroy();
+        objects.remove(0);
+    }
+    var body = world.createConvexHull(rockVerts, Vector3(px, py, pz), 2.0);
+    if (body == nil) { print("createConvexHull failed"); return; }
+    var obj = DynObj();
+    obj.body = body;
+    obj.kind = 1;
+    obj.r = 0.4 + rand() * 0.5;
+    obj.g = 0.3 + rand() * 0.4;
+    obj.b = 0.6 + rand() * 0.4;
+    objects.append(obj);
+}
+
+def spawnSphere(px, py, pz)
+{
+    if (len(objects) >= objectLimit)
+    {
+        var old = objects[0];
+        if (old.body != nil && old.body.isValid()) old.body.destroy();
+        objects.remove(0);
+    }
+    var body = world.createSphere(0.25, Vector3(px, py, pz), 1.5);
+    if (body == nil) return;
+    var obj = DynObj();
+    obj.body = body;
+    obj.kind = 0;
+    obj.r = 0.8 + rand() * 0.2;
+    obj.g = 0.2 + rand() * 0.3;
+    obj.b = 0.15;
+    objects.append(obj);
+}
+
+// ─── Drawing ─────────────────────────────────────────────────────────
+
+def drawRamp()
+{
+    glColor3f(0.25, 0.55, 0.35);
+    glBegin(GL_TRIANGLES);
+    for (var i = 0; i < len(rampIndices); i += 3)
+    {
+        var i0 = rampIndices[i];
+        var i1 = rampIndices[i + 1];
+        var i2 = rampIndices[i + 2];
+        glVertex3f(rampVerts[i0 * 3], rampVerts[i0 * 3 + 1], rampVerts[i0 * 3 + 2]);
+        glVertex3f(rampVerts[i1 * 3], rampVerts[i1 * 3 + 1], rampVerts[i1 * 3 + 2]);
+        glVertex3f(rampVerts[i2 * 3], rampVerts[i2 * 3 + 1], rampVerts[i2 * 3 + 2]);
+    }
+    glEnd();
+
+    glColor3f(0.5, 0.9, 0.6);
+    glLineWidth(1.5);
+    for (var i = 0; i < len(rampIndices); i += 3)
+    {
+        var i0 = rampIndices[i];
+        var i1 = rampIndices[i + 1];
+        var i2 = rampIndices[i + 2];
+        glBegin(GL_LINE_LOOP);
+        glVertex3f(rampVerts[i0 * 3], rampVerts[i0 * 3 + 1], rampVerts[i0 * 3 + 2]);
+        glVertex3f(rampVerts[i1 * 3], rampVerts[i1 * 3 + 1], rampVerts[i1 * 3 + 2]);
+        glVertex3f(rampVerts[i2 * 3], rampVerts[i2 * 3 + 1], rampVerts[i2 * 3 + 2]);
+        glEnd();
+    }
+}
+
+def drawFloor()
+{
+    glColor3f(0.14, 0.16, 0.20);
+    glBegin(GL_QUADS);
+    glVertex3f(-12.0, 0.0, -12.0);
+    glVertex3f( 12.0, 0.0, -12.0);
+    glVertex3f( 12.0, 0.0,  12.0);
+    glVertex3f(-12.0, 0.0,  12.0);
+    glEnd();
+
+    glColor3f(0.22, 0.26, 0.32);
+    glLineWidth(1.0);
+    glBegin(GL_LINES);
+    for (var i = -12; i <= 12; i++)
+    {
+        glVertex3f(i, 0.002, -12.0);
+        glVertex3f(i, 0.002,  12.0);
+        glVertex3f(-12.0, 0.002, i);
+        glVertex3f( 12.0, 0.002, i);
+    }
+    glEnd();
+}
+
+def drawSphereLocal(radius)
+{
+    var stacks = 8;
+    var slices = 12;
+    for (var i = 0; i < stacks; i++)
+    {
+        var v0 = i / stacks;
+        var v1 = (i + 1) / stacks;
+        var a0 = (v0 - 0.5) * PI;
+        var a1 = (v1 - 0.5) * PI;
+        var y0 = sin(a0) * radius;
+        var y1 = sin(a1) * radius;
+        var r0 = cos(a0) * radius;
+        var r1 = cos(a1) * radius;
+        glBegin(GL_QUAD_STRIP);
+        for (var s = 0; s <= slices; s++)
+        {
+            var t = (s / slices) * PI * 2.0;
+            glVertex3f(cos(t) * r0, y0, sin(t) * r0);
+            glVertex3f(cos(t) * r1, y1, sin(t) * r1);
+        }
+        glEnd();
+    }
+}
+
+def drawDynBody(obj)
+{
+    if (obj.body == nil || !obj.body.isValid()) return;
+    var pos = obj.body.getPosition();
+    var rot = obj.body.getRotation();
+    var (axis, angle) = QuaternionToAxisAngle(rot);
+
+    glPushMatrix();
+    glTranslatef(pos.x, pos.y, pos.z);
+    glRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
+    glColor3f(obj.r, obj.g, obj.b);
+
+    if (obj.kind == 0)
+    {
+        drawSphereLocal(0.25);
+    }
+    else
+    {
+        glPointSize(6.0);
+        glBegin(GL_POINTS);
+        for (var i = 0; i < len(rockVerts); i += 3)
+            glVertex3f(rockVerts[i], rockVerts[i + 1], rockVerts[i + 2]);
+        glEnd();
+        glLineWidth(2.0);
+        glBegin(GL_LINE_LOOP);
+        for (var i = 0; i < len(rockVerts); i += 3)
+            glVertex3f(rockVerts[i], rockVerts[i + 1], rockVerts[i + 2]);
+        glEnd();
+    }
+
+    glPopMatrix();
+}
+
+// ─── Main ────────────────────────────────────────────────────────────
+
+resetScene();
+print("Jolt TriMesh + ConvexHull Demo");
+print("L-Click: convex hull | R-Click: sphere | R: reset | ESC: quit");
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) resetScene();
+
+    if (IsMousePressed(MOUSE_LEFT))
+    {
+        var sx = -1.5 + rand() * 3.0;
+        var sz = -5.0 + rand() * 2.0;
+        spawnConvexHull(sx, 5.0, sz);
+    }
+    if (IsMousePressed(MOUSE_RIGHT))
+    {
+        var sx = -1.5 + rand() * 3.0;
+        var sz = -5.0 + rand() * 2.0;
+        spawnSphere(sx, 5.0, sz);
+    }
+
+    var dt = GetDeltaTime();
+    if (dt > 0.1) dt = 0.1;
+    accumulator = accumulator + dt;
+    while (accumulator >= fixedStep)
+    {
+        world.step(fixedStep, 1);
+        accumulator = accumulator - fixedStep;
+    }
+
+    // Remove fallen objects
+    for (var i = len(objects) - 1; i >= 0; i--)
+    {
+        if (objects[i].body != nil && objects[i].body.isValid())
+        {
+            var p = objects[i].body.getPosition();
+            if (p.y < -10.0)
+            {
+                objects[i].body.destroy();
+                objects.remove(i);
+            }
+        }
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    var h = GetHeight();
+    if (h <= 0) h = 1;
+    var aspect = GetWidth() / h;
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glFrustum(-0.08 * aspect, 0.08 * aspect, -0.08, 0.08, 0.1, 120.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(0.0, -2.5, -18.0);
+    glRotatef(20.0, 1.0, 0.0, 0.0);
+    glRotatef(-25.0, 0.0, 1.0, 0.0);
+
+    drawFloor();
+    drawRamp();
+    for (var i = 0; i < len(objects); i++)
+        drawDynBody(objects[i]);
+
+    Flip();
+}
+
+for (var i = 0; i < len(objects); i++)
+{
+    if (objects[i].body != nil && objects[i].body.isValid())
+        objects[i].body.destroy();
+}
+if (meshBody != nil && meshBody.isValid()) meshBody.destroy();
+if (world != nil && world.isValid()) world.destroy();
+Close();

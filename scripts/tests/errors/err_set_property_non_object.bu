@@ -1,0 +1,5 @@
+// Test: set property on non-object type
+// Expected: runtime error
+
+var x = 42;
+x.name = "hello";

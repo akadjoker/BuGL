@@ -1,0 +1,5 @@
+// BAD: while with no condition
+while {
+    break;
+}
+print("should not reach here");

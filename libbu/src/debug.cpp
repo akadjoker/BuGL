@@ -188,6 +188,8 @@ size_t Debug::disassembleInstruction(const Code &chunk, size_t offset)
     return simpleInstruction("OP_PROC", offset);
   case OP_GET_ID:
     return simpleInstruction("OP_GET_ID", offset);
+  case OP_TOSTRING:
+    return simpleInstruction("OP_TOSTRING", offset);
 
   case OP_CLOSURE:
   {

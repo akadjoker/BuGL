@@ -1,0 +1,8 @@
+# Build só o runner (rápido, sem SDL/plugins):
+cmake --build build-debug --target bulang_test
+
+# Correr todos os testes:
+cd build-debug && ctest --output-on-failure -L bulang
+
+# Ou correr um teste individual:
+./bin/bulang_test scripts/tests/test_functions.bu

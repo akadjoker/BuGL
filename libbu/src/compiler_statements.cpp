@@ -132,6 +132,10 @@ void Compiler::statement()
     {
         structDeclaration();
     }
+    else if (match(TOKEN_ENUM))
+    {
+        enumDeclaration();
+    }
     else if (match(TOKEN_CLASS))
     {
         classDeclaration();
@@ -1643,6 +1647,7 @@ void Compiler::funDeclaration()
 
 void Compiler::processDeclaration()
 {
+    bool savedIsProcess = isProcess_;
     consume(TOKEN_IDENTIFIER, "Expect process name");
     Token nameToken = previous;
     isProcess_ = true;
@@ -1706,13 +1711,13 @@ void Compiler::processDeclaration()
 
     proc->finalize();
 
-    isProcess_ = false;
+    isProcess_ = savedIsProcess;
 }
 
 void Compiler::compileFunction(Function *func, bool isProcess)
 {
     // ========================================
-    // SALVA ESTADO
+    // GUARDA ESTADO
     // ========================================
     Function *enclosing = this->function;
     Code *enclosingChunk = this->currentChunk;
@@ -2171,7 +2176,7 @@ void Compiler::includeStatement()
     // Adiciona ao set
     includedFiles.insert(filename);
 
-    // SALVA estado
+    // GUARDA estado
     Lexer *oldLexer = this->lexer;
     std::vector<Token> oldTokens = this->tokens;
     Token oldCurrent = this->current;
@@ -2635,8 +2640,113 @@ void Compiler::gosubStatement()
     pendingGosubs.push_back(jump);
 }
 
+void Compiler::enumDeclaration()
+{
+    bool savedIsProcess = isProcess_;
+    isProcess_ = false;
+    consume(TOKEN_IDENTIFIER, "Expect enum name");
+    Token enumName = previous;
+    uint16_t nameConstant = identifierConstant(enumName);
+
+    validateIdentifierName(enumName);
+    if (hadError)
+    {
+        return;
+    }
+
+    consume(TOKEN_LBRACE, "Expect '{' before enum body");
+
+    // Collect all key-value pairs: push key string then int value onto the stack
+    int count = 0;
+    int nextValue = 0; // auto-increment value for members without explicit value
+
+    while (!check(TOKEN_RBRACE) && !check(TOKEN_EOF))
+    {
+        // Skip stray semicolons
+        if (check(TOKEN_SEMICOLON))
+        {
+            advance();
+            continue;
+        }
+
+        // Member name
+        consume(TOKEN_IDENTIFIER, "Expect enum member name");
+        Token memberName = previous;
+
+        // Push key (string constant for the member name)
+        emitConstant(vm_->makeString(memberName.lexeme.c_str()));
+
+        // Optional explicit value: = <integer>
+        if (match(TOKEN_EQUAL))
+        {
+            // Check if it's a simple integer literal for auto-increment tracking
+            if (check(TOKEN_INT))
+            {
+                Token valToken = current;
+                expression();
+                if (hadError) return;
+                // Update auto-increment from the literal value
+                nextValue = std::stoi(valToken.lexeme) + 1;
+            }
+            else
+            {
+                // Complex expression - just compile it and increment counter
+                expression();
+                if (hadError) return;
+                nextValue++;
+            }
+        }
+        else
+        {
+            // Use auto-incremented value
+            emitConstant(vm_->makeInt(nextValue));
+            nextValue++;
+        }
+
+        count++;
+
+        if (count > 65535)
+        {
+            error("Cannot have more than 65535 enum members");
+            break;
+        }
+
+        // Allow comma or semicolon separator between members
+        if (!match(TOKEN_COMMA))
+        {
+            match(TOKEN_SEMICOLON);
+        }
+    }
+
+    consume(TOKEN_RBRACE, "Expect '}' after enum body");
+
+    // Optional trailing semicolon
+    match(TOKEN_SEMICOLON);
+
+    // Emit OP_DEFINE_MAP to create the map from key/value pairs on the stack
+    if (!hadError)
+    {
+        emitByte(OP_DEFINE_MAP);
+        emitShort((uint16)count);
+    }
+
+    // Define the enum name as a global/local variable holding the map
+    if (scopeDepth == 0)
+    {
+        uint16_t global = getOrCreateGlobalIndex(enumName.lexeme);
+        declaredGlobals_.insert(enumName.lexeme);
+        defineVariable(global);
+    }
+    else
+    {
+        defineVariable(nameConstant);
+    }
+    isProcess_ = savedIsProcess;
+}
+
 void Compiler::structDeclaration()
 {
+    bool savedIsProcess = isProcess_;
     isProcess_ = false;
     consume(TOKEN_IDENTIFIER, "Expect struct name");
     Token structName = previous;
@@ -2660,7 +2770,7 @@ void Compiler::structDeclaration()
     structDef->argCount = 0;
 
     //  Loop externo: múltiplas linhas de fields
-    while (!check(TOKEN_RBRACE) && !check(TOKEN_EOF))
+    while (!check(TOKEN_RBRACE) && !check(TOKEN_EOF) && !hadError)
     {
 
         if (check(TOKEN_SEMICOLON))
@@ -2676,6 +2786,7 @@ void Compiler::structDeclaration()
         do
         {
             consumeIdentifierLike("Expect field name");
+            if (hadError) break;
 
             String *fieldName = vm_->createString(previous.lexeme.c_str());
             // Não validar keywords - campos podem ter nomes como "loop", "break", etc.
@@ -2721,12 +2832,12 @@ void Compiler::structDeclaration()
     {
         defineVariable(nameConstant);
     }
+    isProcess_ = savedIsProcess;
 }
 
 void Compiler::self(bool canAssign)
 {
     (void)canAssign;
-    isProcess_ = false;
     if (currentClass == nullptr)
     {
         error("Cannot use 'self' outside of a class");
@@ -2741,7 +2852,6 @@ void Compiler::self(bool canAssign)
 void Compiler::super(bool canAssign)
 {
     (void)canAssign;
-    isProcess_ = false;
     if (currentClass == nullptr)
     {
         error("Cannot use 'super' outside of a class");
@@ -2775,6 +2885,7 @@ void Compiler::super(bool canAssign)
 
 void Compiler::classDeclaration()
 {
+    bool savedIsProcess = isProcess_;
     isProcess_ = false;
     consume(TOKEN_IDENTIFIER, "Expect class name");
     Token className = previous;
@@ -2981,6 +3092,7 @@ void Compiler::classDeclaration()
         Warning("Class '%s' has no init() method - fields will be uninitialized (nil)",
                 className.lexeme.c_str());
     }
+    isProcess_ = savedIsProcess;
 }
 
 void Compiler::method(ClassDef *classDef)
@@ -3009,7 +3121,7 @@ void Compiler::method(ClassDef *classDef)
 
     vm_->addFunctionsClasses(func);
 
-    // ===== SALVA ESTADO =====
+    // ===== GUARDA ESTADO =====
     Function *enclosing = this->function;
     Code *enclosingChunk = this->currentChunk;
     int enclosingScopeDepth = this->scopeDepth;
@@ -3094,6 +3206,7 @@ void Compiler::method(ClassDef *classDef)
 
 void Compiler::tryStatement()
 {
+    bool savedIsProcess = isProcess_;
     isProcess_ = false;
     consume(TOKEN_LBRACE, "Expect '{' after 'try'");
 
@@ -3207,6 +3320,7 @@ void Compiler::tryStatement()
     }
 
     tryDepth--;
+    isProcess_ = savedIsProcess;
 }
 
 void Compiler::throwStatement()

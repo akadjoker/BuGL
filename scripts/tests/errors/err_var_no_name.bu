@@ -1,0 +1,4 @@
+// BAD: var with no name, just semicolon
+var ;
+var = 10;
+print("should not reach here");

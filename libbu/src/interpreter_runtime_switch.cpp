@@ -34,6 +34,7 @@
 #include "debug.hpp"
 #include "platform.hpp"
 #include <cmath> // std::fmod
+#include <climits> // INT32_MIN
 #include <new>
 #include <ctime>
 
@@ -165,7 +166,7 @@ ProcessResult Interpreter::run_process(Process *process)
                                                                      \
         if (throwException(errorVal))                                \
         {                                                            \
-            ip = fiber->ip;                                          \
+            LOAD_FRAME();                                            \
             break; /* Sai do switch e continua no loop */            \
         }                                                            \
         else                                                         \
@@ -572,7 +573,7 @@ ProcessResult Interpreter::run_process(Process *process)
         Value error = makeString("Division by zero");                \
         if (throwException(error))                                   \
         {                                                            \
-            ip = fiber->ip;                                          \
+            LOAD_FRAME();                                            \
             goto break_switch; /* Trick para sair do switch */       \
         }                                                            \
         else                                                         \
@@ -589,6 +590,14 @@ ProcessResult Interpreter::run_process(Process *process)
                     THROW_DIV_ZERO();
 
                 int ia = a.asInt();
+
+                // Guard against INT_MIN / -1 (undefined behavior in C++, SIGFPE on x86)
+                if (ia == INT32_MIN && ib == -1)
+                {
+                    PUSH(makeDouble(-(double)INT32_MIN));
+                    break;
+                }
+
                 if (ia % ib == 0)
                     PUSH(makeInt(ia / ib));
                 else
@@ -650,7 +659,7 @@ ProcessResult Interpreter::run_process(Process *process)
         Value error = makeString("Modulo by zero");                  \
         if (throwException(error))                                   \
         {                                                            \
-            ip = fiber->ip;                                          \
+            LOAD_FRAME();                                            \
             goto break_switch_mod;                                   \
         }                                                            \
         else                                                         \
@@ -664,7 +673,18 @@ ProcessResult Interpreter::run_process(Process *process)
             {
                 if (b.asInt() == 0)
                     THROW_MOD_ZERO();
-                PUSH(makeInt(a.asInt() % b.asInt()));
+
+                int ia = a.asInt();
+                int ib = b.asInt();
+
+                // Guard against INT_MIN % -1 (undefined behavior in C++, SIGFPE on x86)
+                if (ia == INT32_MIN && ib == -1)
+                {
+                    PUSH(makeInt(0));
+                    break;
+                }
+
+                PUSH(makeInt(ia % ib));
                 break; // Sucesso, sai do switch
             }
 
@@ -1284,6 +1304,14 @@ ProcessResult Interpreter::run_process(Process *process)
             if (hasFinally)
             {
                 break;
+            }
+
+            // Unwind try handlers belonging to the returning frame
+            // (handles: return from inside try block without finally)
+            while (fiber->tryDepth > 0 &&
+                   fiber->tryHandlers[fiber->tryDepth - 1].frameRestore >= fiber->frameCount)
+            {
+                fiber->tryDepth--;
             }
 
             fiber->frameCount--;
@@ -4371,6 +4399,7 @@ ProcessResult Interpreter::run_process(Process *process)
             handler.catchIP = catchAddr == 0xFFFF ? nullptr : func->chunk->code + catchAddr;
             handler.finallyIP = finallyAddr == 0xFFFF ? nullptr : func->chunk->code + finallyAddr;
             handler.stackRestore = fiber->stackTop;
+            handler.frameRestore = fiber->frameCount;
             handler.inFinally = false;
             handler.pendingError = makeNil();
             handler.hasPendingError = false;
@@ -4411,6 +4440,7 @@ ProcessResult Interpreter::run_process(Process *process)
         {
             Value error = POP();
             bool handlerFound = false;
+            uint8_t *targetIP = nullptr;
 
             while (fiber->tryDepth > 0)
             {
@@ -4426,13 +4456,16 @@ ProcessResult Interpreter::run_process(Process *process)
 
                 fiber->stackTop = handler.stackRestore;
 
+                // Unwind call frames back to the frame that registered this try handler
+                fiber->frameCount = handler.frameRestore;
+
                 // Tem catch?
                 if (handler.catchIP != nullptr && !handler.catchConsumed)
                 {
                     handler.catchConsumed = true;
 
                     PUSH(error);
-                    ip = handler.catchIP;
+                    targetIP = handler.catchIP;
                     handlerFound = true;
 
                     break;
@@ -4444,7 +4477,7 @@ ProcessResult Interpreter::run_process(Process *process)
                     handler.pendingError = error;
                     handler.hasPendingError = true;
                     handler.inFinally = true;
-                    ip = handler.finallyIP;
+                    targetIP = handler.finallyIP;
                     handlerFound = true;
                     break;
                 }
@@ -4460,7 +4493,9 @@ ProcessResult Interpreter::run_process(Process *process)
 
                 return {ProcessResult::PROCESS_DONE, 0};
             }
-
+            // Sync frame/func/stackStart from the restored frameCount, then set ip to the handler target
+            LOAD_FRAME();
+            ip = targetIP;
             break;
         }
 
@@ -5182,6 +5217,28 @@ ProcessResult Interpreter::run_process(Process *process)
                 }
             }
             if (!found) PUSH(makeInt(-1));
+            break;
+        }
+
+        // ============================================
+        // OP_TOSTRING — Convert top-of-stack to string
+        // Used by f-string interpolation
+        // ============================================
+        case OP_TOSTRING:
+        {
+            Value val = POP();
+            if (val.isString())
+            {
+                // Already a string, push back as-is
+                PUSH(val);
+            }
+            else
+            {
+                // Convert to string using valueToBuffer
+                char buf[256];
+                valueToBuffer(val, buf, sizeof(buf));
+                PUSH(makeString(buf));
+            }
             break;
         }
 

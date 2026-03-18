@@ -7,6 +7,8 @@
 #include <Jolt/Physics/Constraints/DistanceConstraint.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/ConeConstraint.h>
 
 namespace JoltBindings
 {
@@ -14,6 +16,8 @@ namespace JoltBindings
     static NativeClassDef *g_distanceConstraintClass = nullptr;
     static NativeClassDef *g_hingeConstraintClass = nullptr;
     static NativeClassDef *g_sliderConstraintClass = nullptr;
+    static NativeClassDef *g_fixedConstraintClass = nullptr;
+    static NativeClassDef *g_coneConstraintClass = nullptr;
 
     static JoltBodyHandle *require_body_value_arg(Interpreter *vm, const Value &value, const char *fn, int argIndex)
     {
@@ -1045,6 +1049,144 @@ namespace JoltBindings
         return finalize_constraint_creation(vm, world, constraint, subType, g_sliderConstraintClass) ? 1 : push_nil1(vm);
     }
 
+    // ─── Fixed Constraint ─────────────────────────────────────────────────
+
+    static int world_create_fixed_constraint(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 2)
+        {
+            Error("JoltWorld.createFixedConstraint() expects (bodyA, bodyB)");
+            return push_nil1(vm);
+        }
+
+        JoltWorldHandle *world = require_world(instance, "JoltWorld.createFixedConstraint()");
+        if (!world)
+            return push_nil1(vm);
+
+        JoltBodyHandle *bodyA = require_body_value_arg(vm, args[0], "JoltWorld.createFixedConstraint()", 1);
+        JoltBodyHandle *bodyB = require_body_value_arg(vm, args[1], "JoltWorld.createFixedConstraint()", 2);
+        if (!bodyA || !bodyB)
+            return push_nil1(vm);
+
+        FixedConstraintSettings settings;
+        settings.mAutoDetectPoint = true;
+
+        BodyID ids[2] = { bodyA->id, bodyB->id };
+        BodyLockMultiWrite lock(world->physicsSystem.GetBodyLockInterface(), ids, 2);
+        Body *joltBodyA = lock.GetBody(0);
+        Body *joltBodyB = lock.GetBody(1);
+        if (!joltBodyA || !joltBodyB)
+        {
+            Error("JoltWorld.createFixedConstraint() could not lock bodies");
+            return push_nil1(vm);
+        }
+
+        Constraint *constraint = settings.Create(*joltBodyA, *joltBodyB);
+        if (!constraint)
+        {
+            Error("JoltWorld.createFixedConstraint() failed to create constraint");
+            return push_nil1(vm);
+        }
+
+        return finalize_constraint_creation(vm, world, constraint, EConstraintSubType::Fixed, g_fixedConstraintClass) ? 1 : push_nil1(vm);
+    }
+
+    // ─── Cone Constraint ──────────────────────────────────────────────────
+
+    static int world_create_cone_constraint(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 4 && argCount != 5)
+        {
+            Error("JoltWorld.createConeConstraint() expects (bodyA, bodyB, anchor, axis[, halfConeAngle])");
+            return push_nil1(vm);
+        }
+
+        JoltWorldHandle *world = require_world(instance, "JoltWorld.createConeConstraint()");
+        if (!world)
+            return push_nil1(vm);
+
+        JoltBodyHandle *bodyA = require_body_value_arg(vm, args[0], "JoltWorld.createConeConstraint()", 1);
+        JoltBodyHandle *bodyB = require_body_value_arg(vm, args[1], "JoltWorld.createConeConstraint()", 2);
+        if (!bodyA || !bodyB)
+            return push_nil1(vm);
+
+        Vector3 anchor;
+        Vector3 axis;
+        if (!read_vector3_arg(args[2], &anchor, "JoltWorld.createConeConstraint()", 3) ||
+            !read_vector3_arg(args[3], &axis, "JoltWorld.createConeConstraint()", 4))
+            return push_nil1(vm);
+
+        double halfConeAngle = JPH_PI;
+        if (argCount == 5 && !read_number_arg(args[4], &halfConeAngle, "JoltWorld.createConeConstraint()", 5))
+            return push_nil1(vm);
+
+        ConeConstraintSettings settings;
+        settings.mSpace = EConstraintSpace::WorldSpace;
+        settings.mPoint1 = to_jolt_rvec3(anchor);
+        settings.mPoint2 = to_jolt_rvec3(anchor);
+        settings.mTwistAxis1 = to_jolt_vec3(axis).Normalized();
+        settings.mTwistAxis2 = settings.mTwistAxis1;
+        settings.mHalfConeAngle = (float)halfConeAngle;
+
+        BodyID ids[2] = { bodyA->id, bodyB->id };
+        BodyLockMultiWrite lock(world->physicsSystem.GetBodyLockInterface(), ids, 2);
+        Body *joltBodyA = lock.GetBody(0);
+        Body *joltBodyB = lock.GetBody(1);
+        if (!joltBodyA || !joltBodyB)
+        {
+            Error("JoltWorld.createConeConstraint() could not lock bodies");
+            return push_nil1(vm);
+        }
+
+        Constraint *constraint = settings.Create(*joltBodyA, *joltBodyB);
+        if (!constraint)
+        {
+            Error("JoltWorld.createConeConstraint() failed to create constraint");
+            return push_nil1(vm);
+        }
+
+        return finalize_constraint_creation(vm, world, constraint, EConstraintSubType::Cone, g_coneConstraintClass) ? 1 : push_nil1(vm);
+    }
+
+    // ─── Cone constraint specific methods ─────────────────────────────────
+
+    static int cone_constraint_set_half_cone_angle(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1)
+        {
+            Error("JoltConeConstraint.setHalfConeAngle() expects (number)");
+            return 0;
+        }
+
+        JoltConstraintHandle *constraint = require_constraint_handle(instance, EConstraintSubType::Cone, "JoltConeConstraint.setHalfConeAngle()");
+        if (!constraint)
+            return 0;
+
+        double angle = 0.0;
+        if (!read_number_arg(args[0], &angle, "JoltConeConstraint.setHalfConeAngle()", 1))
+            return 0;
+
+        ((ConeConstraint *)constraint->constraint)->SetHalfConeAngle((float)angle);
+        return 0;
+    }
+
+    static int cone_constraint_get_cos_half_cone_angle(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("JoltConeConstraint.getCosHalfConeAngle() expects 0 arguments");
+            return push_nil1(vm);
+        }
+
+        JoltConstraintHandle *constraint = require_constraint_handle(instance, EConstraintSubType::Cone, "JoltConeConstraint.getCosHalfConeAngle()");
+        if (!constraint)
+            return push_nil1(vm);
+
+        vm->pushDouble((double)((ConeConstraint *)constraint->constraint)->GetCosHalfConeAngle());
+        return 1;
+    }
+
     static void *constraint_ctor_error(Interpreter *vm, int argCount, Value *args)
     {
         (void)vm;
@@ -1084,11 +1226,15 @@ namespace JoltBindings
         g_distanceConstraintClass = vm.registerNativeClass("JoltDistanceConstraint", constraint_ctor_error, constraint_dtor, 0, false);
         g_hingeConstraintClass = vm.registerNativeClass("JoltHingeConstraint", constraint_ctor_error, constraint_dtor, 0, false);
         g_sliderConstraintClass = vm.registerNativeClass("JoltSliderConstraint", constraint_ctor_error, constraint_dtor, 0, false);
+        g_fixedConstraintClass = vm.registerNativeClass("JoltFixedConstraint", constraint_ctor_error, constraint_dtor, 0, false);
+        g_coneConstraintClass = vm.registerNativeClass("JoltConeConstraint", constraint_ctor_error, constraint_dtor, 0, false);
 
         add_common_constraint_methods(vm, g_pointConstraintClass);
         add_common_constraint_methods(vm, g_distanceConstraintClass);
         add_common_constraint_methods(vm, g_hingeConstraintClass);
         add_common_constraint_methods(vm, g_sliderConstraintClass);
+        add_common_constraint_methods(vm, g_fixedConstraintClass);
+        add_common_constraint_methods(vm, g_coneConstraintClass);
 
         vm.addNativeMethod(g_pointConstraintClass, "setPoint1", point_constraint_set_point1);
         vm.addNativeMethod(g_pointConstraintClass, "setPoint2", point_constraint_set_point2);
@@ -1131,5 +1277,10 @@ namespace JoltBindings
         vm.addNativeMethod(g_worldClass, "createDistanceConstraint", world_create_distance_constraint);
         vm.addNativeMethod(g_worldClass, "createHingeConstraint", world_create_hinge_constraint);
         vm.addNativeMethod(g_worldClass, "createSliderConstraint", world_create_slider_constraint);
+        vm.addNativeMethod(g_worldClass, "createFixedConstraint", world_create_fixed_constraint);
+        vm.addNativeMethod(g_worldClass, "createConeConstraint", world_create_cone_constraint);
+
+        vm.addNativeMethod(g_coneConstraintClass, "setHalfConeAngle", cone_constraint_set_half_cone_angle);
+        vm.addNativeMethod(g_coneConstraintClass, "getCosHalfConeAngle", cone_constraint_get_cos_half_cone_angle);
     }
 }

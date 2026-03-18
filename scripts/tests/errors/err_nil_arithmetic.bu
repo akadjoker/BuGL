@@ -1,0 +1,4 @@
+// Test: arithmetic type mismatches
+// Expected: runtime errors about type mismatches
+
+var a = nil * 5;

@@ -1,0 +1,10 @@
+// Test: duplicate else blocks
+// Expected: compile error
+
+if (true) {
+    print("a");
+} else {
+    print("b");
+} else {
+    print("c");
+}

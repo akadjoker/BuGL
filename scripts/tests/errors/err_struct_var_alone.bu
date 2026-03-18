@@ -1,0 +1,9 @@
+// BAD: struct with var and nothing else, then loop
+struct Broken {
+    var
+}
+
+while (true) {
+    break;
+}
+print("should not reach here");

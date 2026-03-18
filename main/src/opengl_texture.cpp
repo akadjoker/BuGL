@@ -431,6 +431,150 @@ namespace SDLBindings
         return 0;
     }
 
+    // =====================================================
+    // TEXTURE 3D / STORAGE / COPY
+    // =====================================================
+
+    int native_glTexImage3D(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 10)
+        {
+            Error("glTexImage3D expects 10 arguments: target, level, internalFormat, width, height, depth, border, format, type, data");
+            return 0;
+        }
+
+        const GLenum target = (GLenum)args[0].asNumber();
+        const GLint level = (GLint)args[1].asNumber();
+        const GLint internalFormat = (GLint)args[2].asNumber();
+        const GLsizei width = (GLsizei)args[3].asNumber();
+        const GLsizei height = (GLsizei)args[4].asNumber();
+        const GLsizei depth = (GLsizei)args[5].asNumber();
+        const GLint border = (GLint)args[6].asNumber();
+        const GLenum format = (GLenum)args[7].asNumber();
+        const GLenum type = (GLenum)args[8].asNumber();
+
+        const GLvoid *pixels = nullptr;
+        std::vector<unsigned char> scratch;
+        // For 3D textures, compute size for a single slice then multiply by depth
+        GLsizeiptr sliceSize = 0;
+        if (computeTextureUploadSize(width, height, format, type, &sliceSize))
+        {
+            GLsizeiptr totalSize = sliceSize * (GLsizeiptr)depth;
+            if (!resolveUploadDataArg(args[9], totalSize, "glTexImage3D", &pixels, scratch))
+                return 0;
+        }
+        else
+        {
+            if (!resolveUploadDataArg(args[9], 0, "glTexImage3D", &pixels, scratch))
+                return 0;
+        }
+
+        glTexImage3D(target, level, internalFormat, width, height, depth, border, format, type, pixels);
+        return 0;
+    }
+
+    int native_glTexSubImage3D(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 11)
+        {
+            Error("glTexSubImage3D expects 11 arguments: target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, data");
+            return 0;
+        }
+
+        const GLenum target = (GLenum)args[0].asNumber();
+        const GLint level = (GLint)args[1].asNumber();
+        const GLint xoffset = (GLint)args[2].asNumber();
+        const GLint yoffset = (GLint)args[3].asNumber();
+        const GLint zoffset = (GLint)args[4].asNumber();
+        const GLsizei width = (GLsizei)args[5].asNumber();
+        const GLsizei height = (GLsizei)args[6].asNumber();
+        const GLsizei depth = (GLsizei)args[7].asNumber();
+        const GLenum format = (GLenum)args[8].asNumber();
+        const GLenum type = (GLenum)args[9].asNumber();
+
+        const GLvoid *pixels = nullptr;
+        std::vector<unsigned char> scratch;
+        GLsizeiptr sliceSize = 0;
+        if (computeTextureUploadSize(width, height, format, type, &sliceSize))
+        {
+            GLsizeiptr totalSize = sliceSize * (GLsizeiptr)depth;
+            if (!resolveUploadDataArg(args[10], totalSize, "glTexSubImage3D", &pixels, scratch))
+                return 0;
+        }
+        else
+        {
+            if (!resolveUploadDataArg(args[10], 0, "glTexSubImage3D", &pixels, scratch))
+                return 0;
+        }
+
+        glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels);
+        return 0;
+    }
+
+    int native_glCopyTexImage2D(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 8)
+        {
+            Error("glCopyTexImage2D expects 8 arguments: target, level, internalFormat, x, y, width, height, border");
+            return 0;
+        }
+
+        glCopyTexImage2D((GLenum)args[0].asNumber(), (GLint)args[1].asNumber(),
+                         (GLenum)args[2].asNumber(), (GLint)args[3].asNumber(),
+                         (GLint)args[4].asNumber(), (GLsizei)args[5].asNumber(),
+                         (GLsizei)args[6].asNumber(), (GLint)args[7].asNumber());
+        return 0;
+    }
+
+    int native_glCopyTexSubImage2D(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 8)
+        {
+            Error("glCopyTexSubImage2D expects 8 arguments: target, level, xoffset, yoffset, x, y, width, height");
+            return 0;
+        }
+
+        glCopyTexSubImage2D((GLenum)args[0].asNumber(), (GLint)args[1].asNumber(),
+                            (GLint)args[2].asNumber(), (GLint)args[3].asNumber(),
+                            (GLint)args[4].asNumber(), (GLint)args[5].asNumber(),
+                            (GLsizei)args[6].asNumber(), (GLsizei)args[7].asNumber());
+        return 0;
+    }
+
+    int native_glTexStorage2D(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 5)
+        {
+            Error("glTexStorage2D expects 5 arguments: target, levels, internalformat, width, height");
+            return 0;
+        }
+
+        glTexStorage2D((GLenum)args[0].asNumber(), (GLsizei)args[1].asNumber(),
+                       (GLenum)args[2].asNumber(), (GLsizei)args[3].asNumber(),
+                       (GLsizei)args[4].asNumber());
+        return 0;
+    }
+
+    int native_glTexStorage3D(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 6)
+        {
+            Error("glTexStorage3D expects 6 arguments: target, levels, internalformat, width, height, depth");
+            return 0;
+        }
+
+        glTexStorage3D((GLenum)args[0].asNumber(), (GLsizei)args[1].asNumber(),
+                       (GLenum)args[2].asNumber(), (GLsizei)args[3].asNumber(),
+                       (GLsizei)args[4].asNumber(), (GLsizei)args[5].asNumber());
+        return 0;
+    }
+
     void register_opengl_texture(ModuleBuilder &module)
     {
         module.addFunction("glGenTextures", native_glGenTextures, 0)
@@ -442,6 +586,12 @@ namespace SDLBindings
             .addFunction("glTexEnvi", native_glTexEnvi, 3)
             .addFunction("glTexImage2D", native_glTexImage2D, 9)
             .addFunction("glTexSubImage2D", native_glTexSubImage2D, 9)
+            .addFunction("glTexImage3D", native_glTexImage3D, 10)
+            .addFunction("glTexSubImage3D", native_glTexSubImage3D, 11)
+            .addFunction("glCopyTexImage2D", native_glCopyTexImage2D, 8)
+            .addFunction("glCopyTexSubImage2D", native_glCopyTexSubImage2D, 8)
+            .addFunction("glTexStorage2D", native_glTexStorage2D, 5)
+            .addFunction("glTexStorage3D", native_glTexStorage3D, 6)
 
             .addInt("GL_TEXTURE_MIN_FILTER", GL_TEXTURE_MIN_FILTER)
             .addInt("GL_TEXTURE_MAG_FILTER", GL_TEXTURE_MAG_FILTER)
@@ -469,6 +619,109 @@ namespace SDLBindings
             .addInt("GL_RGBA32F", GL_RGBA32F)
             .addInt("GL_RGB16F", GL_RGB16F)
             .addInt("GL_RGB32F", GL_RGB32F);
+
+        // =============================================================
+        // CUBEMAP CONSTANTS
+        // =============================================================
+#ifdef GL_TEXTURE_CUBE_MAP
+        module.addInt("GL_TEXTURE_CUBE_MAP", GL_TEXTURE_CUBE_MAP);
+#endif
+#ifdef GL_TEXTURE_CUBE_MAP_POSITIVE_X
+        module.addInt("GL_TEXTURE_CUBE_MAP_POSITIVE_X", GL_TEXTURE_CUBE_MAP_POSITIVE_X)
+              .addInt("GL_TEXTURE_CUBE_MAP_NEGATIVE_X", GL_TEXTURE_CUBE_MAP_NEGATIVE_X)
+              .addInt("GL_TEXTURE_CUBE_MAP_POSITIVE_Y", GL_TEXTURE_CUBE_MAP_POSITIVE_Y)
+              .addInt("GL_TEXTURE_CUBE_MAP_NEGATIVE_Y", GL_TEXTURE_CUBE_MAP_NEGATIVE_Y)
+              .addInt("GL_TEXTURE_CUBE_MAP_POSITIVE_Z", GL_TEXTURE_CUBE_MAP_POSITIVE_Z)
+              .addInt("GL_TEXTURE_CUBE_MAP_NEGATIVE_Z", GL_TEXTURE_CUBE_MAP_NEGATIVE_Z);
+#endif
+#ifdef GL_TEXTURE_WRAP_R
+        module.addInt("GL_TEXTURE_WRAP_R", GL_TEXTURE_WRAP_R);
+#endif
+#ifdef GL_TEXTURE_CUBE_MAP_SEAMLESS
+        module.addInt("GL_TEXTURE_CUBE_MAP_SEAMLESS", GL_TEXTURE_CUBE_MAP_SEAMLESS);
+#endif
+
+        // =============================================================
+        // 3D / ARRAY TEXTURE CONSTANTS
+        // =============================================================
+#ifdef GL_TEXTURE_3D
+        module.addInt("GL_TEXTURE_3D", GL_TEXTURE_3D);
+#endif
+#ifdef GL_TEXTURE_2D_ARRAY
+        module.addInt("GL_TEXTURE_2D_ARRAY", GL_TEXTURE_2D_ARRAY);
+#endif
+#ifdef GL_TEXTURE_BASE_LEVEL
+        module.addInt("GL_TEXTURE_BASE_LEVEL", GL_TEXTURE_BASE_LEVEL);
+#endif
+#ifdef GL_TEXTURE_MAX_LEVEL
+        module.addInt("GL_TEXTURE_MAX_LEVEL", GL_TEXTURE_MAX_LEVEL);
+#endif
+#ifdef GL_TEXTURE_MAX_ANISOTROPY_EXT
+        module.addInt("GL_TEXTURE_MAX_ANISOTROPY_EXT", GL_TEXTURE_MAX_ANISOTROPY_EXT);
+#endif
+#ifdef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+        module.addInt("GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT", GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+#endif
+
+        // =============================================================
+        // ADDITIONAL TEXTURE UNITS (GL_TEXTURE4 - GL_TEXTURE15)
+        // =============================================================
+#ifdef GL_TEXTURE4
+        module.addInt("GL_TEXTURE4", GL_TEXTURE4)
+              .addInt("GL_TEXTURE5", GL_TEXTURE5)
+              .addInt("GL_TEXTURE6", GL_TEXTURE6)
+              .addInt("GL_TEXTURE7", GL_TEXTURE7);
+#endif
+#ifdef GL_TEXTURE8
+        module.addInt("GL_TEXTURE8", GL_TEXTURE8)
+              .addInt("GL_TEXTURE9", GL_TEXTURE9)
+              .addInt("GL_TEXTURE10", GL_TEXTURE10)
+              .addInt("GL_TEXTURE11", GL_TEXTURE11)
+              .addInt("GL_TEXTURE12", GL_TEXTURE12)
+              .addInt("GL_TEXTURE13", GL_TEXTURE13)
+              .addInt("GL_TEXTURE14", GL_TEXTURE14)
+              .addInt("GL_TEXTURE15", GL_TEXTURE15);
+#endif
+
+        // =============================================================
+        // INTERNAL FORMAT CONSTANTS (sRGB, depth, compressed)
+        // =============================================================
+#ifdef GL_SRGB
+        module.addInt("GL_SRGB", GL_SRGB);
+#endif
+#ifdef GL_SRGB8
+        module.addInt("GL_SRGB8", GL_SRGB8);
+#endif
+#ifdef GL_SRGB_ALPHA
+        module.addInt("GL_SRGB_ALPHA", GL_SRGB_ALPHA);
+#endif
+#ifdef GL_SRGB8_ALPHA8
+        module.addInt("GL_SRGB8_ALPHA8", GL_SRGB8_ALPHA8);
+#endif
+#ifdef GL_R8
+        module.addInt("GL_R8", GL_R8);
+#endif
+#ifdef GL_RG8
+        module.addInt("GL_RG8", GL_RG8);
+#endif
+#ifdef GL_R16F
+        module.addInt("GL_R16F", GL_R16F);
+#endif
+#ifdef GL_RG16F
+        module.addInt("GL_RG16F", GL_RG16F);
+#endif
+#ifdef GL_R32F
+        module.addInt("GL_R32F", GL_R32F);
+#endif
+#ifdef GL_RG32F
+        module.addInt("GL_RG32F", GL_RG32F);
+#endif
+#ifdef GL_RED
+        module.addInt("GL_RED", GL_RED);
+#endif
+#ifdef GL_RG
+        module.addInt("GL_RG", GL_RG);
+#endif
             
 
 #ifdef GL_CLAMP

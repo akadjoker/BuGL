@@ -127,6 +127,7 @@ void Compiler::initRules()
   rules[TOKEN_INT] = {&Compiler::number, nullptr, PREC_NONE};
   rules[TOKEN_FLOAT] = {&Compiler::number, nullptr, PREC_NONE};
   rules[TOKEN_STRING] = {&Compiler::string, nullptr, PREC_NONE};
+  rules[TOKEN_FSTRING] = {&Compiler::fstringExpression, nullptr, PREC_NONE};
   rules[TOKEN_IDENTIFIER] = {&Compiler::variable, nullptr, PREC_NONE};
   rules[TOKEN_TRUE] = {&Compiler::literal, nullptr, PREC_NONE};
   rules[TOKEN_FALSE] = {&Compiler::literal, nullptr, PREC_NONE};

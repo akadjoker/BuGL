@@ -1,0 +1,5 @@
+// Test: property access on nil
+// Expected: runtime error about property access on nil
+
+var x = nil;
+var y = x.name;

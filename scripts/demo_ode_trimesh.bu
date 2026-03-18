@@ -1,0 +1,339 @@
+// ================================================================
+// BuGL Demo — ODE TriMesh Collision
+// Static triangle mesh ramp + dynamic boxes and spheres
+// S     -> spawn objects
+// R     -> reset
+// ESC   -> quit
+// ================================================================
+
+require "ODE";
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ODE;
+using ODE;
+import math;
+using math;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("BuGL  ODE TriMesh Demo", 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.05, 0.07, 0.11, 1.0);
+glViewport(0, 0, GetWidth(), GetHeight());
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+
+dInitODE2(0);
+
+var PI = 3.141592653589793;
+
+var world = dWorldCreate();
+var space = dSimpleSpaceCreate(nil);
+var contactGroup = dJointGroupCreate(0);
+
+dWorldSetGravity(world, 0.0, -9.81, 0.0);
+dWorldSetQuickStepNumIterations(world, 40);
+
+var ground = dCreatePlane(space, 0.0, 1.0, 0.0, 0.0);
+
+// ─── TriMesh ramp data ───────────────────────────────────────────────
+
+var rampVerts = [
+    -3.0, 4.0, -5.0,
+     3.0, 4.0, -5.0,
+     3.0, 0.0,  5.0,
+    -3.0, 0.0,  5.0,
+    -3.0, 0.0, -5.0,
+     3.0, 0.0, -5.0,
+     3.0, 0.0,  5.0,
+    -3.0, 0.0,  5.0
+];
+
+var rampIndices = [
+    0, 2, 1,
+    0, 3, 2,
+    4, 5, 6,
+    4, 6, 7,
+    0, 1, 5,
+    0, 5, 4,
+    0, 4, 7,
+    0, 7, 3,
+    1, 2, 6,
+    1, 6, 5
+];
+
+var trimeshGeom = dCreateTriMesh(space, rampVerts, rampIndices);
+if (trimeshGeom == nil)
+    print("ERROR: dCreateTriMesh failed!");
+else
+    print("TriMesh created! Triangles: " + dGeomTriMeshGetTriangleCount(trimeshGeom));
+
+// ─── Dynamic objects ─────────────────────────────────────────────────
+
+var fixedStep = 1.0 / 120.0;
+var accumulator = 0.0;
+var objects = [];
+var objectMax = 60;
+
+struct DropObj
+{
+    var body;
+    var geom;
+    var kind;
+    var sx;
+    var sy;
+    var sz;
+    var r;
+    var g;
+    var b;
+}
+
+def spawnDrop()
+{
+    if (len(objects) >= objectMax) return;
+
+    var kind = int(rand() * 2.0);
+    var px = -2.0 + rand() * 4.0;
+    var py = 6.0 + rand() * 3.0;
+    var pz = -6.0 + rand() * 2.0;
+
+    var b = dBodyCreate(world);
+    var g = nil;
+    var sx = 0.0;
+    var sy = 0.0;
+    var sz = 0.0;
+    var cr = 0.9;
+    var cg = 0.5;
+    var cb = 0.2;
+
+    if (kind == 0)
+    {
+        sx = 0.4 + rand() * 0.4;
+        sy = 0.4 + rand() * 0.4;
+        sz = 0.4 + rand() * 0.4;
+        dBodySetMassBoxTotal(b, 1.0, sx, sy, sz);
+        g = dCreateBox(space, sx, sy, sz);
+        cr = 0.33; cg = 0.78; cb = 1.0;
+    }
+    else
+    {
+        sx = 0.2 + rand() * 0.25;
+        dBodySetMassSphereTotal(b, 1.0, sx);
+        g = dCreateSphere(space, sx);
+        cr = 1.0; cg = 0.55; cb = 0.22;
+    }
+
+    dBodySetPosition(b, px, py, pz);
+    dGeomSetBody(g, b);
+    objects.push(DropObj(b, g, kind, sx, sy, sz, cr, cg, cb));
+}
+
+def clearDrops()
+{
+    for (var i = 0; i < len(objects); i++)
+    {
+        dGeomDestroy(objects[i].geom);
+        dBodyDestroy(objects[i].body);
+    }
+    objects = [];
+}
+
+// ─── Drawing ─────────────────────────────────────────────────────────
+
+def drawGrid()
+{
+    glColor3f(0.14, 0.16, 0.20);
+    glBegin(GL_QUADS);
+    glVertex3f(-15.0, 0.0, -15.0);
+    glVertex3f( 15.0, 0.0, -15.0);
+    glVertex3f( 15.0, 0.0,  15.0);
+    glVertex3f(-15.0, 0.0,  15.0);
+    glEnd();
+
+    glColor3f(0.22, 0.26, 0.32);
+    glLineWidth(1.0);
+    glBegin(GL_LINES);
+    for (var i = -15; i <= 15; i++)
+    {
+        glVertex3f(i, 0.002, -15.0);
+        glVertex3f(i, 0.002,  15.0);
+        glVertex3f(-15.0, 0.002, i);
+        glVertex3f( 15.0, 0.002, i);
+    }
+    glEnd();
+}
+
+def drawRamp()
+{
+    glColor3f(0.2, 0.5, 0.3);
+    glBegin(GL_TRIANGLES);
+    for (var i = 0; i < len(rampIndices); i += 3)
+    {
+        var i0 = rampIndices[i];
+        var i1 = rampIndices[i + 1];
+        var i2 = rampIndices[i + 2];
+        glVertex3f(rampVerts[i0 * 3], rampVerts[i0 * 3 + 1], rampVerts[i0 * 3 + 2]);
+        glVertex3f(rampVerts[i1 * 3], rampVerts[i1 * 3 + 1], rampVerts[i1 * 3 + 2]);
+        glVertex3f(rampVerts[i2 * 3], rampVerts[i2 * 3 + 1], rampVerts[i2 * 3 + 2]);
+    }
+    glEnd();
+
+    glColor3f(0.4, 0.85, 0.5);
+    glLineWidth(1.5);
+    for (var i = 0; i < len(rampIndices); i += 3)
+    {
+        var i0 = rampIndices[i];
+        var i1 = rampIndices[i + 1];
+        var i2 = rampIndices[i + 2];
+        glBegin(GL_LINE_LOOP);
+        glVertex3f(rampVerts[i0 * 3], rampVerts[i0 * 3 + 1], rampVerts[i0 * 3 + 2]);
+        glVertex3f(rampVerts[i1 * 3], rampVerts[i1 * 3 + 1], rampVerts[i1 * 3 + 2]);
+        glVertex3f(rampVerts[i2 * 3], rampVerts[i2 * 3 + 1], rampVerts[i2 * 3 + 2]);
+        glEnd();
+    }
+}
+
+def drawBox3D(bdy, sx, sy, sz)
+{
+    var (px, py, pz) = dBodyGetPosition(bdy);
+    var (r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11) = dBodyGetRotation(bdy);
+
+    glPushMatrix();
+    var m = [
+        r0, r4, r8,  0.0,
+        r1, r5, r9,  0.0,
+        r2, r6, r10, 0.0,
+        px, py, pz,  1.0
+    ];
+    glMultMatrixf(m);
+
+    var hx = sx * 0.5;
+    var hy = sy * 0.5;
+    var hz = sz * 0.5;
+
+    glBegin(GL_QUADS);
+    glVertex3f(-hx, -hy,  hz); glVertex3f( hx, -hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
+    glVertex3f( hx, -hy, -hz); glVertex3f(-hx, -hy, -hz); glVertex3f(-hx,  hy, -hz); glVertex3f( hx,  hy, -hz);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx, -hy,  hz); glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx,  hy, -hz); glVertex3f( hx,  hy,  hz);
+    glVertex3f(-hx,  hy,  hz); glVertex3f( hx,  hy,  hz); glVertex3f( hx,  hy, -hz); glVertex3f(-hx,  hy, -hz);
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz); glVertex3f( hx, -hy,  hz); glVertex3f(-hx, -hy,  hz);
+    glEnd();
+
+    glPopMatrix();
+}
+
+def drawSphere3D(bdy, radius)
+{
+    var (px, py, pz) = dBodyGetPosition(bdy);
+    glPushMatrix();
+    glTranslatef(px, py, pz);
+
+    var stacks = 8;
+    var slices = 12;
+    for (var i = 0; i < stacks; i++)
+    {
+        var v0 = i / stacks;
+        var v1 = (i + 1) / stacks;
+        var a0 = (v0 - 0.5) * PI;
+        var a1 = (v1 - 0.5) * PI;
+        var y0 = sin(a0) * radius;
+        var y1 = sin(a1) * radius;
+        var r0 = cos(a0) * radius;
+        var r1 = cos(a1) * radius;
+        glBegin(GL_QUAD_STRIP);
+        for (var s = 0; s <= slices; s++)
+        {
+            var t = (s / slices) * PI * 2.0;
+            glVertex3f(cos(t) * r0, y0, sin(t) * r0);
+            glVertex3f(cos(t) * r1, y1, sin(t) * r1);
+        }
+        glEnd();
+    }
+    glPopMatrix();
+}
+
+// ─── Main ────────────────────────────────────────────────────────────
+
+print("ODE TriMesh: S spawn | R reset | ESC quit");
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_R)) clearDrops();
+    if (IsKeyPressed(KEY_S))
+    {
+        for (var n = 0; n < 3; n++) spawnDrop();
+    }
+
+    var dt = GetDeltaTime();
+    accumulator = accumulator + dt;
+    while (accumulator >= fixedStep)
+    {
+        dJointGroupEmpty(contactGroup);
+        dSpaceCollideSimple(space, world, contactGroup, 8, dInfinity, 0.01, 0.15, 0.70, 0.00001);
+        dWorldQuickStep(world, fixedStep);
+        accumulator = accumulator - fixedStep;
+    }
+
+    // Remove fallen
+    for (var i = len(objects) - 1; i >= 0; i--)
+    {
+        var (ox, oy, oz) = dBodyGetPosition(objects[i].body);
+        if (oy < -15.0)
+        {
+            dGeomDestroy(objects[i].geom);
+            dBodyDestroy(objects[i].body);
+            objects.remove(i);
+        }
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    var h = GetHeight();
+    if (h <= 0) h = 1;
+    var aspect = GetWidth() / h;
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glFrustum(-0.08 * aspect, 0.08 * aspect, -0.08, 0.08, 0.1, 100.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(0.0, -3.0, -20.0);
+    glRotatef(22.0, 1.0, 0.0, 0.0);
+    glRotatef(-20.0, 0.0, 1.0, 0.0);
+
+    drawGrid();
+    drawRamp();
+
+    for (var i = 0; i < len(objects); i++)
+    {
+        var obj = objects[i];
+        if (obj.kind == 0)
+        {
+            glColor3f(obj.r, obj.g, obj.b);
+            drawBox3D(obj.body, obj.sx, obj.sy, obj.sz);
+        }
+        else
+        {
+            glColor3f(obj.r, obj.g, obj.b);
+            drawSphere3D(obj.body, obj.sx);
+        }
+    }
+
+    Flip();
+}
+
+clearDrops();
+if (trimeshGeom != nil) dDestroyTriMesh(trimeshGeom);
+dGeomDestroy(ground);
+dJointGroupDestroy(contactGroup);
+dSpaceDestroy(space);
+dWorldDestroy(world);
+dCloseODE();
+Close();

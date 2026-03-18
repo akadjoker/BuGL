@@ -1,0 +1,10 @@
+// BAD: class inheriting from non-existent class, with while after
+class Child : NonExistentParent
+{
+    def init() {}
+}
+
+while (true) {
+    break;
+}
+print("should not reach here");

@@ -1,0 +1,202 @@
+// ================================================================
+// Tutorial 03 — 3D Scene with Camera & Depth
+//
+// You will learn:
+//   - GL_DEPTH_TEST and depth buffer
+//   - Projection with glFrustum (perspective)
+//   - Camera positioning with glTranslatef / glRotatef
+//   - Drawing 3D primitives (cube, floor grid)
+//   - 3D coordinate system (X right, Y up, Z towards you)
+//   - glPushMatrix / glPopMatrix for object transforms
+//   - Arrow keys to orbit the camera
+//
+// Result: a lit 3D scene with colored cubes on a grid floor
+// Arrow keys: orbit camera | ESC to quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import math;
+using math;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24); // request 24-bit depth buffer
+if (!Init("Tutorial 03 — 3D Scene", 900, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.06, 0.06, 0.12, 1.0);
+glEnable(GL_DEPTH_TEST); // enable depth testing so closer objects occlude farther ones
+glDisable(GL_CULL_FACE); // show both sides of faces
+
+var PI = 3.141592653589793;
+
+// Camera orbit angles (degrees)
+var camAngleX = 25.0; // pitch (up/down)
+var camAngleY = 30.0; // yaw (left/right)
+var camDist   = 12.0; // distance from origin
+
+// ── Draw a solid box centered at origin with given half-sizes ──
+def drawBox(hx, hy, hz)
+{
+    glBegin(GL_QUADS);
+    // Front face (+Z)
+    glNormal3f(0.0, 0.0, 1.0);
+    glVertex3f(-hx, -hy,  hz); glVertex3f( hx, -hy,  hz);
+    glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
+    // Back face (-Z)
+    glNormal3f(0.0, 0.0, -1.0);
+    glVertex3f( hx, -hy, -hz); glVertex3f(-hx, -hy, -hz);
+    glVertex3f(-hx,  hy, -hz); glVertex3f( hx,  hy, -hz);
+    // Left face (-X)
+    glNormal3f(-1.0, 0.0, 0.0);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx, -hy,  hz);
+    glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
+    // Right face (+X)
+    glNormal3f(1.0, 0.0, 0.0);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx, -hy, -hz);
+    glVertex3f( hx,  hy, -hz); glVertex3f( hx,  hy,  hz);
+    // Top face (+Y)
+    glNormal3f(0.0, 1.0, 0.0);
+    glVertex3f(-hx,  hy,  hz); glVertex3f( hx,  hy,  hz);
+    glVertex3f( hx,  hy, -hz); glVertex3f(-hx,  hy, -hz);
+    // Bottom face (-Y)
+    glNormal3f(0.0, -1.0, 0.0);
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f(-hx, -hy,  hz);
+    glEnd();
+}
+
+// ── Draw a wireframe box outline ────────────────────────────
+def drawBoxWireframe(hx, hy, hz)
+{
+    glBegin(GL_LINES);
+    // Bottom edges
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz);
+    glVertex3f( hx, -hy, -hz); glVertex3f( hx, -hy,  hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f(-hx, -hy,  hz);
+    glVertex3f(-hx, -hy,  hz); glVertex3f(-hx, -hy, -hz);
+    // Top edges
+    glVertex3f(-hx,  hy, -hz); glVertex3f( hx,  hy, -hz);
+    glVertex3f( hx,  hy, -hz); glVertex3f( hx,  hy,  hz);
+    glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
+    glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
+    // Vertical edges
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx,  hy, -hz);
+    glVertex3f( hx, -hy, -hz); glVertex3f( hx,  hy, -hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx,  hy,  hz);
+    glVertex3f(-hx, -hy,  hz); glVertex3f(-hx,  hy,  hz);
+    glEnd();
+}
+
+// ── Draw grid floor ─────────────────────────────────────────
+def drawFloor()
+{
+    // Solid dark quad
+    glColor3f(0.12, 0.13, 0.18);
+    glBegin(GL_QUADS);
+    glVertex3f(-8.0, 0.0, -8.0); glVertex3f(8.0, 0.0, -8.0);
+    glVertex3f( 8.0, 0.0,  8.0); glVertex3f(-8.0, 0.0,  8.0);
+    glEnd();
+
+    // Grid lines
+    glColor3f(0.22, 0.24, 0.30);
+    glLineWidth(1.0);
+    glBegin(GL_LINES);
+    for (var i = -8; i <= 8; i++)
+    {
+        glVertex3f(i, 0.005, -8.0); glVertex3f(i, 0.005, 8.0);
+        glVertex3f(-8.0, 0.005, i); glVertex3f(8.0, 0.005, i);
+    }
+    glEnd();
+}
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    var dt = GetDeltaTime();
+
+    // ── Camera orbit controls ───────────────────────────────
+    if (IsKeyDown(KEY_LEFT))  camAngleY = camAngleY - 80.0 * dt;
+    if (IsKeyDown(KEY_RIGHT)) camAngleY = camAngleY + 80.0 * dt;
+    if (IsKeyDown(KEY_UP))    camAngleX = camAngleX - 50.0 * dt;
+    if (IsKeyDown(KEY_DOWN))  camAngleX = camAngleX + 50.0 * dt;
+
+    // Clamp pitch to avoid flipping
+    if (camAngleX < 5.0)  camAngleX = 5.0;
+    if (camAngleX > 85.0) camAngleX = 85.0;
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    // Clear both color and depth buffers
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // ── Set up perspective projection ───────────────────────
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    // glFrustum(left, right, bottom, top, near, far)
+    // This creates a perspective projection matrix
+    glFrustum(-0.08 * aspect, 0.08 * aspect, -0.08, 0.08, 0.1, 100.0);
+
+    // ── Set up camera (view matrix) ─────────────────────────
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    // Apply orbit: translate back, then rotate
+    glTranslatef(0.0, -1.0, -camDist);
+    glRotatef(camAngleX, 1.0, 0.0, 0.0); // pitch
+    glRotatef(camAngleY, 0.0, 1.0, 0.0); // yaw
+
+    // ── Draw the scene ──────────────────────────────────────
+    drawFloor();
+
+    // Red cube at center
+    glPushMatrix();
+    glTranslatef(0.0, 0.6, 0.0);
+    glColor3f(0.9, 0.2, 0.2);
+    drawBox(0.5, 0.5, 0.5);
+    glColor3f(1.0, 0.5, 0.5);
+    glLineWidth(2.0);
+    drawBoxWireframe(0.51, 0.51, 0.51);
+    glPopMatrix();
+
+    // Green cube on the left
+    glPushMatrix();
+    glTranslatef(-2.5, 0.4, 1.0);
+    glColor3f(0.2, 0.8, 0.3);
+    drawBox(0.35, 0.35, 0.35);
+    glColor3f(0.5, 1.0, 0.6);
+    glLineWidth(1.5);
+    drawBoxWireframe(0.36, 0.36, 0.36);
+    glPopMatrix();
+
+    // Blue cube on the right
+    glPushMatrix();
+    glTranslatef(2.0, 0.3, -1.5);
+    glColor3f(0.2, 0.4, 0.9);
+    drawBox(0.25, 0.25, 0.25);
+    glColor3f(0.5, 0.7, 1.0);
+    glLineWidth(1.5);
+    drawBoxWireframe(0.26, 0.26, 0.26);
+    glPopMatrix();
+
+    // Yellow tall box in the back
+    glPushMatrix();
+    glTranslatef(0.0, 0.8, -3.0);
+    glColor3f(0.9, 0.85, 0.2);
+    drawBox(0.3, 0.7, 0.3);
+    glColor3f(1.0, 1.0, 0.6);
+    glLineWidth(1.5);
+    drawBoxWireframe(0.31, 0.71, 0.31);
+    glPopMatrix();
+
+    Flip();
+}
+
+Close();

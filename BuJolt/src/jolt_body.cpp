@@ -1,4 +1,5 @@
 #include "jolt_core.hpp"
+#include <Jolt/Physics/Body/BodyLock.h>
 
 namespace JoltBindings
 {
@@ -522,6 +523,158 @@ namespace JoltBindings
         return 0;
     }
 
+    // ─── Body property getters ────────────────────────────────────────────
+
+    static int jolt_body_get_friction(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("JoltBody.getFriction() expects 0 arguments");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.getFriction()");
+        if (!body)
+            return push_nil1(vm);
+
+        vm->pushFloat(body->world->physicsSystem.GetBodyInterface().GetFriction(body->id));
+        return 1;
+    }
+
+    static int jolt_body_get_restitution(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("JoltBody.getRestitution() expects 0 arguments");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.getRestitution()");
+        if (!body)
+            return push_nil1(vm);
+
+        vm->pushFloat(body->world->physicsSystem.GetBodyInterface().GetRestitution(body->id));
+        return 1;
+    }
+
+    static int jolt_body_get_inverse_mass(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("JoltBody.getInverseMass() expects 0 arguments");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.getInverseMass()");
+        if (!body)
+            return push_nil1(vm);
+
+        BodyLockRead lock(body->world->physicsSystem.GetBodyLockInterface(), body->id);
+        if (!lock.Succeeded())
+            return push_nil1(vm);
+
+        const Body &b = lock.GetBody();
+        if (!b.IsDynamic())
+        {
+            vm->pushFloat(0.0f);
+            return 1;
+        }
+
+        vm->pushFloat(b.GetMotionProperties()->GetInverseMass());
+        return 1;
+    }
+
+    // ─── Gravity factor ──────────────────────────────────────────────────
+
+    static int jolt_body_set_gravity_factor(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1)
+        {
+            Error("JoltBody.setGravityFactor() expects (number)");
+            return 0;
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.setGravityFactor()");
+        if (!body)
+            return 0;
+
+        double factor = 0.0;
+        if (!read_number_arg(args[0], &factor, "JoltBody.setGravityFactor()", 1))
+            return 0;
+
+        body->world->physicsSystem.GetBodyInterface().SetGravityFactor(body->id, (float)factor);
+        return 0;
+    }
+
+    static int jolt_body_get_gravity_factor(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("JoltBody.getGravityFactor() expects 0 arguments");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.getGravityFactor()");
+        if (!body)
+            return push_nil1(vm);
+
+        vm->pushFloat(body->world->physicsSystem.GetBodyInterface().GetGravityFactor(body->id));
+        return 1;
+    }
+
+    // ─── Linear & angular damping ────────────────────────────────────────
+
+    static int jolt_body_set_linear_velocity_clamped(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        if (argCount != 1)
+        {
+            Error("JoltBody.setLinearVelocityClamped() expects (Vector3)");
+            return 0;
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.setLinearVelocityClamped()");
+        if (!body)
+            return 0;
+
+        Vector3 velocity;
+        if (!read_vector3_arg(args[0], &velocity, "JoltBody.setLinearVelocityClamped()", 1))
+            return 0;
+
+        body->world->physicsSystem.GetBodyInterface().SetLinearAndAngularVelocity(
+            body->id,
+            to_jolt_vec3(velocity),
+            body->world->physicsSystem.GetBodyInterface().GetAngularVelocity(body->id));
+        return 0;
+    }
+
+    static int jolt_body_get_world_transform(Interpreter *vm, void *instance, int argCount, Value *args)
+    {
+        (void)args;
+        if (argCount != 0)
+        {
+            Error("JoltBody.getWorldTransform() expects 0 arguments");
+            return push_nil1(vm);
+        }
+
+        JoltBodyHandle *body = require_body(instance, "JoltBody.getWorldTransform()");
+        if (!body)
+            return push_nil1(vm);
+
+        BodyInterface &bi = body->world->physicsSystem.GetBodyInterface();
+        RVec3 pos = bi.GetCenterOfMassPosition(body->id);
+        Quat rot = bi.GetRotation(body->id);
+
+        if (!push_vector3(vm, from_jolt_rvec3(pos)))
+            return push_nil1(vm);
+        if (!push_quaternion(vm, from_jolt_quat(rot)))
+            return 0; // 1 already pushed
+        return 2;
+    }
+
     void register_jolt_body(Interpreter &vm)
     {
         g_bodyClass = vm.registerNativeClass("JoltBody", jolt_body_ctor_error, jolt_body_dtor, 0, false);
@@ -551,5 +704,12 @@ namespace JoltBindings
         vm.addNativeMethod(g_bodyClass, "addAngularImpulse", jolt_body_add_angular_impulse);
         vm.addNativeMethod(g_bodyClass, "setFriction", jolt_body_set_friction);
         vm.addNativeMethod(g_bodyClass, "setRestitution", jolt_body_set_restitution);
+        vm.addNativeMethod(g_bodyClass, "getFriction", jolt_body_get_friction);
+        vm.addNativeMethod(g_bodyClass, "getRestitution", jolt_body_get_restitution);
+        vm.addNativeMethod(g_bodyClass, "getInverseMass", jolt_body_get_inverse_mass);
+        vm.addNativeMethod(g_bodyClass, "setGravityFactor", jolt_body_set_gravity_factor);
+        vm.addNativeMethod(g_bodyClass, "getGravityFactor", jolt_body_get_gravity_factor);
+        vm.addNativeMethod(g_bodyClass, "setLinearVelocityClamped", jolt_body_set_linear_velocity_clamped);
+        vm.addNativeMethod(g_bodyClass, "getWorldTransform", jolt_body_get_world_transform);
     }
 }

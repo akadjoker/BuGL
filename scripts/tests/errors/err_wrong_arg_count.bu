@@ -1,0 +1,8 @@
+// Test: wrong number of arguments to function
+// Expected: runtime error about argument count
+
+def foo(a, b, c) {
+    return a + b + c;
+}
+
+foo(1);

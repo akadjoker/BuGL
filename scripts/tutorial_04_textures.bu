@@ -1,0 +1,294 @@
+// ================================================================
+// Tutorial 04 — Textures & Blending (OpenGL 2.1 Compatibility)
+//
+// What you will learn:
+//   - Creating procedural textures (pixel arrays)
+//   - glGenTextures, glBindTexture, glTexImage2D, glTexParameteri
+//   - Texture coordinates with glTexCoord2f
+//   - Alpha blending with glBlendFunc
+//   - Multiple texture objects
+//   - GL_TEXTURE_2D enable/disable in fixed pipeline
+//
+// Controls: Arrow keys to rotate camera, ESC to quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+if (!Init("Tutorial 04 — Textures & Blending", 1024, 768, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glEnable(GL_DEPTH_TEST);
+glClearColor(0.08, 0.08, 0.12, 1.0);
+
+// ================================================================
+// SECTION 1: Procedural texture generation
+// ================================================================
+// In OpenGL, textures are pixel arrays uploaded to the GPU.
+// Here we generate two textures procedurally (no image files needed).
+
+// --- Texture A: Checkerboard pattern (opaque) ---
+var texSize = 64;
+var checkerPixels = @(texSize * texSize * 4, 0);
+var tileSize = 8;
+
+for (var y = 0; y < texSize; y = y + 1) {
+    for (var x = 0; x < texSize; x = x + 1) {
+        var i = (y * texSize + x) * 4;
+        var tx = floor(x / tileSize);
+        var ty = floor(y / tileSize);
+        if ((tx + ty) % 2 == 0) {
+            // White tile with slight warm tint
+            checkerPixels[i + 0] = 240;  // R
+            checkerPixels[i + 1] = 230;  // G
+            checkerPixels[i + 2] = 200;  // B
+            checkerPixels[i + 3] = 255;  // A (fully opaque)
+        } else {
+            // Dark tile with blue tint
+            checkerPixels[i + 0] = 40;
+            checkerPixels[i + 1] = 50;
+            checkerPixels[i + 2] = 80;
+            checkerPixels[i + 3] = 255;
+        }
+    }
+}
+
+// --- Texture B: Radial gradient with transparency ---
+// This texture fades to transparent at the edges (for blending demo)
+var gradPixels = @(texSize * texSize * 4, 0);
+var half = texSize / 2.0;
+
+for (var y = 0; y < texSize; y = y + 1) {
+    for (var x = 0; x < texSize; x = x + 1) {
+        var i = (y * texSize + x) * 4;
+        var dx = (x - half) / half;
+        var dy = (y - half) / half;
+        var dist = sqrt(dx * dx + dy * dy);
+        // Clamp distance to 0..1
+        if (dist > 1.0) dist = 1.0;
+        var intensity = 1.0 - dist;
+        // Bright cyan-ish center fading to transparent
+        gradPixels[i + 0] = floor(intensity * 100);   // R
+        gradPixels[i + 1] = floor(intensity * 200);   // G
+        gradPixels[i + 2] = floor(intensity * 255);   // B
+        gradPixels[i + 3] = floor(intensity * 220);   // A (fades out)
+    }
+}
+
+// ================================================================
+// SECTION 2: Upload textures to GPU
+// ================================================================
+// Each texture gets a unique ID from glGenTextures().
+// We bind it, set filtering/wrap parameters, then upload pixel data.
+
+// Helper function to upload a texture
+def uploadTexture(pixels, size, wrapMode, filterMode) {
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    // Set wrapping: GL_REPEAT tiles the texture, GL_CLAMP_TO_EDGE stops at border
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapMode);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapMode);
+    // Set filtering: GL_NEAREST = pixelated, GL_LINEAR = smooth
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filterMode);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filterMode);
+    // Upload the RGBA pixel data
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+var texChecker  = uploadTexture(checkerPixels, texSize, GL_REPEAT, GL_NEAREST);
+var texGradient = uploadTexture(gradPixels, texSize, GL_CLAMP_TO_EDGE, GL_LINEAR);
+
+// ================================================================
+// SECTION 3: Drawing helpers
+// ================================================================
+
+// Draw a textured quad in the XZ plane (floor-like)
+def drawTexturedFloor(texId, x, z, w, h, tilesU, tilesV) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texId);
+    glColor4f(1.0, 1.0, 1.0, 1.0);  // Full brightness, no tinting
+    glBegin(GL_QUADS);
+        // UV coordinates > 1.0 cause tiling when wrap = GL_REPEAT
+        glTexCoord2f(0.0,    0.0);    glVertex3f(x,     0.0, z);
+        glTexCoord2f(tilesU, 0.0);    glVertex3f(x + w, 0.0, z);
+        glTexCoord2f(tilesU, tilesV); glVertex3f(x + w, 0.0, z + h);
+        glTexCoord2f(0.0,    tilesV); glVertex3f(x,     0.0, z + h);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+}
+
+// Draw a textured box (6 faces) centered at origin, size s
+def drawTexturedBox(texId, s) {
+    var h = s / 2.0;
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texId);
+    glColor4f(1.0, 1.0, 1.0, 1.0);
+    glBegin(GL_QUADS);
+        // Front face (+Z)
+        glTexCoord2f(0, 0); glVertex3f(-h, -h,  h);
+        glTexCoord2f(1, 0); glVertex3f( h, -h,  h);
+        glTexCoord2f(1, 1); glVertex3f( h,  h,  h);
+        glTexCoord2f(0, 1); glVertex3f(-h,  h,  h);
+        // Back face (-Z)
+        glTexCoord2f(0, 0); glVertex3f( h, -h, -h);
+        glTexCoord2f(1, 0); glVertex3f(-h, -h, -h);
+        glTexCoord2f(1, 1); glVertex3f(-h,  h, -h);
+        glTexCoord2f(0, 1); glVertex3f( h,  h, -h);
+        // Top face (+Y)
+        glTexCoord2f(0, 0); glVertex3f(-h,  h,  h);
+        glTexCoord2f(1, 0); glVertex3f( h,  h,  h);
+        glTexCoord2f(1, 1); glVertex3f( h,  h, -h);
+        glTexCoord2f(0, 1); glVertex3f(-h,  h, -h);
+        // Bottom face (-Y)
+        glTexCoord2f(0, 0); glVertex3f(-h, -h, -h);
+        glTexCoord2f(1, 0); glVertex3f( h, -h, -h);
+        glTexCoord2f(1, 1); glVertex3f( h, -h,  h);
+        glTexCoord2f(0, 1); glVertex3f(-h, -h,  h);
+        // Right face (+X)
+        glTexCoord2f(0, 0); glVertex3f( h, -h,  h);
+        glTexCoord2f(1, 0); glVertex3f( h, -h, -h);
+        glTexCoord2f(1, 1); glVertex3f( h,  h, -h);
+        glTexCoord2f(0, 1); glVertex3f( h,  h,  h);
+        // Left face (-X)
+        glTexCoord2f(0, 0); glVertex3f(-h, -h, -h);
+        glTexCoord2f(1, 0); glVertex3f(-h, -h,  h);
+        glTexCoord2f(1, 1); glVertex3f(-h,  h,  h);
+        glTexCoord2f(0, 1); glVertex3f(-h,  h, -h);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+}
+
+// Draw a translucent billboard quad facing the camera (for blending demo)
+def drawBillboard(texId, x, y, z, size) {
+    var h = size / 2.0;
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texId);
+    // Billboard: quad in XY plane at position
+    glBegin(GL_QUADS);
+        glTexCoord2f(0, 0); glVertex3f(x - h, y - h, z);
+        glTexCoord2f(1, 0); glVertex3f(x + h, y - h, z);
+        glTexCoord2f(1, 1); glVertex3f(x + h, y + h, z);
+        glTexCoord2f(0, 1); glVertex3f(x - h, y + h, z);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+}
+
+// ================================================================
+// SECTION 4: Perspective projection setup
+// ================================================================
+var deg2rad = 0.017453292519943295;
+
+def setupPerspective() {
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    var aspect = GetWidth() / GetHeight();
+    var fovY   = 60.0;
+    var near   = 0.1;
+    var far    = 100.0;
+    var top    = near * tan(fovY * 0.5 * deg2rad);
+    var bottom = -top;
+    var right  = top * aspect;
+    var left   = -right;
+    glFrustum(left, right, bottom, top, near, far);
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// ================================================================
+// SECTION 5: Camera and main loop
+// ================================================================
+var camAngleX = 25.0;   // Pitch (degrees)
+var camAngleY = 30.0;   // Yaw (degrees)
+var camDist   = 10.0;   // Distance from center
+var time = 0.0;
+
+while (Running()) {
+    var dt = GetDeltaTime();
+    time = time + dt;
+
+    // Camera controls
+    if (IsKeyDown(KEY_ESCAPE)) { Close(); }
+    if (IsKeyDown(KEY_LEFT))   camAngleY = camAngleY + 60.0 * dt;
+    if (IsKeyDown(KEY_RIGHT))  camAngleY = camAngleY - 60.0 * dt;
+    if (IsKeyDown(KEY_UP))     camAngleX = camAngleX + 40.0 * dt;
+    if (IsKeyDown(KEY_DOWN))   camAngleX = camAngleX - 40.0 * dt;
+    // Clamp pitch
+    if (camAngleX > 85.0) camAngleX = 85.0;
+    if (camAngleX < 5.0)  camAngleX = 5.0;
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    // ── Clear and set up camera ──
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    setupPerspective();
+    glLoadIdentity();
+    // Orbit camera: translate back, then rotate
+    glTranslatef(0.0, 0.0, -camDist);
+    glRotatef(camAngleX, 1.0, 0.0, 0.0);
+    glRotatef(camAngleY, 0.0, 1.0, 0.0);
+
+    // ── Draw tiled checker floor ──
+    // The checker texture tiles 6x6 times across the floor
+    // because we set UV > 1.0 and wrap mode = GL_REPEAT
+    drawTexturedFloor(texChecker, -8, -8, 16, 16, 6.0, 6.0);
+
+    // ── Draw textured boxes ──
+    // Box 1: checker textured, slowly rotating
+    glPushMatrix();
+    glTranslatef(0.0, 1.0, 0.0);
+    glRotatef(time * 30.0, 0.0, 1.0, 0.0);
+    drawTexturedBox(texChecker, 1.8);
+    glPopMatrix();
+
+    // Box 2: gradient textured, offset to the right
+    glPushMatrix();
+    glTranslatef(3.5, 0.8, 0.0);
+    glRotatef(time * -20.0, 1.0, 0.0, 1.0);
+    drawTexturedBox(texGradient, 1.4);
+    glPopMatrix();
+
+    // ── Demonstrate alpha blending ──
+    // Enable blending: source alpha * source color + (1-alpha) * dest color
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // Disable depth write for translucent objects (they shouldn't block each other)
+    glDepthMask(false);
+
+    // Draw several floating translucent billboards using the gradient texture
+    // The gradient texture has alpha fading out at the edges
+    var numBillboards = 5;
+    for (var i = 0; i < numBillboards; i = i + 1) {
+        var angle = (i / numBillboards) * 360.0 + time * 20.0;
+        var bx = cos(angle * deg2rad) * 3.0;
+        var bz = sin(angle * deg2rad) * 3.0;
+        var by = 2.0 + sin(time * 1.5 + i * 1.2) * 0.8;
+        // Tint each billboard with a different color
+        var r = 0.5 + 0.5 * sin(time + i * 1.0);
+        var g = 0.5 + 0.5 * sin(time + i * 2.0);
+        var b = 0.5 + 0.5 * cos(time + i * 1.5);
+        glColor4f(r, g, b, 0.7);
+        drawBillboard(texGradient, bx, by, bz, 1.5);
+    }
+
+    // Re-enable depth writes
+    glDepthMask(true);
+    glDisable(GL_BLEND);
+
+    Flip();
+}
+
+// ================================================================
+// SECTION 6: Cleanup
+// ================================================================
+// Always delete textures when done to free GPU memory
+glDeleteTextures(texChecker);
+glDeleteTextures(texGradient);
+
+Close();

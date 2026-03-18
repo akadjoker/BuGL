@@ -1,0 +1,12 @@
+// BAD: class with opening { but no closing }
+class Broken
+{
+    var x;
+    def init(x) { self.x = x; }
+
+// missing closing }
+var a = 10;
+while (a > 0) {
+    a -= 1;
+}
+print("should not reach here");

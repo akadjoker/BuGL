@@ -1,0 +1,3 @@
+// BAD: random tokens, class keyword mid-expression
+var x = class + 10;
+print("should not reach here");

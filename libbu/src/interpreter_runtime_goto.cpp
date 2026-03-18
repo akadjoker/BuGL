@@ -39,6 +39,7 @@
 #include "debug.hpp"
 #include "platform.hpp"
 #include <cmath> // std::fmod
+#include <climits> // INT32_MIN
 #include <new>
 #include <ctime>
 
@@ -166,7 +167,7 @@ ProcessResult Interpreter::run_process(Process *process)
                                                                      \
         if (throwException(errorVal))                                \
         {                                                            \
-            ip = fiber->ip;                                          \
+            LOAD_FRAME();                                            \
             DISPATCH();                                              \
         }                                                            \
         else                                                         \
@@ -316,6 +317,9 @@ ProcessResult Interpreter::run_process(Process *process)
         // Process utilities (90-91)
         &&op_proc,
         &&op_get_id,
+
+        // String interpolation (92)
+        &&op_tostring,
     };
 
 #define SAFE_CALL_NATIVE(fiber, argCount, callFunc)                                    \
@@ -697,7 +701,7 @@ op_divide:
                                                                      \
         if (throwException(error))                                   \
         {                                                            \
-            ip = fiber->ip;                                          \
+            LOAD_FRAME();                                            \
             DISPATCH();                                              \
         }                                                            \
         else                                                         \
@@ -716,6 +720,14 @@ op_divide:
         }
 
         int ia = a.asInt();
+
+        // Guard against INT_MIN / -1 (undefined behavior in C++, SIGFPE on x86)
+        if (ia == INT32_MIN && ib == -1)
+        {
+            PUSH(makeDouble(-(double)INT32_MIN));
+            DISPATCH();
+        }
+
         if (ia % ib == 0)
         {
             PUSH(makeInt(ia / ib));
@@ -796,7 +808,7 @@ op_modulo:
         Value error = makeString("Modulo by zero");                  \
         if (throwException(error))                                   \
         {                                                            \
-            ip = fiber->ip;                                          \
+            LOAD_FRAME();                                            \
             DISPATCH();                                              \
         }                                                            \
         else                                                         \
@@ -811,7 +823,17 @@ op_modulo:
         if (b.asInt() == 0)
             THROW_MOD_ZERO();
 
-        PUSH(makeInt(a.asInt() % b.asInt()));
+        int ia = a.asInt();
+        int ib = b.asInt();
+
+        // Guard against INT_MIN % -1 (undefined behavior in C++, SIGFPE on x86)
+        if (ia == INT32_MIN && ib == -1)
+        {
+            PUSH(makeInt(0));
+            DISPATCH();
+        }
+
+        PUSH(makeInt(ia % ib));
         DISPATCH();
     }
     double da = a.isInt() ? (double)a.asInt() : a.asDouble();
@@ -1461,6 +1483,14 @@ op_return:
     if (hasFinally)
     {
         DISPATCH();
+    }
+
+    // Unwind try handlers belonging to the returning frame
+    // (handles: return from inside try block without finally)
+    while (fiber->tryDepth > 0 &&
+           fiber->tryHandlers[fiber->tryDepth - 1].frameRestore >= fiber->frameCount)
+    {
+        fiber->tryDepth--;
     }
 
     fiber->frameCount--;
@@ -4448,6 +4478,7 @@ op_try:
     handler.catchIP = catchAddr == 0xFFFF ? nullptr : func->chunk->code + catchAddr;
     handler.finallyIP = finallyAddr == 0xFFFF ? nullptr : func->chunk->code + finallyAddr;
     handler.stackRestore = fiber->stackTop;
+    handler.frameRestore = fiber->frameCount;
     handler.inFinally = false;
     handler.pendingError = makeNil();
     handler.hasPendingError = false;
@@ -4486,6 +4517,7 @@ op_throw:
 {
     Value error = POP();
     bool handlerFound = false;
+    uint8_t *targetIP = nullptr;
 
     while (fiber->tryDepth > 0)
     {
@@ -4501,13 +4533,16 @@ op_throw:
 
         fiber->stackTop = handler.stackRestore;
 
+        // Unwind call frames back to the frame that registered this try handler
+        fiber->frameCount = handler.frameRestore;
+
         // Tem catch?
         if (handler.catchIP != nullptr && !handler.catchConsumed)
         {
             handler.catchConsumed = true;
 
             PUSH(error);
-            ip = handler.catchIP;
+            targetIP = handler.catchIP;
             handlerFound = true;
 
             break;
@@ -4519,7 +4554,7 @@ op_throw:
             handler.pendingError = error;
             handler.hasPendingError = true;
             handler.inFinally = true;
-            ip = handler.finallyIP;
+            targetIP = handler.finallyIP;
             handlerFound = true;
             break;
         }
@@ -4535,6 +4570,9 @@ op_throw:
 
         return {ProcessResult::PROCESS_DONE, 0};
     }
+    // Sync frame/func/stackStart from the restored frameCount, then set ip to the handler target
+    LOAD_FRAME();
+    ip = targetIP;
     DISPATCH();
 }
 
@@ -5384,6 +5422,28 @@ op_get_id:
         }
     }
     if (!found) PUSH(makeInt(-1));
+    DISPATCH();
+}
+
+// ============================================
+// OP_TOSTRING — Convert top-of-stack to string
+// Used by f-string interpolation
+// ============================================
+op_tostring:
+{
+    Value val = POP();
+    if (val.isString())
+    {
+        // Already a string, push back as-is
+        PUSH(val);
+    }
+    else
+    {
+        // Convert to string using valueToBuffer
+        char buf[256];
+        valueToBuffer(val, buf, sizeof(buf));
+        PUSH(makeString(buf));
+    }
     DISPATCH();
 }
 

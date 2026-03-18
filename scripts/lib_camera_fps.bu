@@ -1,0 +1,148 @@
+// ================================================================
+// lib_camera_fps.bu — Reusable FPS Camera (First Person Shooter)
+//
+// Usage:
+//   import "lib_camera_fps.bu";
+//   var cam = CameraFPS(0.0, 1.7, 5.0);   // x, y, z
+//   cam.speed = 5.0;
+//   cam.sensitivity = 0.12;
+//   SDL_SetRelativeMouseMode(true);
+//   // in your loop:
+//   cam.update(dt);
+//   var view = cam.getViewMatrix();
+//   var proj = cam.getProjectionMatrix(aspect, fov, near, far);
+//
+// Keys: WASD move, Q/E up/down, mouse look (while left-click or always)
+// ================================================================
+
+import math;
+using math;
+import GLM;
+using GLM;
+
+struct CameraFPS
+{
+    var x;
+    var y;
+    var z;
+    var yaw;
+    var pitch;
+    var speed;
+    var sensitivity;
+    var firstMouse;
+    var alwaysCapture;  // if true, no need to hold mouse button
+
+    def init(px, py, pz)
+    {
+        this.x = px;
+        this.y = py;
+        this.z = pz;
+        this.yaw = -90.0;
+        this.pitch = 0.0;
+        this.speed = 4.0;
+        this.sensitivity = 0.1;
+        this.firstMouse = true;
+        this.alwaysCapture = false;
+    }
+
+    def setPosition(px, py, pz)
+    {
+        this.x = px;
+        this.y = py;
+        this.z = pz;
+    }
+
+    def setAngles(yawDeg, pitchDeg)
+    {
+        this.yaw = yawDeg;
+        this.pitch = pitchDeg;
+        if (this.pitch > 89.0) this.pitch = 89.0;
+        if (this.pitch < -89.0) this.pitch = -89.0;
+    }
+
+    def getForward()
+    {
+        var deg2rad = 0.017453292519943295;
+        var yr = this.yaw * deg2rad;
+        var pr = this.pitch * deg2rad;
+        var fx = cos(yr) * cos(pr);
+        var fy = sin(pr);
+        var fz = sin(yr) * cos(pr);
+        return Vector3(fx, fy, fz);
+    }
+
+    def getRight()
+    {
+        var deg2rad = 0.017453292519943295;
+        var yr = this.yaw * deg2rad;
+        var rx = sin(yr);
+        var rz = -cos(yr);
+        return Vector3(rx, 0.0, rz);
+    }
+
+    def update(dt)
+    {
+        // Mouse look
+        var doLook = this.alwaysCapture || IsMouseDown(0);
+        if (doLook)
+        {
+            var (dx, dy) = GetMouseDelta();
+            if (this.firstMouse)
+            {
+                this.firstMouse = false;
+            }
+            else
+            {
+                this.yaw = this.yaw - dx * this.sensitivity;
+                this.pitch = this.pitch - dy * this.sensitivity;
+                if (this.pitch > 89.0) this.pitch = 89.0;
+                if (this.pitch < -89.0) this.pitch = -89.0;
+            }
+        }
+        else
+        {
+            this.firstMouse = true;
+        }
+
+        // Forward/right vectors
+        var deg2rad = 0.017453292519943295;
+        var yr = this.yaw * deg2rad;
+        var pr = this.pitch * deg2rad;
+        var fx = cos(yr) * cos(pr);
+        var fy = sin(pr);
+        var fz = sin(yr) * cos(pr);
+        var rx = sin(yr);
+        var rz = -cos(yr);
+
+        // Movement
+        var mv = this.speed * dt;
+        if (IsKeyDown(KEY_W)) { this.x = this.x + fx*mv; this.y = this.y + fy*mv; this.z = this.z + fz*mv; }
+        if (IsKeyDown(KEY_S)) { this.x = this.x - fx*mv; this.y = this.y - fy*mv; this.z = this.z - fz*mv; }
+        if (IsKeyDown(KEY_A)) { this.x = this.x - rx*mv; this.z = this.z - rz*mv; }
+        if (IsKeyDown(KEY_D)) { this.x = this.x + rx*mv; this.z = this.z + rz*mv; }
+        if (IsKeyDown(KEY_Q)) { this.y = this.y - mv; }
+        if (IsKeyDown(KEY_E)) { this.y = this.y + mv; }
+
+        // Sprint
+        if (IsKeyDown(KEY_LSHIFT)) { mv = mv * 2.0; }
+    }
+
+    def getViewMatrix()
+    {
+        var fwd = this.getForward();
+        var eye = Vector3(this.x, this.y, this.z);
+        var tgt = Vector3(this.x + fwd.x, this.y + fwd.y, this.z + fwd.z);
+        var up  = Vector3(0.0, 1.0, 0.0);
+        return MatrixLookAt(eye, tgt, up);
+    }
+
+    def getProjectionMatrix(aspect, fov, near, far)
+    {
+        return MatrixPerspective(fov, aspect, near, far);
+    }
+
+    def getEye()
+    {
+        return Vector3(this.x, this.y, this.z);
+    }
+}

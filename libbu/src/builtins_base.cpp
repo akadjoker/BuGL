@@ -677,4 +677,12 @@ void Interpreter::registerAll()
 #ifdef BU_ENABLE_SOCKETS
   registerSocket();
 #endif
+
+#ifdef BU_ENABLE_CRYPTO
+  registerCrypto();
+#endif
+
+#ifdef BU_ENABLE_NN
+  registerNN();
+#endif
 }

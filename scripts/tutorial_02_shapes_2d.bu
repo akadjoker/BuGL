@@ -1,0 +1,143 @@
+// ================================================================
+// Tutorial 02 — 2D Shapes & Animation
+//
+// You will learn:
+//   - GL_QUADS, GL_LINE_LOOP, GL_TRIANGLE_FAN, GL_POINTS
+//   - Animation with GetDeltaTime()
+//   - Trig functions (sin, cos) for smooth motion
+//   - glPushMatrix / glPopMatrix / glTranslatef / glRotatef
+//   - glLineWidth, glPointSize
+//   - Alpha blending (glBlendFunc)
+//   - How to draw: square, circle, star, dot grid
+//
+// Result: animated 2D shapes with wave effects
+// ESC to quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import math;
+using math;
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+if (!Init("Tutorial 02 — 2D Shapes & Animation", 800, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+
+glClearColor(0.08, 0.08, 0.14, 1.0);
+
+var PI = 3.141592653589793;
+var time = 0.0;
+
+// ── Helper: filled circle using TRIANGLE_FAN ─────────────────
+def drawCircle(cx, cy, radius, segments, r, g, b)
+{
+    glColor3f(r, g, b);
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(cx, cy); // center
+    for (var i = 0; i <= segments; i++)
+    {
+        var angle = (i / segments) * PI * 2.0;
+        glVertex2f(cx + cos(angle) * radius, cy + sin(angle) * radius);
+    }
+    glEnd();
+}
+
+// ── Helper: circle outline using LINE_LOOP ───────────────────
+def drawRing(cx, cy, radius, segments, r, g, b)
+{
+    glColor3f(r, g, b);
+    glBegin(GL_LINE_LOOP);
+    for (var i = 0; i < segments; i++)
+    {
+        var angle = (i / segments) * PI * 2.0;
+        glVertex2f(cx + cos(angle) * radius, cy + sin(angle) * radius);
+    }
+    glEnd();
+}
+
+// ── Helper: 5-pointed star using TRIANGLE_FAN ────────────────
+def drawStar(cx, cy, outerR, innerR, r, g, b)
+{
+    glColor3f(r, g, b);
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(cx, cy);
+    for (var i = 0; i <= 10; i++)
+    {
+        var angle = (i / 10.0) * PI * 2.0 - PI * 0.5;
+        var radius = innerR;
+        if (i % 2 == 0) radius = outerR;
+        glVertex2f(cx + cos(angle) * radius, cy + sin(angle) * radius);
+    }
+    glEnd();
+}
+
+while (Running())
+{
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    var dt = GetDeltaTime();
+    time = time + dt;
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // ── 1. Spinning square (left side) ──────────────────────
+    glPushMatrix();
+    glTranslatef(-0.5, 0.2, 0.0);
+    glRotatef(time * 60.0, 0.0, 0.0, 1.0); // rotate around Z axis
+
+    // Filled quad
+    glColor3f(0.2, 0.7, 1.0);
+    glBegin(GL_QUADS);
+        glVertex2f(-0.15, -0.15);
+        glVertex2f( 0.15, -0.15);
+        glVertex2f( 0.15,  0.15);
+        glVertex2f(-0.15,  0.15);
+    glEnd();
+
+    // White wireframe outline
+    glColor3f(1.0, 1.0, 1.0);
+    glLineWidth(2.0);
+    glBegin(GL_LINE_LOOP);
+        glVertex2f(-0.15, -0.15);
+        glVertex2f( 0.15, -0.15);
+        glVertex2f( 0.15,  0.15);
+        glVertex2f(-0.15,  0.15);
+    glEnd();
+    glPopMatrix();
+
+    // ── 2. Pulsating circle (center) ────────────────────────
+    var pulse = 0.12 + sin(time * 3.0) * 0.04;
+    drawCircle(0.0, -0.2, pulse, 32, 1.0, 0.4, 0.2);
+    glLineWidth(2.0);
+    drawRing(0.0, -0.2, pulse + 0.02, 32, 1.0, 0.7, 0.4);
+
+    // ── 3. Floating star (right side) ───────────────────────
+    var starY = 0.2 + sin(time * 2.0) * 0.15;
+    drawStar(0.5, starY, 0.15, 0.06, 1.0, 1.0, 0.2);
+
+    // ── 4. Background dot grid with wave effect ─────────────
+    glPointSize(3.0);
+    glColor4f(0.3, 0.3, 0.5, 0.4);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBegin(GL_POINTS);
+    for (var gx = -9; gx <= 9; gx++)
+    {
+        for (var gy = -6; gy <= 6; gy++)
+        {
+            var px = gx * 0.1;
+            var py = gy * 0.1;
+            var wave = sin(px * 4.0 + time * 2.0) * 0.02;
+            glVertex2f(px, py + wave);
+        }
+    }
+    glEnd();
+    glDisable(GL_BLEND);
+
+    Flip();
+}
+
+Close();

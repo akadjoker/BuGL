@@ -1,0 +1,61 @@
+// ============================================
+// test_strings.bu — String operations, f-strings, methods
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// Basic strings
+var s = "hello";
+assert(len(s) == 5, "len() string");
+
+// Concatenation
+assert("foo" + "bar" == "foobar", "concat");
+assert("" + "a" == "a", "concat empty");
+
+// Escape sequences
+var nl = "a\nb";
+assert(len(nl) == 3, "newline escape length");
+var tab = "a\tb";
+assert(len(tab) == 3, "tab escape length");
+
+// F-string basics
+var name = "BuLang";
+assert(f"Hello {name}" == "Hello BuLang", "f-string var");
+assert(f"{1 + 2}" == "3", "f-string expr");
+assert(f"" == "", "f-string empty");
+assert(f"no interp" == "no interp", "f-string no interp");
+
+// F-string escaped braces
+assert(f"{{x}}" == "{x}", "f-string escaped braces");
+
+// F-string nested expressions
+var arr = [10, 20, 30];
+assert(f"len={len(arr)}" == "len=3", "f-string len call");
+
+// String comparison
+assert("abc" == "abc", "string eq");
+assert("abc" != "def", "string neq");
+
+// String repeat (via loop)
+var rep = "";
+for (var i = 0; i < 3; i += 1) {
+    rep += "ab";
+}
+assert(rep == "ababab", "string repeat via concat");
+
+// Multiline (implicit via escape)
+var multi = "line1\nline2";
+assert(len(multi) == 11, "multiline string length");
+
+print(f"test_strings: {passed} passed, {failed} failed");

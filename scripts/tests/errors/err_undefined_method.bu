@@ -1,0 +1,9 @@
+// Test: undefined method on class instance
+// Expected: runtime error "Undefined method"
+
+class Foo {
+    def init() {}
+}
+
+var f = Foo();
+f.nonexistent_method();

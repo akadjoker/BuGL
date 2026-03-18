@@ -1,0 +1,4 @@
+// Test: modulo by zero
+// Expected: "Modulo by zero" error
+
+var x = 10 % 0;

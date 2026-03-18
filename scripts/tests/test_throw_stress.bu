@@ -1,0 +1,150 @@
+// ============================================
+// test_throw_stress.bu — throw/catch across frames, nesting, edge cases
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// ==== 1. Throw across 3 levels of function calls ====
+def deep3() { throw "from_deep3"; }
+def deep2() { deep3(); }
+def deep1() { deep2(); }
+
+var caught1 = "";
+try {
+    deep1();
+} catch (e) {
+    caught1 = e;
+}
+assert(caught1 == "from_deep3", "throw across 3 frames");
+
+// ==== 2. Throw in loop inside function ====
+def throw_in_loop()
+{
+    for (var i = 0; i < 100; i += 1) {
+        if (i == 50) { throw "loop_50"; }
+    }
+}
+
+var caught2 = "";
+try {
+    throw_in_loop();
+} catch (e) {
+    caught2 = e;
+}
+assert(caught2 == "loop_50", "throw in loop");
+
+// ==== 3. Multiple sequential try/catch ====
+var results = [];
+for (var i = 0; i < 10; i += 1) {
+    try {
+        if (i % 3 == 0) { throw f"div3_{i}"; }
+        results.push(f"ok_{i}");
+    } catch (e) {
+        results.push(e);
+    }
+}
+assert(results.length() == 10, "sequential try/catch count");
+assert(results[0] == "div3_0", "sequential catch 0");
+assert(results[1] == "ok_1", "sequential ok 1");
+assert(results[2] == "ok_2", "sequential ok 2");
+assert(results[3] == "div3_3", "sequential catch 3");
+
+// ==== 4. Nested try/catch (depth 3 - within TRY_MAX of 4) ====
+var depth_log = "";
+try {
+    depth_log += "a";
+    try {
+        depth_log += "b";
+        try {
+            depth_log += "c";
+            throw "inner";
+        } catch (e) {
+            depth_log += "d";
+        }
+        depth_log += "e";
+    } catch (e) {
+        depth_log += "X"; // should not reach
+    }
+    depth_log += "f";
+} catch (e) {
+    depth_log += "Y"; // should not reach
+}
+assert(depth_log == "abcdef", "nested try/catch depth 3");
+
+// ==== 5. Throw non-string values ====
+var caught_int = nil;
+try { throw 42; } catch (e) { caught_int = e; }
+assert(caught_int == 42, "throw int");
+
+var caught_bool = nil;
+try { throw true; } catch (e) { caught_bool = e; }
+assert(caught_bool == true, "throw bool");
+
+var caught_nil = "not_nil";
+try { throw nil; } catch (e) { caught_nil = e; }
+assert(caught_nil == nil, "throw nil");
+
+// ==== 6. Try/catch in recursive function ====
+// With TRY_MAX=4, recursive try/catch can nest at most 4 deep
+def safe_recurse(n)
+{
+    if (n <= 0) { return 0; }
+    try {
+        if (n == 3) { throw "three"; }
+        return n + safe_recurse(n - 1);
+    } catch (e) {
+        return -1;
+    }
+}
+assert(safe_recurse(2) == 3, "recurse no throw (2+1+0)");
+assert(safe_recurse(3) == -1, "recurse throw at 3");
+// safe_recurse(4) = try { 4 + safe_recurse(3) } = try { 4 + -1 } = 3
+assert(safe_recurse(4) == 3, "recurse catch propagation");
+// Verify no try handler leak: calling many times still works
+assert(safe_recurse(2) == 3, "no try handler leak 1");
+assert(safe_recurse(2) == 3, "no try handler leak 2");
+assert(safe_recurse(2) == 3, "no try handler leak 3");
+assert(safe_recurse(2) == 3, "no try handler leak 4");
+assert(safe_recurse(2) == 3, "no try handler leak 5");
+
+// ==== 7. Division by zero caught in try/catch ====
+var div_result = nil;
+try {
+    var x = 10 / 0;
+    div_result = "unreachable";
+} catch (e) {
+    div_result = "caught";
+}
+assert(div_result == "caught", "div by zero caught");
+
+// ==== 8. Throw and rethrow ====
+var rethrow_log = "";
+try {
+    try {
+        throw "original";
+    } catch (e) {
+        rethrow_log += e;
+        throw f"re_{e}";
+    }
+} catch (e2) {
+    rethrow_log += f":{e2}";
+}
+assert(rethrow_log == "original:re_original", "rethrow");
+
+// ==== Summary ====
+print(f"=== test_throw_stress: {passed}/{passed + failed} ===");
+if (failed > 0) {
+    print(f"FAILED: {failed} tests");
+    exit(1);
+}

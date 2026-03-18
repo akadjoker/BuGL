@@ -57,6 +57,7 @@ private:
     Token number();
     Token string();
     Token verbatimString();
+    Token fstring();
     Token identifier();
 
     void initKeywords();

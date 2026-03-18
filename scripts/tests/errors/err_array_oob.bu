@@ -1,0 +1,5 @@
+// Test: array out of bounds access
+// Expected: runtime error "Array index out of bounds"
+
+var arr = [10, 20, 30];
+var x = arr[100];

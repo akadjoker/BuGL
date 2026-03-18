@@ -156,6 +156,8 @@ const char *tokenTypeToString(TokenType type)
         return "USING";
     case TOKEN_REQUIRE:
         return "REQUIRE";
+    case TOKEN_FSTRING:
+        return "FSTRING";
 
     default:
         return "UNKNOWN";

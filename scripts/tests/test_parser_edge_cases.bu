@@ -1,0 +1,339 @@
+// ============================================
+// test_parser_edge_cases.bu — Parser robustness: structs, classes,
+// var declarations, scoping, edge cases
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+// ══════════════════════════════════════════════
+// 1. Struct edge cases
+// ══════════════════════════════════════════════
+
+// Struct with single field
+struct Single { x }
+var s1 = Single(42);
+assert(s1.x == 42, "struct single field");
+
+// Struct with many fields
+struct Big { a, b, c, d, e, f }
+var b1 = Big(1, 2, 3, 4, 5, 6);
+assert(b1.a == 1, "struct big field a");
+assert(b1.f == 6, "struct big field f");
+
+// Struct fields with var keyword
+struct WithVar { var x; var y; }
+var wv = WithVar(10, 20);
+assert(wv.x == 10, "struct with var x");
+assert(wv.y == 20, "struct with var y");
+
+// Struct mixed var and non-var (if supported)
+struct Mixed { var a, b; c }
+var mx = Mixed(1, 2, 3);
+assert(mx.a == 1, "struct mixed a");
+assert(mx.b == 2, "struct mixed b");
+assert(mx.c == 3, "struct mixed c");
+
+// Struct field mutation
+struct Mutable { val }
+var m = Mutable(0);
+m.val = 100;
+assert(m.val == 100, "struct mutation");
+
+// Struct as function parameter
+def getVal(s) { return s.val; }
+assert(getVal(m) == 100, "struct as param");
+
+// Struct returned from function
+struct Pt { a, b }
+def makePoint(x, y)
+{
+    return Pt(x, y);
+}
+var pt = makePoint(3, 7);
+assert(pt.a == 3, "struct from function a");
+assert(pt.b == 7, "struct from function b");
+
+// ══════════════════════════════════════════════
+// 2. Class edge cases
+// ══════════════════════════════════════════════
+
+// Minimal class: no fields, no init
+class Empty
+{
+    def hello() { return "hi"; }
+}
+var e = Empty();
+assert(e.hello() == "hi", "minimal class method");
+
+// Class with default field values
+class WithDefaults
+{
+    var x = 10;
+    var name = "default";
+    var flag = true;
+
+    def init() {}
+}
+var wd = WithDefaults();
+assert(wd.x == 10, "class default int");
+assert(wd.name == "default", "class default string");
+assert(wd.flag == true, "class default bool");
+
+// Class method calling other method
+class Calc
+{
+    var val;
+
+    def init(v) { self.val = v; }
+
+    def double() { return self.val * 2; }
+
+    def quadruple() { return self.double() * 2; }
+}
+var calc = Calc(5);
+assert(calc.double() == 10, "class method double");
+assert(calc.quadruple() == 20, "class method calls method");
+
+// Class with multiple methods
+class Multi
+{
+    var x;
+    def init(x) { self.x = x; }
+    def a() { return self.x + 1; }
+    def b() { return self.x + 2; }
+    def c() { return self.x + 3; }
+}
+var mu = Multi(10);
+assert(mu.a() == 11, "multi method a");
+assert(mu.b() == 12, "multi method b");
+assert(mu.c() == 13, "multi method c");
+
+// Class instance in array
+class Item
+{
+    var id;
+    def init(id) { self.id = id; }
+}
+var items = [];
+for (var i = 0; i < 5; i += 1) {
+    items.push(Item(i));
+}
+assert(len(items) == 5, "class in array len");
+assert(items[0].id == 0, "class in array [0]");
+assert(items[4].id == 4, "class in array [4]");
+
+// Class inheritance: override + super
+class Base
+{
+    var v;
+    def init(v) { self.v = v; }
+    def get() { return self.v; }
+}
+class Derived : Base
+{
+    def init(v) { super.init(v * 2); }
+    def get() { return super.get() + 1; }
+}
+var d = Derived(5);
+assert(d.v == 10, "inheritance field via super.init");
+assert(d.get() == 11, "inheritance super.get + 1");
+
+// ══════════════════════════════════════════════
+// 3. Var declaration edge cases
+// ══════════════════════════════════════════════
+
+// var with no initializer (should be nil)
+var uninit;
+assert(uninit == nil, "var without init is nil");
+
+// var with expression initializer
+var computed = 2 + 3 * 4;
+assert(computed == 14, "var with expression");
+
+// var with function call initializer
+def makeVal() { return 99; }
+var fromFunc = makeVal();
+assert(fromFunc == 99, "var from function call");
+
+// Multiple var declarations in sequence
+var a1 = 1;
+var a2 = 2;
+var a3 = 3;
+assert(a1 + a2 + a3 == 6, "sequential var decls");
+
+// var shadowing in block
+var shadow = "outer";
+{
+    var shadow = "inner";
+    assert(shadow == "inner", "shadow inner");
+}
+assert(shadow == "outer", "shadow outer restored");
+
+// var in nested blocks
+var deep = 0;
+{
+    var x = 1;
+    {
+        var y = 2;
+        {
+            var z = 3;
+            deep = x + y + z;
+        }
+    }
+}
+assert(deep == 6, "nested block vars");
+
+// ══════════════════════════════════════════════
+// 4. Scoping with loops and functions
+// ══════════════════════════════════════════════
+
+// for loop variable scoping
+var before_loop = 0;
+for (var i = 0; i < 3; i += 1) {
+    before_loop += 1;
+}
+assert(before_loop == 3, "for loop var scope");
+
+// while with block-scoped var
+var total = 0;
+var idx = 0;
+while (idx < 3) {
+    var temp = idx * 10;
+    total += temp;
+    idx += 1;
+}
+assert(total == 30, "while block scoped var");
+
+// Function returning closure over local
+def makeCounter()
+{
+    var n = 0;
+    def inc() {
+        n += 1;
+        return n;
+    }
+    return inc;
+}
+var counter = makeCounter();
+assert(counter() == 1, "closure counter 1");
+assert(counter() == 2, "closure counter 2");
+assert(counter() == 3, "closure counter 3");
+
+// Two closures sharing same upvalue
+def makeAccum()
+{
+    var n = 0;
+    def add(x) { n += x; return n; }
+    def get() { return n; }
+    return [add, get];
+}
+var accum = makeAccum();
+var addFn = accum[0];
+var getFn = accum[1];
+addFn(10);
+addFn(20);
+assert(getFn() == 30, "closures share upvalue");
+
+// ══════════════════════════════════════════════
+// 5. Complex expressions as edge cases
+// ══════════════════════════════════════════════
+
+// Chained method calls
+class Builder
+{
+    var parts;
+
+    def init() { self.parts = []; }
+
+    def add(p)
+    {
+        self.parts.push(p);
+        return self;
+    }
+
+    def count() { return len(self.parts); }
+}
+var builder = Builder();
+builder.add(1).add(2).add(3);
+assert(builder.count() == 3, "chained method calls");
+
+// Ternary-like using and/or
+var val = false || "fallback";
+assert(val == "fallback", "or as fallback");
+
+var val2 = "truthy" && "second";
+assert(val2 == "second", "and returns second");
+
+// Struct nested in struct
+struct Outer { inner }
+struct Inner { value }
+var nested = Outer(Inner(42));
+assert(nested.inner.value == 42, "nested struct access");
+
+// ══════════════════════════════════════════════
+// 6. While loop inside class/function combos
+// ══════════════════════════════════════════════
+
+class Looper
+{
+    var limit;
+
+    def init(limit) { self.limit = limit; }
+
+    def sum()
+    {
+        var s = 0;
+        var i = 1;
+        while (i <= self.limit) {
+            s += i;
+            i += 1;
+        }
+        return s;
+    }
+
+    def collect()
+    {
+        var arr = [];
+        for (var i = 0; i < self.limit; i += 1) {
+            arr.push(i);
+        }
+        return arr;
+    }
+}
+var looper = Looper(10);
+assert(looper.sum() == 55, "while inside class method");
+assert(len(looper.collect()) == 10, "for inside class method");
+
+// Function with loop and early return
+def findFirst(arr, target)
+{
+    var idx = 0;
+    while (idx < len(arr)) {
+        if (arr[idx] == target) return idx;
+        idx += 1;
+    }
+    return -1;
+}
+assert(findFirst([5, 10, 15, 20], 15) == 2, "loop early return found");
+assert(findFirst([5, 10, 15, 20], 99) == -1, "loop early return not found");
+
+// Recursive function
+def fib(n)
+{
+    if (n <= 1) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+assert(fib(10) == 55, "recursive fibonacci");
+
+print(f"test_parser_edge_cases: {passed} passed, {failed} failed");

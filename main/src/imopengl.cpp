@@ -570,6 +570,123 @@ namespace SDLBindings
         return 0;
     }
 
+    // =====================================================
+    // BLEND / STATE FUNCTIONS (Modern)
+    // =====================================================
+
+    int native_glBlendFuncSeparate(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 4)
+        {
+            Error("glBlendFuncSeparate expects 4 arguments (srcRGB, dstRGB, srcAlpha, dstAlpha)");
+            return 0;
+        }
+        glBlendFuncSeparate((GLenum)args[0].asNumber(), (GLenum)args[1].asNumber(),
+                            (GLenum)args[2].asNumber(), (GLenum)args[3].asNumber());
+        return 0;
+    }
+
+    int native_glBlendEquation(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 1)
+        {
+            Error("glBlendEquation expects 1 argument");
+            return 0;
+        }
+        glBlendEquation((GLenum)args[0].asNumber());
+        return 0;
+    }
+
+    int native_glBlendEquationSeparate(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 2)
+        {
+            Error("glBlendEquationSeparate expects 2 arguments (modeRGB, modeAlpha)");
+            return 0;
+        }
+        glBlendEquationSeparate((GLenum)args[0].asNumber(), (GLenum)args[1].asNumber());
+        return 0;
+    }
+
+    int native_glColorMask(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 4)
+        {
+            Error("glColorMask expects 4 arguments (r, g, b, a)");
+            return 0;
+        }
+        glColorMask(args[0].asBool() ? GL_TRUE : GL_FALSE,
+                     args[1].asBool() ? GL_TRUE : GL_FALSE,
+                     args[2].asBool() ? GL_TRUE : GL_FALSE,
+                     args[3].asBool() ? GL_TRUE : GL_FALSE);
+        return 0;
+    }
+
+    int native_glStencilFuncSeparate(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 4)
+        {
+            Error("glStencilFuncSeparate expects 4 arguments (face, func, ref, mask)");
+            return 0;
+        }
+        glStencilFuncSeparate((GLenum)args[0].asNumber(), (GLenum)args[1].asNumber(),
+                              (GLint)args[2].asNumber(), (GLuint)args[3].asNumber());
+        return 0;
+    }
+
+    int native_glStencilOpSeparate(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 4)
+        {
+            Error("glStencilOpSeparate expects 4 arguments (face, sfail, dpfail, dppass)");
+            return 0;
+        }
+        glStencilOpSeparate((GLenum)args[0].asNumber(), (GLenum)args[1].asNumber(),
+                            (GLenum)args[2].asNumber(), (GLenum)args[3].asNumber());
+        return 0;
+    }
+
+    int native_glStencilMaskSeparate(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 2)
+        {
+            Error("glStencilMaskSeparate expects 2 arguments (face, mask)");
+            return 0;
+        }
+        glStencilMaskSeparate((GLenum)args[0].asNumber(), (GLuint)args[1].asNumber());
+        return 0;
+    }
+
+    int native_glPolygonOffset(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 2)
+        {
+            Error("glPolygonOffset expects 2 arguments (factor, units)");
+            return 0;
+        }
+        glPolygonOffset((GLfloat)args[0].asNumber(), (GLfloat)args[1].asNumber());
+        return 0;
+    }
+
+    int native_glSampleCoverage(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 2)
+        {
+            Error("glSampleCoverage expects 2 arguments (value, invert)");
+            return 0;
+        }
+        glSampleCoverage((GLfloat)args[0].asNumber(), args[1].asBool() ? GL_TRUE : GL_FALSE);
+        return 0;
+    }
 
 
     void register_opengl(ModuleBuilder &module)
@@ -600,6 +717,15 @@ namespace SDLBindings
             .addFunction("glGetIntegerv", native_glGetIntegerv, 1)
             .addFunction("glFlush", native_glFlush, 0)
             .addFunction("glFinish", native_glFinish, 0)
+            .addFunction("glBlendFuncSeparate", native_glBlendFuncSeparate, 4)
+            .addFunction("glBlendEquation", native_glBlendEquation, 1)
+            .addFunction("glBlendEquationSeparate", native_glBlendEquationSeparate, 2)
+            .addFunction("glColorMask", native_glColorMask, 4)
+            .addFunction("glStencilFuncSeparate", native_glStencilFuncSeparate, 4)
+            .addFunction("glStencilOpSeparate", native_glStencilOpSeparate, 4)
+            .addFunction("glStencilMaskSeparate", native_glStencilMaskSeparate, 2)
+            .addFunction("glPolygonOffset", native_glPolygonOffset, 2)
+            .addFunction("glSampleCoverage", native_glSampleCoverage, 2)
 
             // =============================================================
             // IMMEDIATE MODE (OpenGL 1.x)
@@ -656,6 +782,14 @@ namespace SDLBindings
             .addInt("GL_TEXTURE_2D", GL_TEXTURE_2D)
             .addInt("GL_LINE_SMOOTH", GL_LINE_SMOOTH)
             .addInt("GL_POINT_SMOOTH", GL_POINT_SMOOTH)
+            .addInt("GL_POLYGON_OFFSET_FILL", GL_POLYGON_OFFSET_FILL)
+            .addInt("GL_POLYGON_OFFSET_LINE", GL_POLYGON_OFFSET_LINE)
+            .addInt("GL_POLYGON_OFFSET_POINT", GL_POLYGON_OFFSET_POINT)
+            .addInt("GL_MULTISAMPLE", GL_MULTISAMPLE)
+            .addInt("GL_SAMPLE_ALPHA_TO_COVERAGE", GL_SAMPLE_ALPHA_TO_COVERAGE)
+            .addInt("GL_SAMPLE_COVERAGE", GL_SAMPLE_COVERAGE)
+            .addInt("GL_PROGRAM_POINT_SIZE", GL_PROGRAM_POINT_SIZE)
+            .addInt("GL_POINT_SPRITE", GL_POINT_SPRITE)
 
             // =============================================================
             // GL BLEND FUNCTIONS
@@ -670,6 +804,15 @@ namespace SDLBindings
             .addInt("GL_ONE_MINUS_DST_ALPHA", GL_ONE_MINUS_DST_ALPHA)
             .addInt("GL_DST_COLOR", GL_DST_COLOR)
             .addInt("GL_ONE_MINUS_DST_COLOR", GL_ONE_MINUS_DST_COLOR)
+
+            // =============================================================
+            // GL BLEND EQUATIONS
+            // =============================================================
+            .addInt("GL_FUNC_ADD", GL_FUNC_ADD)
+            .addInt("GL_FUNC_SUBTRACT", GL_FUNC_SUBTRACT)
+            .addInt("GL_FUNC_REVERSE_SUBTRACT", GL_FUNC_REVERSE_SUBTRACT)
+            .addInt("GL_MIN", GL_MIN)
+            .addInt("GL_MAX", GL_MAX)
 
             // =============================================================
             // GL DEPTH FUNCTIONS
@@ -743,7 +886,12 @@ namespace SDLBindings
             // GL BOOLEAN
             // =============================================================
             .addByte("GL_TRUE", GL_TRUE)
-            .addByte("GL_FALSE", GL_FALSE);
+            .addByte("GL_FALSE", GL_FALSE)
+
+            // =============================================================
+            // GL MISC
+            // =============================================================
+            .addInt("GL_NONE", GL_NONE);
 
         // Separate registration blocks (modular organization)
         register_opengl_legacy(module);

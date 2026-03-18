@@ -1,0 +1,10 @@
+// BAD: nested unclosed braces
+{
+    {
+        {
+            var x = 1;
+
+while (true) {
+    break;
+}
+print("should not reach here");

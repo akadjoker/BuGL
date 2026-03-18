@@ -1,0 +1,18 @@
+// BAD: class with method that has unclosed brace, then while loop
+class Broken
+{
+    var x;
+
+    def init(x) {
+        self.x = x;
+    // missing } for init
+
+    def other() {
+        return 1;
+    }
+}
+
+while (true) {
+    break;
+}
+print("should not reach here");

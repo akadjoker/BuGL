@@ -1,0 +1,209 @@
+// ================================================================
+// lib_camera_orbit.bu — Reusable Orbit Camera (third person / editor)
+//
+// Usage:
+//   import "lib_camera_orbit.bu";
+//   var cam = CameraOrbit(0.0, 1.0, 0.0, 15.0);  // target xyz + distance
+//   // in your loop:
+//   cam.update(dt);
+//   var view = cam.getViewMatrix();
+//   var proj = cam.getProjectionMatrix(aspect, fov, near, far);
+//
+// Controls:
+//   Arrow keys / mouse drag to orbit
+//   W/S or scroll to zoom
+//   Middle mouse drag to pan target
+// ================================================================
+
+import math;
+using math;
+import GLM;
+using GLM;
+
+struct CameraOrbit
+{
+    var targetX;
+    var targetY;
+    var targetZ;
+    var distance;
+    var yaw;
+    var pitch;
+    var minPitch;
+    var maxPitch;
+    var minDist;
+    var maxDist;
+    var orbitSpeed;
+    var zoomSpeed;
+    var panSpeed;
+    var sensitivity;
+    var smoothing;    // 0 = instant, 1 = max smooth
+    var _curYaw;
+    var _curPitch;
+    var _curDist;
+    var _curTx;
+    var _curTy;
+    var _curTz;
+    var _inited;
+
+    def init(tx, ty, tz, dist)
+    {
+        this.targetX = tx;
+        this.targetY = ty;
+        this.targetZ = tz;
+        this.distance = dist;
+        this.yaw = 0.0;
+        this.pitch = -25.0;
+        this.minPitch = -85.0;
+        this.maxPitch = 85.0;
+        this.minDist = 1.0;
+        this.maxDist = 200.0;
+        this.orbitSpeed = 65.0;
+        this.zoomSpeed = 14.0;
+        this.panSpeed = 5.0;
+        this.sensitivity = 0.25;
+        this.smoothing = 0.08;
+        this._curYaw = this.yaw;
+        this._curPitch = this.pitch;
+        this._curDist = this.distance;
+        this._curTx = tx;
+        this._curTy = ty;
+        this._curTz = tz;
+        this._inited = false;
+    }
+
+    def setTarget(tx, ty, tz)
+    {
+        this.targetX = tx;
+        this.targetY = ty;
+        this.targetZ = tz;
+    }
+
+    def setAngles(yawDeg, pitchDeg)
+    {
+        this.yaw = yawDeg;
+        this.pitch = pitchDeg;
+        if (this.pitch < this.minPitch) this.pitch = this.minPitch;
+        if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
+    }
+
+    def setDistance(d)
+    {
+        this.distance = d;
+        if (this.distance < this.minDist) this.distance = this.minDist;
+        if (this.distance > this.maxDist) this.distance = this.maxDist;
+    }
+
+    def update(dt)
+    {
+        var turn = this.orbitSpeed * dt;
+        var zoom = this.zoomSpeed * dt;
+
+        // Keyboard orbit
+        if (IsKeyDown(KEY_LEFT))  this.yaw = this.yaw - turn;
+        if (IsKeyDown(KEY_RIGHT)) this.yaw = this.yaw + turn;
+        if (IsKeyDown(KEY_UP))    this.pitch = this.pitch + turn;
+        if (IsKeyDown(KEY_DOWN))  this.pitch = this.pitch - turn;
+
+        // Keyboard zoom
+        if (IsKeyDown(KEY_W)) this.distance = this.distance - zoom;
+        if (IsKeyDown(KEY_S)) this.distance = this.distance + zoom;
+
+        // Mouse drag orbit (right button)
+        if (IsMouseDown(1))
+        {
+            var (dx, dy) = GetMouseDelta();
+            this.yaw = this.yaw + dx * this.sensitivity;
+            this.pitch = this.pitch - dy * this.sensitivity;
+        }
+
+        // Mouse drag pan (middle button)
+        if (IsMouseDown(2))
+        {
+            var deg2rad = 0.017453292519943295;
+            var yr = this.yaw * deg2rad;
+            var (dx, dy) = GetMouseDelta();
+            var panMul = this.panSpeed * dt;
+            // right vector (horizontal)
+            var rx = sin(yr);
+            var rz = -cos(yr);
+            this.targetX = this.targetX - rx * dx * panMul;
+            this.targetZ = this.targetZ - rz * dx * panMul;
+            this.targetY = this.targetY + dy * panMul;
+        }
+
+        // Scroll zoom (if available via GetMouseWheel)
+        // var scroll = GetMouseWheel();
+        // if (scroll != 0) this.distance = this.distance - scroll * this.zoomSpeed * 0.5;
+
+        // Clamp
+        if (this.pitch < this.minPitch) this.pitch = this.minPitch;
+        if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
+        if (this.distance < this.minDist) this.distance = this.minDist;
+        if (this.distance > this.maxDist) this.distance = this.maxDist;
+
+        // Smooth interpolation
+        if (!this._inited)
+        {
+            this._curYaw = this.yaw;
+            this._curPitch = this.pitch;
+            this._curDist = this.distance;
+            this._curTx = this.targetX;
+            this._curTy = this.targetY;
+            this._curTz = this.targetZ;
+            this._inited = true;
+        }
+        else
+        {
+            var t = 1.0 - this.smoothing;
+            this._curYaw   = this._curYaw   + (this.yaw - this._curYaw) * t;
+            this._curPitch = this._curPitch + (this.pitch - this._curPitch) * t;
+            this._curDist  = this._curDist  + (this.distance - this._curDist) * t;
+            this._curTx    = this._curTx    + (this.targetX - this._curTx) * t;
+            this._curTy    = this._curTy    + (this.targetY - this._curTy) * t;
+            this._curTz    = this._curTz    + (this.targetZ - this._curTz) * t;
+        }
+    }
+
+    def getViewMatrix()
+    {
+        var deg2rad = 0.017453292519943295;
+        var yr = this._curYaw * deg2rad;
+        var pr = this._curPitch * deg2rad;
+        var cp = cos(pr);
+        var camX = sin(yr) * cp * this._curDist + this._curTx;
+        var camY = sin(pr) * this._curDist + this._curTy;
+        var camZ = cos(yr) * cp * this._curDist + this._curTz;
+
+        var eye = Vector3(camX, camY, camZ);
+        var tgt = Vector3(this._curTx, this._curTy, this._curTz);
+        var up  = Vector3(0.0, 1.0, 0.0);
+        return MatrixLookAt(eye, tgt, up);
+    }
+
+    def getProjectionMatrix(aspect, fov, near, far)
+    {
+        return MatrixPerspective(fov, aspect, near, far);
+    }
+
+    def getEye()
+    {
+        var deg2rad = 0.017453292519943295;
+        var yr = this._curYaw * deg2rad;
+        var pr = this._curPitch * deg2rad;
+        var cp = cos(pr);
+        var camX = sin(yr) * cp * this._curDist + this._curTx;
+        var camY = sin(pr) * this._curDist + this._curTy;
+        var camZ = cos(yr) * cp * this._curDist + this._curTz;
+        return Vector3(camX, camY, camZ);
+    }
+
+    def getTarget()
+    {
+        return Vector3(this._curTx, this._curTy, this._curTz);
+    }
+
+    def getDistance()
+    {
+        return this._curDist;
+    }
+}
