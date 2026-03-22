@@ -344,20 +344,16 @@ bugl.exe scripts/demo_jolt_tank_csm_particles.bu
 | ![micropather pathfinding](gif/pathfind.gif) | ![opensteer](gif/opensteer.gif) | ![assimp](gif/assimp.gif) |
 |               Grid pathfinding               |        Steering behaviors       |   Model import pipeline   |
 
-|             B3D Collision             |           IQM Animation           |             Q3 BSP Map             |
+|             B3D Collision             |           Water Shader            |             Q3 BSP Map             |
 | :-----------------------------------: | :-------------------------------: | :--------------------------------: |
-| ![b3d collision](gif/b3d_collide.gif) | ![iqm animation](gif/iqm_anim.gif)|      ![q3 bsp map](gif/q3bsp.gif)  |
-|  Blitz3D models with ellipsoid slide  | CPU skinning and skeletal scaling | Quake 3 levels with collision trace|
+| ![b3d collision](gif/collision.gif)   | ![water shader](gif/water.gif)    |     ![q3 bsp map](gif/bsp.gif)     |
+|  Blitz3D models with ellipsoid slide  |      Refletion/Refraction         | Quake 3 levels with collision trace|
 
-|             MD3 Animation             |           MD2 Animation           |            Water Shader            |
+|             MD3 Animation             |           MD2 Animation           |          IQM Animation             |
 | :-----------------------------------: | :-------------------------------: | :--------------------------------: |
-|       ![md3 anim](gif/md3.gif)        |       ![md2 anim](gif/md2.gif)    |      ![water shader](gif/water.gif)|
-|      Quake 3 character animation      |      Quake 2 character animation  |   Interactive water rendering      |
+|       ![md3 anim](gif/md3.gif)        |     ![md2 anim](gif/md2.gif)      |  [iqm animation](gif/iqm.gif)|     |
+|      Quake 3 character animation      |      Quake 2 character animation  |   CPU skinning and Animation       |
 
-|             B2D Animation             |                                   |                                    |
-| :-----------------------------------: | :-------------------------------: | :--------------------------------: |
-|    ![b2d anim](gif/b2d_anim.gif)      |                                   |                                    |
-|        2D animation system            |                                   |                                    |
 
 
 ---
