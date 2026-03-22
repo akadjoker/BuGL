@@ -2,17 +2,6 @@ project(BuBox2d)
 cmake_policy(SET CMP0072 NEW)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ")
-
-if (WIN32)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}   -D_CRT_SECURE_NO_WARNINGS")
-    if (MSVC)
-        if(CMAKE_BUILD_TYPE MATCHES Debug)
-            add_compile_options(/RTC1 /Od /Zi)
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fsanitize=address")
-        endif()
-    endif()
-endif()
 
  
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin/plugins)
@@ -39,6 +28,10 @@ target_include_directories(bu_box2d PRIVATE include src ${CMAKE_SOURCE_DIR}/libb
 # Plugin-specific compile definitions
 target_compile_definitions(bu_box2d PRIVATE BU_PLUGIN_BUILD)
 
+if (WIN32)
+    target_compile_definitions(bu_box2d PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     if (UNIX)
         target_compile_options(bu_box2d PRIVATE
@@ -58,6 +51,9 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
             -fsanitize=leak
             -g
         )
+    elseif(MSVC)
+        target_compile_options(bu_box2d PRIVATE /RTC1 /Od /Zi /fsanitize=address)
+        target_link_options(bu_box2d PRIVATE /fsanitize=address)
     endif()
 elseif(CMAKE_BUILD_TYPE MATCHES Release)
     target_compile_options(bu_box2d PRIVATE -O3 -DNDEBUG -fPIC)

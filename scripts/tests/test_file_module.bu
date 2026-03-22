@@ -1,0 +1,86 @@
+// ============================================
+// test_file_module.bu — file module numeric I/O and empty-file edge cases
+// ============================================
+
+import file;
+import fs;
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+var path = "bugl_test_file_module.bin";
+var emptyPath = "bugl_test_empty_file_module.bin";
+fs.remove(path);
+fs.remove(emptyPath);
+
+var fileId = file.open(path, "w");
+assert(fileId > 0, "open write");
+assert(file.write_byte(fileId, 65.0), "write_byte accepts number");
+assert(file.write_short(fileId, 1200.0), "write_short accepts number");
+assert(file.write_int(fileId, -7.0), "write_int accepts number");
+assert(file.write_uint(fileId, 4000000000), "write_uint");
+assert(file.write_float(fileId, 1.25), "write_float");
+assert(file.write_double(fileId, 2.5), "write_double");
+assert(file.write_bool(fileId, true), "write_bool");
+assert(file.write_string(fileId, "abc"), "write_string");
+assert(file.close(fileId), "close write");
+
+fileId = file.open(path, "r");
+assert(fileId > 0, "open read");
+assert(file.read_byte(fileId) == 65, "read_byte");
+assert(file.read_short(fileId) == 1200, "read_short");
+assert(file.read_int(fileId) == -7, "read_int");
+assert(file.read_uint(fileId) == 4000000000, "read_uint");
+assert(file.read_float(fileId) == 1.25, "read_float");
+assert(file.read_double(fileId) == 2.5, "read_double");
+assert(file.read_bool(fileId) == true, "read_bool");
+assert(file.read_string(fileId) == "abc", "read_string");
+assert(file.close(fileId), "close read");
+
+var chunk = @(4, TYPE_UINT8);
+chunk.writeByte(1);
+chunk.writeByte(2);
+chunk.writeByte(3);
+chunk.writeByte(4);
+
+fileId = file.open(path, "w");
+assert(file.write_buffer(fileId, chunk), "write_buffer");
+assert(file.close(fileId), "close buffer write");
+
+fileId = file.open(path, "r");
+var bytes = file.read_bytes(fileId, 4);
+assert(bytes.length() == 4, "read_bytes length");
+assert(bytes.readByte() == 1, "read_bytes value 0");
+assert(bytes.readByte() == 2, "read_bytes value 1");
+assert(bytes.readByte() == 3, "read_bytes value 2");
+assert(bytes.readByte() == 4, "read_bytes value 3");
+assert(file.close(fileId), "close bytes read");
+
+fileId = file.open(emptyPath, "w");
+assert(fileId > 0, "open empty write");
+assert(file.close(fileId), "close empty write");
+
+fileId = file.open(emptyPath, "r");
+assert(fileId > 0, "open empty read");
+assert(file.size(fileId) == 0, "empty size");
+assert(file.tell(fileId) == 0, "empty tell");
+assert(file.close(fileId), "close empty read");
+
+fs.remove(path);
+fs.remove(emptyPath);
+
+print(f"=== test_file_module: {passed}/{passed + failed} ===");
+if (failed > 0) {
+    print(f"FAILED: {failed} tests");
+    exit(1);
+}

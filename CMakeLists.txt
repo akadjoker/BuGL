@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 cmake_policy(SET CMP0072 NEW)
 
-project(bugl VERSION 2.0.0)
+project(bugl VERSION 2.5.1)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

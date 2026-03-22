@@ -28,6 +28,7 @@ uint16 ModuleDef::addFunction(const char *name, NativeFunction func, int arity)
      if (functionNames.get(nameStr, &existingId))
      {
          Warning("Function '%s' already exists in module '%s', replacing", name, this->name ? this->name->chars() : "<null>");
+         functions[existingId] = {func, arity};
          return existingId;
      }
  

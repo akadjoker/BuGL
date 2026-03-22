@@ -46,6 +46,9 @@ assert(f"len={len(arr)}" == "len=3", "f-string len call");
 // String comparison
 assert("abc" == "abc", "string eq");
 assert("abc" != "def", "string neq");
+assert(char(65) == "A", "char int to string");
+assert(str(char(65)) == "A", "str char stays string");
+assert(char("A") == "A", "char string roundtrip");
 
 // String repeat (via loop)
 var rep = "";

@@ -1017,6 +1017,10 @@ op_negate:
     {
         PUSH(makeInt(-a.asInt()));
     }
+    else if (a.isUInt())
+    {
+        PUSH(makeDouble(-(double)a.asUInt()));
+    }
     else if (a.isDouble())
     {
         PUSH(makeDouble(-a.asDouble()));
@@ -1026,7 +1030,7 @@ op_negate:
         PUSH(makeBool(!a.asBool()));
     } else if (a.isByte())
     {
-        PUSH(makeByte(-a.asByte()));
+        PUSH(makeInt(-a.asByte()));
     } else if (a.isFloat())
     {
         PUSH(makeFloat(-a.asFloat()));

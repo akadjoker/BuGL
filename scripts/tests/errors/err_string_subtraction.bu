@@ -1,0 +1,4 @@
+// Test: string subtraction should error cleanly
+// Expected: runtime error about type mismatch
+
+var a = "hello" - "world";

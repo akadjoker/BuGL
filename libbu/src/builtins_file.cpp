@@ -38,6 +38,17 @@ static FileBuffer *get_open_file(int id)
     return openFiles[id - 1];
 }
 
+static bool flush_file_buffer(FileBuffer *fb)
+{
+    if (!fb)
+        return false;
+
+    const size_t size = fb->data.size();
+    const void *bytes = (size > 0) ? (const void *)fb->data.data() : (const void *)"";
+    int written = OsFileWrite(fb->path.c_str(), bytes, size);
+    return written >= 0 && (size_t)written == size;
+}
+
 // ============================================
 // CLEANUP
 // ============================================
@@ -49,7 +60,7 @@ static void FileModuleCleanup()
         if (fb)
         {
             if (fb->modified && fb->mode != FileMode::READ)
-                OsFileWrite(fb->path.c_str(), fb->data.data(), fb->data.size());
+                flush_file_buffer(fb);
             delete fb;
         }
     }
@@ -111,22 +122,25 @@ int native_file_open(Interpreter *vm, int argCount, Value *args)
     fb->path = path;
     fb->cursor = 0;
     fb->mode = mode;
-    fb->modified = false;
+    fb->modified = (mode == FileMode::WRITE);
 
     if (mode == FileMode::READ || mode == FileMode::READ_WRITE)
     {
         int fileSize = OsFileSize(path);
 
-        if (fileSize > 0)
+        if (fileSize >= 0)
         {
-            fb->data.resize(fileSize);
-            int bytesRead = OsFileRead(path, fb->data.data(), fileSize);
+            if (fileSize > 0)
+            {
+                fb->data.resize(fileSize);
+            }
+            int bytesRead = (fileSize > 0) ? OsFileRead(path, fb->data.data(), fileSize) : 0;
 
             if (bytesRead < 0)
             {
                 delete fb;
                 vm->runtimeError("Failed to read file '%s'", path);
-                return 1;
+                return 0;
             }
 
             fb->data.resize(bytesRead);
@@ -172,8 +186,7 @@ int native_file_save(Interpreter *vm, int argCount, Value *args)
         return 1;
     }
 
-    int written = OsFileWrite(fb->path.c_str(), fb->data.data(), fb->data.size());
-    if (written < 0)
+    if (!flush_file_buffer(fb))
     {
         vm->push(vm->makeBool(false));
         return 1;
@@ -207,7 +220,7 @@ int native_file_close(Interpreter *vm, int argCount, Value *args)
 
     if (fb->modified && fb->mode != FileMode::READ)
     {
-        OsFileWrite(fb->path.c_str(), fb->data.data(), fb->data.size());
+        flush_file_buffer(fb);
     }
 
     delete fb;
@@ -223,7 +236,7 @@ int native_file_close(Interpreter *vm, int argCount, Value *args)
 
 int native_file_write_byte(Interpreter *vm, int argCount, Value *args)
 {
-    if (argCount < 2 || !args[0].isInt() || !args[1].isInt())
+    if (argCount < 2 || !args[0].isInt() || !args[1].isNumber())
     {
         vm->push(vm->makeBool(false));
         return 1;
@@ -248,7 +261,7 @@ int native_file_write_byte(Interpreter *vm, int argCount, Value *args)
     if (fb->cursor >= fb->data.size())
         fb->data.resize(fb->cursor + 1);
 
-    fb->data[fb->cursor++] = (uint8_t)args[1].asInt();
+    fb->data[fb->cursor++] = (uint8_t)args[1].asNumber();
     fb->modified = true;
 
     vm->push(vm->makeBool(true));
@@ -261,7 +274,7 @@ int native_file_write_byte(Interpreter *vm, int argCount, Value *args)
 
 int native_file_write_short(Interpreter *vm, int argCount, Value *args)
 {
-    if (argCount < 2 || !args[0].isInt() || !args[1].isInt())
+    if (argCount < 2 || !args[0].isInt() || !args[1].isNumber())
     {
         vm->push(vm->makeBool(false));
         return 1;
@@ -286,7 +299,7 @@ int native_file_write_short(Interpreter *vm, int argCount, Value *args)
     if (fb->cursor + sizeof(int16_t) > fb->data.size())
         fb->data.resize(fb->cursor + sizeof(int16_t));
 
-    int16_t value = (int16_t)args[1].asInt();
+    int16_t value = (int16_t)args[1].asNumber();
     memcpy(fb->data.data() + fb->cursor, &value, sizeof(int16_t));
     fb->cursor += sizeof(int16_t);
     fb->modified = true;
@@ -381,7 +394,7 @@ int native_file_write_uint(Interpreter *vm, int argCount, Value *args)
 
 int native_file_write_int(Interpreter *vm, int argCount, Value *args)
 {
-    if (argCount < 2 || !args[0].isInt() || !args[1].isInt())
+    if (argCount < 2 || !args[0].isInt() || !args[1].isNumber())
     {
         vm->push(vm->makeBool(false));
         return 1;
@@ -406,7 +419,7 @@ int native_file_write_int(Interpreter *vm, int argCount, Value *args)
     if (fb->cursor + sizeof(int32_t) > fb->data.size())
         fb->data.resize(fb->cursor + sizeof(int32_t));
 
-    int32_t value = args[1].asInt();
+    int32_t value = (int32_t)args[1].asNumber();
     memcpy(fb->data.data() + fb->cursor, &value, sizeof(int32_t));
     fb->cursor += sizeof(int32_t);
     fb->modified = true;
@@ -421,7 +434,7 @@ int native_file_write_int(Interpreter *vm, int argCount, Value *args)
 
 int native_file_write_float(Interpreter *vm, int argCount, Value *args)
 {
-    if (argCount < 2 || !args[0].isInt())
+    if (argCount < 2 || !args[0].isInt() || !args[1].isNumber())
     {
         vm->push(vm->makeBool(false));
         return 1;
@@ -461,7 +474,7 @@ int native_file_write_float(Interpreter *vm, int argCount, Value *args)
 
 int native_file_write_double(Interpreter *vm, int argCount, Value *args)
 {
-    if (argCount < 2 || !args[0].isInt())
+    if (argCount < 2 || !args[0].isInt() || !args[1].isNumber())
     {
         vm->push(vm->makeBool(false));
         return 1;

@@ -3,18 +3,6 @@ cmake_policy(SET CMP0072 NEW)
 
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ")
-
-if (WIN32)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}   -D_CRT_SECURE_NO_WARNINGS")
-    if (MSVC)
-        if(CMAKE_BUILD_TYPE MATCHES Debug)
-            add_compile_options(/RTC1 /Od /Zi)
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fsanitize=address")
-        endif()     
-    endif()
-
-endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
@@ -37,17 +25,19 @@ target_include_directories(main PUBLIC include src
     ${CMAKE_SOURCE_DIR}/main/src
 )
 if (WIN32)
-    target_compile_definitions(main PRIVATE WINGDIAPI=)
+    target_compile_definitions(main PRIVATE WINGDIAPI= _CRT_SECURE_NO_WARNINGS)
     if (NOT MSVC)
         target_compile_options(main PRIVATE -U_DLL)
     endif()
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-
-if (UNIX)
-target_compile_options(main PRIVATE -fsanitize=address -fsanitize=undefined -fsanitize=leak -g  -D_DEBUG -DVERBOSE)
-target_link_options(main PRIVATE -fsanitize=address -fsanitize=undefined -fsanitize=leak -g  -D_DEBUG) 
-endif()
+    if (UNIX)
+        target_compile_options(main PRIVATE -fsanitize=address -fsanitize=undefined -fsanitize=leak -g  -D_DEBUG -DVERBOSE)
+        target_link_options(main PRIVATE -fsanitize=address -fsanitize=undefined -fsanitize=leak -g  -D_DEBUG)
+    elseif(MSVC)
+        target_compile_options(main PRIVATE /RTC1 /Od /Zi /fsanitize=address)
+        target_link_options(main PRIVATE /fsanitize=address)
+    endif()
  
 elseif(CMAKE_BUILD_TYPE MATCHES Release)
     target_compile_options(main PRIVATE
@@ -67,7 +57,7 @@ elseif(CMAKE_BUILD_TYPE MATCHES Release)
     endif()
 endif()
 
-target_link_libraries(main PRIVATE miniz poly2tri ODE box2d bugl_audio libbu imgui SDL2::SDL2)
+target_link_libraries(main PRIVATE miniz poly2tri   bugl_audio libbu imgui SDL2::SDL2)
 
 if (WIN32)
     target_link_libraries(main PRIVATE opengl32)

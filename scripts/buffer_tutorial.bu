@@ -1,0 +1,115 @@
+// ==========================================
+// Tutorial: Trabalhando com Buffers em BuLang
+// ==========================================
+
+// Em BuLang, os tipos de Buffer mapeiam para a enumeração interna BufferType (0 a 6).
+// Vamos definir umas variáveis constantes para facilitar a legibilidade:
+var TYPE_UINT8  = 0; // Byte (8 bits)
+var TYPE_INT16  = 1; // Short (16 bits)
+var TYPE_UINT16 = 2; // UShort (16 bits)
+var TYPE_INT32  = 3; // Int (32 bits)
+var TYPE_UINT32 = 4; // UInt (32 bits)
+var TYPE_FLOAT  = 5; // Float (32 bits)
+var TYPE_DOUBLE = 6; // Double (64 bits)
+
+print("--- 1. Criar Buffers ---");
+
+// A forma nativa de criar buffers no BuLang usa a sintaxe de literal de buffer: @(tamanho, tipo)
+
+// Exemplo A: Criar um buffer de 10 bytes (UINT8)
+var buffer_bytes = @(10, TYPE_UINT8);
+print("Buffer de bytes criado. Tamanho:", len(buffer_bytes));
+
+// Exemplo B: Criar um buffer para armazenar 5 números Float
+var buffer_floats = @(5, TYPE_FLOAT);
+print("Buffer de floats criado. Tamanho:", len(buffer_floats));
+
+
+print("\n--- 2. Escrever e Ler Dados ---");
+
+// O BuLang fornece métodos integrados para preencher dados.
+// Vamos usar o buffer de floats criado acima:
+
+// Preenche todo o buffer com o valor 0.0 (útil para inicialização)
+buffer_floats.fill(0.0);
+
+// Verifica onde está o cursor (deverá estar em 0 após a criação ou fill)
+print("Posição atual do cursor:", buffer_floats.tell());
+
+// Escrevendo valores (o cursor avança automaticamente)
+buffer_floats.write_float(3.14);
+buffer_floats.write_float(2.71);
+buffer_floats.write_float(1.618);
+
+print("Posição do cursor após escritas:", buffer_floats.tell());
+print("Espaços restantes:", buffer_floats.remaining());
+
+// Para ler os dados, precisamos voltar o cursor ao início:
+buffer_floats.rewind(); 
+// Equivalente a fazer: buffer_floats.seek(0)
+
+print("Lendo os valores do buffer de floats:");
+print("Valor 1:", buffer_floats.read_float());
+print("Valor 2:", buffer_floats.read_float());
+print("Valor 3:", buffer_floats.read_float());
+
+
+print("\n--- 3. Misturar Tipos e Manipular Strings ---");
+
+// Um uso muito comum é criar um buffer de bytes (UINT8) genérico e 
+// escrever dados serializados de diferentes tipos (ex: pacotes de rede).
+var pacote = @(128, TYPE_UINT8);
+
+// Escrevemos uma string e alguns números
+pacote.write_string("BuLang");
+pacote.write_int(2026);
+pacote.write_double(99.99);
+pacote.write_byte(255);
+
+// Lemos o pacote
+pacote.rewind();
+
+var str_lida = pacote.read_string();
+var int_lido = pacote.read_int();
+var dbl_lido = pacote.read_double();
+var by_lido  = pacote.read_byte();
+
+print("Pacote lido com sucesso:");
+print("String:", str_lida);
+print("Int:", int_lido);
+print("Double:", dbl_lido);
+print("Byte:", by_lido);
+
+
+print("\n--- 4. Fatiamento (Slice) e Cópia ---");
+
+// Podes também fatiar um buffer para extrair uma porção específica
+// usando slice(inicio, fim)
+var sub_pacote = pacote.slice(0, 6); // Extrai os primeiros 6 bytes ("BuLang")
+print("Tamanho do slice extraído:", len(sub_pacote));
+
+// Também é possível salvar o buffer em disco diretamente se necessitares:
+// pacote.save("meu_pacote.bin");
+
+
+print("\n--- 5. Arrays Tipados (Typed Arrays) ---");
+
+// Além da sintaxe literal @(tamanho, tipo), o BuLang suporta instâncias 
+// nativas como ByteArray e Float32Array para manipulação aleatória usando get() e set().
+
+var bytes_arr = ByteArray(5); // Buffer de 5 bytes
+bytes_arr.set(0, 255);
+bytes_arr.set(1, 128);
+bytes_arr.set(2, 64);
+print("ByteArray criado. Tamanho:", len(bytes_arr));
+print("Valor no índice 0:", bytes_arr.get(0));
+print("Valor no índice 1:", bytes_arr.get(1));
+
+var floats_arr = Float32Array(3); // Buffer de 3 floats (32-bit)
+floats_arr.set(0, 3.1415);
+floats_arr.set(1, 2.7182);
+floats_arr.set(2, 1.6180);
+print("\nFloat32Array criado. Tamanho:", len(floats_arr));
+print("Valor no índice 0:", floats_arr.get(0));
+print("Valor no índice 1:", floats_arr.get(1));
+print("Valor no índice 2:", floats_arr.get(2));

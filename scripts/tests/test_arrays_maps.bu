@@ -62,4 +62,18 @@ assert(m["version"] == 2, "map int val");
 m["year"] = 2026;
 assert(m["year"] == 2026, "map set bracket");
 
+// Typed arrays
+var f32 = Float32Array([1, 2.5]);
+assert(f32.length() == 2, "float32 length");
+assert(f32.get(1) == 2.5, "float32 get");
+f32.set(0, 3.5);
+assert(f32.get(0) == 3.5, "float32 set");
+
+var u8 = Uint8Array([65, 66]);
+u8.add([67, 68]);
+assert(u8.length() == 4, "uint8 add array");
+var raw = u8.toBuffer();
+assert(raw.readByte() == 65, "uint8 toBuffer read 0");
+assert(raw.readByte() == 66, "uint8 toBuffer read 1");
+
 print(f"test_arrays_maps: {passed} passed, {failed} failed");

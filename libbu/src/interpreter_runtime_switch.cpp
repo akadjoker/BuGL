@@ -728,12 +728,14 @@ ProcessResult Interpreter::run_process(Process *process)
             Value a = POP();
             if (a.isInt())
                 PUSH(makeInt(-a.asInt()));
+            else if (a.isUInt())
+                PUSH(makeDouble(-(double)a.asUInt()));
             else if (a.isDouble())
                 PUSH(makeDouble(-a.asDouble()));
             else if (a.isBool())
                 PUSH(makeBool(!a.asBool()));
             else if (a.isByte())
-                PUSH(makeByte(-a.asByte()));
+                PUSH(makeInt(-a.asByte()));
             else if (a.isFloat())
                 PUSH(makeFloat(-a.asFloat()));
             else

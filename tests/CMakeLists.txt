@@ -44,6 +44,7 @@ set(BULANG_LANG_TESTS
     test_operators
     test_control_flow
     test_functions
+    test_file_module
     test_strings
     test_arrays_maps
     test_classes
@@ -54,6 +55,7 @@ set(BULANG_LANG_TESTS
     test_parser_edge_cases
     test_throw_stress
     test_stress_runtime
+    test_buffer_runtime_edges
     test_closures_stress
     test_class_stress
     test_int_edge_cases
@@ -107,6 +109,7 @@ set(BULANG_ERROR_TESTS
     err_nil_method
     err_nil_property
     err_nil_arithmetic
+    err_string_subtraction
     err_array_map_arithmetic
     err_try_depth_overflow
     err_throw_no_try

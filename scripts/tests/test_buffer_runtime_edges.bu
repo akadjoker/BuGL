@@ -1,0 +1,54 @@
+// ============================================
+// test_buffer_runtime_edges.bu — buffer reads forced through expressions
+// ============================================
+
+var passed = 0;
+var failed = 0;
+
+def assert(cond, msg)
+{
+    if (cond) {
+        passed += 1;
+    } else {
+        failed += 1;
+        print(f"FAIL: {msg}");
+    }
+}
+
+var buf = @(32, TYPE_UINT8);
+buf.writeByte(5);            // offset 0
+buf.writeShort(1200);        // offset 1
+buf.writeUShort(50000);      // offset 3
+buf.writeInt(-123456);       // offset 5
+buf.writeUInt(4000000000);   // offset 9
+buf.writeFloat(1.25);        // offset 13
+buf.writeDouble(2.5);        // offset 17
+buf.rewind();
+
+assert(-buf.readByte() == -5, "negate inline readByte");
+assert(buf.readShort() + 34 == 1234, "readShort in add expr");
+assert(buf.readUShort() - 100 == 49900, "readUShort in subtract expr");
+assert(buf.readInt() / 2 == -61728, "readInt in divide expr");
+assert(buf.readUInt() - 1 == 3999999999, "readUInt in subtract expr");
+assert(buf.readFloat() * 2 == 2.5, "readFloat in multiply expr");
+assert(buf.readDouble() + 0.5 == 3.0, "readDouble in add expr");
+
+buf.seek(0);
+var byte_value = buf.readByte();
+assert(-byte_value == -5, "negate byte variable");
+
+buf.seek(9);
+assert(-buf.readUInt() < 0, "negate inline readUInt");
+
+buf.seek(13);
+assert(-buf.readFloat() == -1.25, "negate inline readFloat");
+
+var large_unsigned = 4294967295;
+assert(-large_unsigned < 0, "negate uint is negative");
+assert(-large_unsigned == 0 - large_unsigned, "negate uint matches subtraction");
+
+print(f"=== test_buffer_runtime_edges: {passed}/{passed + failed} ===");
+if (failed > 0) {
+    print(f"FAILED: {failed} tests");
+    exit(1);
+}
