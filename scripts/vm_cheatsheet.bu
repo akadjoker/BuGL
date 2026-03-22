@@ -93,3 +93,4 @@ print("NOTA: string.split() parece inconsistente nesta build (confirmar antes de
 print("NOTA: map.remove() marca nil em vez de apagar entrada.");
 
 print("=== Fim Cheatsheet ===");
+

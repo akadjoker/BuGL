@@ -69,7 +69,10 @@ public:
     String *lower(String *src);
     String *substring(String *src, uint32 start, uint32 end);
     String *replace(String *src, const char *oldStr, const char *newStr);
-    
+    int find(String *str, String *substr, int startIndex = 0);
+    int find(String *str, const char *substr, int startIndex = 0);
+    int rfind(String *str, String *substr, int startIndex = -1);
+    int rfind(String *str, const char *substr, int startIndex = -1);
 
     String *to_string(Value v);
 

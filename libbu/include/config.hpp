@@ -43,18 +43,61 @@
 #error "USE_COMPUTED_GOTO must be 0 or 1"
 #endif
 
+#ifndef BU_ENABLE_SOCKETS
 #define BU_ENABLE_SOCKETS 1
+#endif
+
+#ifndef BU_ENABLE_FILE_IO
 #define BU_ENABLE_FILE_IO 1
+#endif
+
+#ifndef BU_ENABLE_MATH
 #define BU_ENABLE_MATH 1
+#endif
+
+#ifndef BU_ENABLE_TIME
 #define BU_ENABLE_TIME 1
+#endif
+
+#ifndef BU_ENABLE_PATH
 #define BU_ENABLE_PATH 1
+#endif
+
+#ifndef BU_ENABLE_OS
 #define BU_ENABLE_OS 1
+#endif
+
+#ifndef BU_ENABLE_OS_EXEC
+#define BU_ENABLE_OS_EXEC BU_ENABLE_OS
+#endif
+
+#ifndef BU_ENABLE_OS_PROCESS
+#define BU_ENABLE_OS_PROCESS BU_ENABLE_OS
+#endif
+
+#ifndef BU_ENABLE_JSON
 #define BU_ENABLE_JSON 1
+#endif
+
+#ifndef BU_ENABLE_REGEX
 #define BU_ENABLE_REGEX 1
+#endif
+
+#ifndef BU_ENABLE_ZIP
 #define BU_ENABLE_ZIP 1
+#endif
+
+#ifndef BU_ENABLE_CRYPTO
 #define BU_ENABLE_CRYPTO 1
+#endif
+
+#ifndef BU_ENABLE_NN
 #define BU_ENABLE_NN 1
+#endif
+
+#ifndef BU_ENABLE_MINIDNN
 #define BU_ENABLE_MINIDNN 1
+#endif
 
 #ifndef BU_ENABLE_BYTECODE_DUMP
 #if defined(OS_LINUX) || defined(OS_WINDOWS)

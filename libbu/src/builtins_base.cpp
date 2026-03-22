@@ -7,281 +7,281 @@
 
 namespace
 {
-struct GcProbeHandle
-{
-  int id;
-  bool persistent;
-  bool payloadAlive;
-  int *payload;
-};
-
-struct GcProbeStats
-{
-  int ctorCount{0};
-  int dtorCount{0};
-  int manualPayloadDestroyCount{0};
-  int autoPayloadDestroyCount{0};
-};
-
-GcProbeStats g_gcProbePersistentStats;
-GcProbeStats g_gcProbeEphemeralStats;
-
-void resetGcProbeStats()
-{
-  g_gcProbePersistentStats = {};
-  g_gcProbeEphemeralStats = {};
-}
-
-GcProbeStats &gc_probe_stats(bool persistent)
-{
-  return persistent ? g_gcProbePersistentStats : g_gcProbeEphemeralStats;
-}
-
-bool gc_probe_release_payload(GcProbeHandle *handle, bool manual)
-{
-  if (!handle || !handle->payloadAlive || handle->payload == nullptr)
-    return false;
-
-  GcProbeStats &stats = gc_probe_stats(handle->persistent);
-  delete handle->payload;
-  handle->payload = nullptr;
-  handle->payloadAlive = false;
-
-  if (manual)
-    stats.manualPayloadDestroyCount++;
-  else
-    stats.autoPayloadDestroyCount++;
-
-  return true;
-}
-
-void *gc_probe_ctor(Interpreter *vm, int argCount, Value *args, bool persistent)
-{
-  if (argCount != 1 || !args[0].isNumber())
+  struct GcProbeHandle
   {
-    vm->runtimeError("%s expects one numeric id", persistent ? "GcPersistentProbe" : "GcEphemeralProbe");
-    return nullptr;
+    int id;
+    bool persistent;
+    bool payloadAlive;
+    int *payload;
+  };
+
+  struct GcProbeStats
+  {
+    int ctorCount{0};
+    int dtorCount{0};
+    int manualPayloadDestroyCount{0};
+    int autoPayloadDestroyCount{0};
+  };
+
+  GcProbeStats g_gcProbePersistentStats;
+  GcProbeStats g_gcProbeEphemeralStats;
+
+  void resetGcProbeStats()
+  {
+    g_gcProbePersistentStats = {};
+    g_gcProbeEphemeralStats = {};
   }
 
-  GcProbeHandle *handle = new GcProbeHandle();
-  handle->id = (int)args[0].asNumber();
-  handle->persistent = persistent;
-  handle->payloadAlive = true;
-  handle->payload = new int(handle->id);
-
-  gc_probe_stats(persistent).ctorCount++;
-
-  return handle;
-}
-
-void *gc_persistent_probe_ctor(Interpreter *vm, int argCount, Value *args)
-{
-  return gc_probe_ctor(vm, argCount, args, true);
-}
-
-void *gc_ephemeral_probe_ctor(Interpreter *vm, int argCount, Value *args)
-{
-  return gc_probe_ctor(vm, argCount, args, false);
-}
-
-void gc_probe_dtor(Interpreter *vm, void *instance)
-{
-  (void)vm;
-  GcProbeHandle *handle = (GcProbeHandle *)instance;
-  if (!handle)
-    return;
-
-  gc_probe_release_payload(handle, false);
-  gc_probe_stats(handle->persistent).dtorCount++;
-
-  delete handle;
-}
-
-int gc_probe_id(Interpreter *vm, void *instance, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  GcProbeHandle *handle = (GcProbeHandle *)instance;
-  if (!handle)
+  GcProbeStats &gc_probe_stats(bool persistent)
   {
-    vm->pushNil();
+    return persistent ? g_gcProbePersistentStats : g_gcProbeEphemeralStats;
+  }
+
+  bool gc_probe_release_payload(GcProbeHandle *handle, bool manual)
+  {
+    if (!handle || !handle->payloadAlive || handle->payload == nullptr)
+      return false;
+
+    GcProbeStats &stats = gc_probe_stats(handle->persistent);
+    delete handle->payload;
+    handle->payload = nullptr;
+    handle->payloadAlive = false;
+
+    if (manual)
+      stats.manualPayloadDestroyCount++;
+    else
+      stats.autoPayloadDestroyCount++;
+
+    return true;
+  }
+
+  void *gc_probe_ctor(Interpreter *vm, int argCount, Value *args, bool persistent)
+  {
+    if (argCount != 1 || !args[0].isNumber())
+    {
+      vm->runtimeError("%s expects one numeric id", persistent ? "GcPersistentProbe" : "GcEphemeralProbe");
+      return nullptr;
+    }
+
+    GcProbeHandle *handle = new GcProbeHandle();
+    handle->id = (int)args[0].asNumber();
+    handle->persistent = persistent;
+    handle->payloadAlive = true;
+    handle->payload = new int(handle->id);
+
+    gc_probe_stats(persistent).ctorCount++;
+
+    return handle;
+  }
+
+  void *gc_persistent_probe_ctor(Interpreter *vm, int argCount, Value *args)
+  {
+    return gc_probe_ctor(vm, argCount, args, true);
+  }
+
+  void *gc_ephemeral_probe_ctor(Interpreter *vm, int argCount, Value *args)
+  {
+    return gc_probe_ctor(vm, argCount, args, false);
+  }
+
+  void gc_probe_dtor(Interpreter *vm, void *instance)
+  {
+    (void)vm;
+    GcProbeHandle *handle = (GcProbeHandle *)instance;
+    if (!handle)
+      return;
+
+    gc_probe_release_payload(handle, false);
+    gc_probe_stats(handle->persistent).dtorCount++;
+
+    delete handle;
+  }
+
+  int gc_probe_id(Interpreter *vm, void *instance, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    GcProbeHandle *handle = (GcProbeHandle *)instance;
+    if (!handle)
+    {
+      vm->pushNil();
+      return 1;
+    }
+
+    vm->pushInt(handle->id);
     return 1;
   }
 
-  vm->pushInt(handle->id);
-  return 1;
-}
-
-int gc_probe_is_persistent(Interpreter *vm, void *instance, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  GcProbeHandle *handle = (GcProbeHandle *)instance;
-  vm->pushBool(handle && handle->persistent);
-  return 1;
-}
-
-int gc_probe_destroy_payload(Interpreter *vm, void *instance, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  GcProbeHandle *handle = (GcProbeHandle *)instance;
-  vm->pushBool(gc_probe_release_payload(handle, true));
-  return 1;
-}
-
-int gc_probe_is_payload_alive(Interpreter *vm, void *instance, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  GcProbeHandle *handle = (GcProbeHandle *)instance;
-  vm->pushBool(handle && handle->payloadAlive && handle->payload != nullptr);
-  return 1;
-}
-
-int native_gc_probe_reset(Interpreter *vm, int argCount, Value *args)
-{
-  (void)vm;
-  (void)argCount;
-  (void)args;
-  resetGcProbeStats();
-  return 0;
-}
-
-int native_gc_probe_persistent_ctor_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbePersistentStats.ctorCount);
-  return 1;
-}
-
-int native_gc_probe_persistent_dtor_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbePersistentStats.dtorCount);
-  return 1;
-}
-
-int native_gc_probe_ephemeral_ctor_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbeEphemeralStats.ctorCount);
-  return 1;
-}
-
-int native_gc_probe_ephemeral_dtor_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbeEphemeralStats.dtorCount);
-  return 1;
-}
-
-int native_gc_probe_persistent_manual_payload_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbePersistentStats.manualPayloadDestroyCount);
-  return 1;
-}
-
-int native_gc_probe_persistent_auto_payload_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbePersistentStats.autoPayloadDestroyCount);
-  return 1;
-}
-
-int native_gc_probe_ephemeral_manual_payload_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbeEphemeralStats.manualPayloadDestroyCount);
-  return 1;
-}
-
-int native_gc_probe_ephemeral_auto_payload_count(Interpreter *vm, int argCount, Value *args)
-{
-  (void)argCount;
-  (void)args;
-  vm->pushInt(g_gcProbeEphemeralStats.autoPayloadDestroyCount);
-  return 1;
-}
-
-int native_typeid(Interpreter *vm, int argCount, Value *args)
-{
-  if (argCount != 1)
+  int gc_probe_is_persistent(Interpreter *vm, void *instance, int argCount, Value *args)
   {
-    vm->runtimeError("typeid() expects exactly one argument");
+    (void)argCount;
+    (void)args;
+    GcProbeHandle *handle = (GcProbeHandle *)instance;
+    vm->pushBool(handle && handle->persistent);
+    return 1;
+  }
+
+  int gc_probe_destroy_payload(Interpreter *vm, void *instance, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    GcProbeHandle *handle = (GcProbeHandle *)instance;
+    vm->pushBool(gc_probe_release_payload(handle, true));
+    return 1;
+  }
+
+  int gc_probe_is_payload_alive(Interpreter *vm, void *instance, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    GcProbeHandle *handle = (GcProbeHandle *)instance;
+    vm->pushBool(handle && handle->payloadAlive && handle->payload != nullptr);
+    return 1;
+  }
+
+  int native_gc_probe_reset(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)vm;
+    (void)argCount;
+    (void)args;
+    resetGcProbeStats();
     return 0;
   }
 
-  auto encode = [](int kind, int index) -> int
+  int native_gc_probe_persistent_ctor_count(Interpreter *vm, int argCount, Value *args)
   {
-    return ((kind & 0x7f) << 24) | (index & 0x00ffffff);
-  };
-
-  const Value &arg = args[0];
-  int typeId = 0;
-
-  switch (arg.type)
-  {
-  case ValueType::CLASS:
-    typeId = encode(1, arg.asClassId());
-    break;
-  case ValueType::CLASSINSTANCE:
-    if (!arg.asClassInstance() || !arg.asClassInstance()->klass)
-    {
-      vm->runtimeError("typeid() received invalid class instance");
-      return 0;
-    }
-    typeId = encode(1, arg.asClassInstance()->klass->index);
-    break;
-  case ValueType::STRUCT:
-    typeId = encode(2, arg.asStructId());
-    break;
-  case ValueType::STRUCTINSTANCE:
-    if (!arg.asStructInstance() || !arg.asStructInstance()->def)
-    {
-      vm->runtimeError("typeid() received invalid struct instance");
-      return 0;
-    }
-    typeId = encode(2, arg.asStructInstance()->def->index);
-    break;
-  case ValueType::NATIVECLASS:
-    typeId = encode(3, arg.asClassNativeId());
-    break;
-  case ValueType::NATIVECLASSINSTANCE:
-    if (!arg.asNativeClassInstance() || !arg.asNativeClassInstance()->klass)
-    {
-      vm->runtimeError("typeid() received invalid native class instance");
-      return 0;
-    }
-    typeId = encode(3, arg.asNativeClassInstance()->klass->index);
-    break;
-  case ValueType::NATIVESTRUCT:
-    typeId = encode(4, arg.asNativeStructId());
-    break;
-  case ValueType::NATIVESTRUCTINSTANCE:
-    if (!arg.asNativeStructInstance() || !arg.asNativeStructInstance()->def)
-    {
-      vm->runtimeError("typeid() received invalid native struct instance");
-      return 0;
-    }
-    typeId = encode(4, arg.asNativeStructInstance()->def->id);
-    break;
-  default:
-    vm->runtimeError("typeid() expects a type or instance");
-    return 0;
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbePersistentStats.ctorCount);
+    return 1;
   }
 
-  vm->pushInt(typeId);
-  return 1;
-}
+  int native_gc_probe_persistent_dtor_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbePersistentStats.dtorCount);
+    return 1;
+  }
+
+  int native_gc_probe_ephemeral_ctor_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbeEphemeralStats.ctorCount);
+    return 1;
+  }
+
+  int native_gc_probe_ephemeral_dtor_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbeEphemeralStats.dtorCount);
+    return 1;
+  }
+
+  int native_gc_probe_persistent_manual_payload_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbePersistentStats.manualPayloadDestroyCount);
+    return 1;
+  }
+
+  int native_gc_probe_persistent_auto_payload_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbePersistentStats.autoPayloadDestroyCount);
+    return 1;
+  }
+
+  int native_gc_probe_ephemeral_manual_payload_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbeEphemeralStats.manualPayloadDestroyCount);
+    return 1;
+  }
+
+  int native_gc_probe_ephemeral_auto_payload_count(Interpreter *vm, int argCount, Value *args)
+  {
+    (void)argCount;
+    (void)args;
+    vm->pushInt(g_gcProbeEphemeralStats.autoPayloadDestroyCount);
+    return 1;
+  }
+
+  int native_typeid(Interpreter *vm, int argCount, Value *args)
+  {
+    if (argCount != 1)
+    {
+      vm->runtimeError("typeid() expects exactly one argument");
+      return 0;
+    }
+
+    auto encode = [](int kind, int index) -> int
+    {
+      return ((kind & 0x7f) << 24) | (index & 0x00ffffff);
+    };
+
+    const Value &arg = args[0];
+    int typeId = 0;
+
+    switch (arg.type)
+    {
+    case ValueType::CLASS:
+      typeId = encode(1, arg.asClassId());
+      break;
+    case ValueType::CLASSINSTANCE:
+      if (!arg.asClassInstance() || !arg.asClassInstance()->klass)
+      {
+        vm->runtimeError("typeid() received invalid class instance");
+        return 0;
+      }
+      typeId = encode(1, arg.asClassInstance()->klass->index);
+      break;
+    case ValueType::STRUCT:
+      typeId = encode(2, arg.asStructId());
+      break;
+    case ValueType::STRUCTINSTANCE:
+      if (!arg.asStructInstance() || !arg.asStructInstance()->def)
+      {
+        vm->runtimeError("typeid() received invalid struct instance");
+        return 0;
+      }
+      typeId = encode(2, arg.asStructInstance()->def->index);
+      break;
+    case ValueType::NATIVECLASS:
+      typeId = encode(3, arg.asClassNativeId());
+      break;
+    case ValueType::NATIVECLASSINSTANCE:
+      if (!arg.asNativeClassInstance() || !arg.asNativeClassInstance()->klass)
+      {
+        vm->runtimeError("typeid() received invalid native class instance");
+        return 0;
+      }
+      typeId = encode(3, arg.asNativeClassInstance()->klass->index);
+      break;
+    case ValueType::NATIVESTRUCT:
+      typeId = encode(4, arg.asNativeStructId());
+      break;
+    case ValueType::NATIVESTRUCTINSTANCE:
+      if (!arg.asNativeStructInstance() || !arg.asNativeStructInstance()->def)
+      {
+        vm->runtimeError("typeid() received invalid native struct instance");
+        return 0;
+      }
+      typeId = encode(4, arg.asNativeStructInstance()->def->id);
+      break;
+    default:
+      vm->runtimeError("typeid() expects a type or instance");
+      return 0;
+    }
+
+    vm->pushInt(typeId);
+    return 1;
+  }
 } // namespace
 
 int native_print_stack(Interpreter *vm, int argCount, Value *args)
@@ -363,6 +363,89 @@ static void valueToString(const Value &v, std::string &out)
   default:
     out += "<unknown>";
   }
+}
+
+int native_char(Interpreter *vm, int argCount, Value *args)
+{
+  if (argCount != 1)
+  {
+    vm->runtimeError("char() expects exactly one argument");
+    return 0;
+  }
+
+  const Value &arg = args[0];
+  int code = 0;
+
+  switch (arg.type)
+  {
+  case ValueType::INT:
+    code = (int)arg.as.integer;
+    break;
+  case ValueType::BYTE:
+    code = (int)arg.as.byte;
+    break;
+  case ValueType::UINT:
+    code = (int)arg.as.unsignedInteger;
+    break;
+  case ValueType::FLOAT:
+    code = (int)arg.as.real;
+    break;
+  case ValueType::DOUBLE:
+    code = (int)arg.as.number;
+    break;
+  case ValueType::STRING:
+  {
+    const char *str = arg.asStringChars();
+    if (str[0] != '\0')
+      code = (unsigned char)str[0];
+    break;
+  }
+  default:
+    vm->runtimeError("char() cannot convert value of this type");
+    return 0;
+  }
+
+  // ASCII / byte range 
+  if (code >= 0 && code < 128)
+  {
+    char buf[2] = { (char)code, '\0' };
+    vm->push(vm->makeString(vm->createString(buf, 1)));
+    return 1;
+  }
+
+  // Unicode — devolve string UTF-8
+  char buf[5] = {};
+  int len = 0;
+
+  if (code < 0x800)
+  {
+    buf[0] = (char)(0xC0 | (code >> 6));
+    buf[1] = (char)(0x80 | (code & 0x3F));
+    len = 2;
+  }
+  else if (code < 0x10000)
+  {
+    buf[0] = (char)(0xE0 | (code >> 12));
+    buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+    buf[2] = (char)(0x80 | (code & 0x3F));
+    len = 3;
+  }
+  else if (code < 0x110000)
+  {
+    buf[0] = (char)(0xF0 | (code >> 18));
+    buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
+    buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
+    buf[3] = (char)(0x80 | (code & 0x3F));
+    len = 4;
+  }
+  else
+  {
+    vm->runtimeError("char() codepoint out of range");
+    return 0;
+  }
+
+  vm->push(vm->makeString(vm->createString(buf, len)));
+  return 1;
 }
 
 int native_string(Interpreter *vm, int argCount, Value *args)
@@ -580,7 +663,6 @@ int native_gc(Interpreter *vm, int argCount, Value *args)
   return 0;
 }
 
-
 int native_ticks(Interpreter *vm, int argCount, Value *args)
 {
   if (argCount != 1 || !args[0].isNumber())
@@ -591,8 +673,6 @@ int native_ticks(Interpreter *vm, int argCount, Value *args)
   vm->update(args[0].asNumber());
   return 0;
 }
-
-
 
 void Interpreter::registerBase()
 {
@@ -626,6 +706,7 @@ void Interpreter::registerBase()
   registerNative("str", native_string, 1);
   registerNative("int", native_int, 1);
   registerNative("real", native_real, 1);
+  registerNative("char", native_char, 1);
   registerNative("classname", native_classname, 1);
   registerNative("typeid", native_typeid, 1);
 }

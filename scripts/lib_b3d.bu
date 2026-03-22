@@ -1,0 +1,1057 @@
+// ================================================================
+// lib_b3d.bu — Blitz3D B3D loader + CPU vertex animation
+//
+// Usage:
+//   include "lib_b3d.bu";
+//   var model = B3DModel();
+//   model.load("model.b3d", "textures/");
+//   // loop:
+//   model.update(currentFrame);
+//   model.draw();
+// ================================================================
+
+import file;
+using math;
+import STB;
+using STB;
+import path;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+// ============================================================
+// Keyframe data
+// ============================================================
+
+class B3DPosKey
+{
+    var aframe;
+    var x, y, z;
+    def init(f, px, py, pz) { self.aframe=f; self.x=px; self.y=py; self.z=pz; }
+}
+
+class B3DRotKey
+{
+    var aframe;
+    var qx, qy, qz, qw;
+    def init(f, x, y, z, w) { self.aframe=f; self.qx=x; self.qy=y; self.qz=z; self.qw=w; }
+}
+
+// ============================================================
+// Joint
+// ============================================================
+
+class B3DJoint
+{
+    var name;
+    var parentIndex;    // -1 = root
+
+    // bind pose
+    var posX, posY, posZ;
+    var scaleX, scaleY, scaleZ;
+    var rotX, rotY, rotZ, rotW;
+
+    // keyframes
+    var posKeys;        // array of B3DPosKey
+    var rotKeys;        // array of B3DRotKey
+
+    // runtime matrices
+    var localMat;       // Matrix — current animated local transform
+    var globalMat;      // Matrix — world space
+    var offsetMat;      // Matrix — inverse bind pose
+    var skinMat;        // Matrix — globalMat * offsetMat
+
+    var bindPosX, bindPosY, bindPosZ;
+    var bindScaleX, bindScaleY, bindScaleZ;
+    var bindRotX, bindRotY, bindRotZ, bindRotW;
+    
+
+    def init(n, parent)
+    {
+        self.name        = n;
+        self.parentIndex = parent;
+        self.posX = 0.0; self.posY = 0.0; self.posZ = 0.0;
+        self.scaleX = 1.0; self.scaleY = 1.0; self.scaleZ = 1.0;
+        self.rotX = 0.0; self.rotY = 0.0; self.rotZ = 0.0; self.rotW = 1.0;
+        self.posKeys = [];
+        self.rotKeys = [];
+        self.localMat  = MatrixIdentity();
+        self.globalMat = MatrixIdentity();
+        self.offsetMat = MatrixIdentity();
+        self.skinMat   = MatrixIdentity();
+        self.bindPosX=0.0; self.bindPosY=0.0; self.bindPosZ=0.0;
+        self.bindScaleX=1.0; self.bindScaleY=1.0; self.bindScaleZ=1.0;
+        self.bindRotX=0.0; self.bindRotY=0.0; self.bindRotZ=0.0; self.bindRotW=1.0;
+    }
+
+    def findPosKey(aframe)
+    {
+        var idx = 0;
+        for (var i = 0; i < len(self.posKeys) - 1; i += 1)
+            if (aframe >= self.posKeys[i].aframe) idx = i;
+        return idx;
+    }
+
+    def findRotKey(aframe)
+    {
+        var idx = 0;
+        for (var i = 0; i < len(self.rotKeys) - 1; i += 1)
+            if (aframe >= self.rotKeys[i].aframe) idx = i;
+        return idx;
+    }
+
+    def buildLocalMatrix(aframe)
+    {
+        var px = self.posX; var py = self.posY; var pz = self.posZ;
+        var qx = self.rotX; var qy = self.rotY; var qz = self.rotZ; var qw = self.rotW;
+
+        // interpolate position
+        if (len(self.posKeys) > 0)
+        {
+            var ki = self.findPosKey(aframe);
+            var ka = self.posKeys[ki];
+            if (ki + 1 < len(self.posKeys))
+            {
+                var kb = self.posKeys[ki + 1];
+                var dt = kb.aframe - ka.aframe;
+                var t  = 0.0;
+                if (dt > 0) t = (aframe - ka.aframe) / dt;
+                t = clamp(t, 0.0, 1.0);
+                px = ka.x + (kb.x - ka.x) * t;
+                py = ka.y + (kb.y - ka.y) * t;
+                pz = ka.z + (kb.z - ka.z) * t;
+            }
+            else
+            {
+                px = ka.x; py = ka.y; pz = ka.z;
+            }
+        }
+
+        // interpolate rotation (slerp)
+        if (len(self.rotKeys) > 0)
+        {
+            var ki = self.findRotKey(aframe);
+            var ka = self.rotKeys[ki];
+            if (ki + 1 < len(self.rotKeys))
+            {
+                var kb = self.rotKeys[ki + 1];
+                var dt = kb.aframe - ka.aframe;
+                var t  = 0.0;
+                if (dt > 0) t = (aframe - ka.aframe) / dt;
+                t = clamp(t, 0.0, 1.0);
+                var qa = Quaternion(ka.qx, ka.qy, ka.qz, ka.qw);
+                var qb = Quaternion(kb.qx, kb.qy, kb.qz, kb.qw);
+                var qr = QuaternionSlerp(qa, qb, t);
+                qx = qr.x; qy = qr.y; qz = qr.z; qw = qr.w;
+            }
+            else
+            {
+                qx = ka.qx; qy = ka.qy; qz = ka.qz; qw = ka.qw;
+            }
+        }
+
+        // build local matrix: rotation + scale + translation
+        var q   = Quaternion(qx, qy, qz, qw);
+        var rot = QuaternionToMatrix(q);
+        rot.m0  = rot.m0  * self.scaleX;
+        rot.m1  = rot.m1  * self.scaleX;
+        rot.m2  = rot.m2  * self.scaleX;
+        rot.m4  = rot.m4  * self.scaleY;
+        rot.m5  = rot.m5  * self.scaleY;
+        rot.m6  = rot.m6  * self.scaleY;
+        rot.m8  = rot.m8  * self.scaleZ;
+        rot.m9  = rot.m9  * self.scaleZ;
+        rot.m10 = rot.m10 * self.scaleZ;
+        self.localMat = rot;
+        self.localMat.m12 = px;
+        self.localMat.m13 = py;
+        self.localMat.m14 = pz;
+    }
+    def buildBindMatrix()
+    {
+        var q   = Quaternion(self.bindRotX, self.bindRotY, self.bindRotZ, self.bindRotW);
+        var rot = QuaternionToMatrix(q);
+        rot.m0  = rot.m0  * self.bindScaleX;
+        rot.m1  = rot.m1  * self.bindScaleX;
+        rot.m2  = rot.m2  * self.bindScaleX;
+        rot.m4  = rot.m4  * self.bindScaleY;
+        rot.m5  = rot.m5  * self.bindScaleY;
+        rot.m6  = rot.m6  * self.bindScaleY;
+        rot.m8  = rot.m8  * self.bindScaleZ;
+        rot.m9  = rot.m9  * self.bindScaleZ;
+        rot.m10 = rot.m10 * self.bindScaleZ;
+        rot.m12 = self.bindPosX;
+        rot.m13 = self.bindPosY;
+        rot.m14 = self.bindPosZ;
+        return rot;
+    }
+}
+
+// ============================================================
+// Vertex with bone weights (max 4)
+// ============================================================
+
+class B3DVertex
+{
+    var x, y, z;
+    var nx, ny, nz;
+    var u, v;
+    var r, g, b, a;
+    var b0, b1, b2, b3;   // bone indices
+    var w0, w1, w2, w3;   // bone weights
+
+    def init()
+    {
+        self.x=0.0; self.y=0.0; self.z=0.0;
+        self.nx=0.0; self.ny=0.0; self.nz=1.0;
+        self.u=0.0; self.v=0.0;
+        self.r=1.0; self.g=1.0; self.b=1.0; self.a=1.0;
+        self.b0=-1; self.b1=-1; self.b2=-1; self.b3=-1;
+        self.w0=0.0; self.w1=0.0; self.w2=0.0; self.w3=0.0;
+    }
+}
+
+// ============================================================
+// Surface (one mesh buffer)
+// ============================================================
+
+class B3DSurface
+{
+    var texId;
+    var vertices;       // array of B3DVertex (bind pose)
+    var indices;        // array of int (triangles)
+    var skinned;        // array of B3DVertex (animated, recomputed per frame)
+
+    def init()
+    {
+        self.texId    = 0;
+        self.vertices = [];
+        self.indices  = [];
+        self.skinned  = [];
+    }
+}
+
+// ============================================================
+// B3D Loader helpers
+// ============================================================
+
+def b3dLoadFileBuffer(filePath)
+{
+    var handle = file.open(filePath, "r");
+    if (handle == nil || handle <= 0)
+    {
+        print("B3D: failed to open: " + filePath);
+        return nil;
+    }
+    var size = file.size(handle);
+    if (size == nil || size <= 0) { file.close(handle); return nil; }
+    var bytes = file.read_all(handle);
+    file.close(handle);
+    return bytes;
+}
+
+def b3dUploadTex(p)
+{
+    stbi_set_flip_vertically_on_load(0);
+    var (w, h, ch, pixels) = stbi_load(p, 4);
+    if (pixels == nil) return 0;
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def b3dLoadTexture(texDir, name)
+{
+    var base = path.filename(name) + path.extension(name);
+    if (path.exists(texDir + base)) return b3dUploadTex(texDir + base);
+    print("B3D: texture not found: " + texDir + base);
+    return 0;
+}
+
+// ============================================================
+// B3D Model
+// ============================================================
+
+class B3DModel
+{
+    var joints;         // array of B3DJoint
+    var surfaces;       // array of B3DSurface
+    var textures;       // array of string (texture names)
+    var texIds;         // array of GL tex ids
+    var numFrames;
+    var fps;
+    var ready;
+    var texDir;
+
+    // chunk stack
+    var _chunkEnds;
+
+    // transform
+    var posX, posY, posZ;
+    var rotX, rotY, rotZ;
+    var scaleVal;
+
+    // vertex pool shared across meshes
+    var _vtxPool;
+    var _vtxStart;
+
+    var showSkeleton;
+    var skinMats;
+
+    def init()
+    {
+        self.joints    = [];
+        self.surfaces  = [];
+        self.textures  = [];
+        self.texIds    = [];
+        self.numFrames = 0;
+        self.fps       = 25.0;
+        self.ready     = false;
+        self.texDir    = "";
+        self._chunkEnds = [];
+        self._vtxPool   = [];
+        self._vtxStart  = 0;
+        self.posX = 0.0; self.posY = 0.0; self.posZ = 0.0;
+        self.rotX = 0.0; self.rotY = 0.0; self.rotZ = 0.0;
+        self.scaleVal = 1.0;
+        self.showSkeleton = false;
+        self.skinMats = [];
+    }
+
+    // ----------------------------------------------------------
+    // Chunk helpers
+    // ----------------------------------------------------------
+
+    def pushChunk(buf, size)
+    {
+        self._chunkEnds.push(buf.tell() + size);
+    }
+
+    def chunkSize(buf)
+    {
+        var top = len(self._chunkEnds) - 1;
+        if (top < 0) return 0;
+        return self._chunkEnds[top] - buf.tell();
+    }
+
+    def popChunk(buf)
+    {
+        var top = len(self._chunkEnds) - 1;
+        if (top < 0) return;
+        buf.seek(self._chunkEnds[top]);
+        self._chunkEnds.pop();
+    }
+
+    def readTag(buf)
+    {
+        return buf.readString(4);
+    }
+
+    // ----------------------------------------------------------
+    // Load
+    // ----------------------------------------------------------
+
+    def load(filePath, texturesDir)
+    {
+        self.texDir = texturesDir;
+        var buf = b3dLoadFileBuffer(filePath);
+        if (buf == nil) return false;
+
+        var tag  = self.readTag(buf);
+        var size = buf.readInt();
+        self.pushChunk(buf, size);
+
+        print("B3D loading: " + filePath);
+        print("Tag: " + tag + ", size: " + size);
+
+        var version = buf.readInt();
+        print("Version: " + version);
+
+        while (self.chunkSize(buf) > 0)
+        {
+            var ctag  = self.readTag(buf);
+            var csize = buf.readInt();
+            self.pushChunk(buf, csize);
+            print("Chunk: " + ctag + ", size: " + csize);
+
+            if      (ctag == "TEXS") self.readTEXS(buf);
+            elif    (ctag == "BRUS") self.readBRUS(buf);
+            elif    (ctag == "NODE") self.readNODE(buf, -1);
+
+            self.popChunk(buf);
+        }
+        self.popChunk(buf);
+
+        self.buildOffsetMatrices();
+
+        self.ready = len(self.surfaces) > 0;
+        print("B3D loaded: " + len(self.joints) + " joints, " +
+              len(self.surfaces) + " surfaces, " +
+              self.numFrames + " frames @ " + self.fps + " fps");
+        return self.ready;
+    }
+
+    // ----------------------------------------------------------
+    // TEXS chunk
+    // ----------------------------------------------------------
+
+    def readTEXS(buf)
+    {
+        while (self.chunkSize(buf) > 0)
+        {
+            var name = self.readString(buf);
+            buf.readInt();    // flags
+            buf.readInt();    // blend
+            buf.readFloat();  // x pos
+            buf.readFloat();  // y pos
+            buf.readFloat();  // x scale
+            buf.readFloat();  // y scale
+            buf.readFloat();  // rotation
+            self.textures.push(name);
+            var tid = b3dLoadTexture(self.texDir, name);
+            self.texIds.push(tid);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // BRUS chunk
+    // ----------------------------------------------------------
+
+    def readBRUS(buf)
+    {
+        var numTex = buf.readInt();
+        while (self.chunkSize(buf) > 0)
+        {
+            var name = self.readString(buf);
+            buf.readFloat(); buf.readFloat(); buf.readFloat(); buf.readFloat(); // rgba
+            buf.readFloat(); // shininess
+            buf.readInt();   // blend
+            buf.readInt();   // fx
+            for (var i = 0; i < numTex; i += 1)
+                buf.readInt();
+        }
+    }
+
+    // ----------------------------------------------------------
+    // NODE chunk (recursive)
+    // ----------------------------------------------------------
+
+    def readNODE(buf, parentIdx)
+    {
+        var name = self.readString(buf);
+        var px = buf.readFloat();
+        var py = buf.readFloat();
+        var pz = buf.readFloat();
+        var sx = buf.readFloat();
+        var sy = buf.readFloat();
+        var sz = buf.readFloat();
+        var rw = buf.readFloat();
+        var rx = buf.readFloat();
+        var ry = buf.readFloat();
+        var rz = buf.readFloat();
+
+        var joint = B3DJoint(name, parentIdx);
+        joint.posX = px; joint.posY = py; joint.posZ = pz;
+        joint.scaleX = sx; joint.scaleY = sy; joint.scaleZ = sz;
+        joint.rotX = rx; joint.rotY = ry; joint.rotZ = rz; joint.rotW = -rw; 
+
+        joint.bindPosX=px; joint.bindPosY=py; joint.bindPosZ=pz;
+        joint.bindScaleX=sx; joint.bindScaleY=sy; joint.bindScaleZ=sz;
+        joint.bindRotX=rx; joint.bindRotY=ry; joint.bindRotZ=rz; joint.bindRotW=-rw;
+
+        var myIdx = len(self.joints);
+        self.joints.push(joint);
+        joint.buildLocalMatrix(0);
+
+        // marca quantas surfaces existiam antes deste NODE
+        var surfsBefore = len(self.surfaces);
+
+        while (self.chunkSize(buf) > 0)
+        {
+            var ctag  = self.readTag(buf);
+            var csize = buf.readInt();
+            self.pushChunk(buf, csize);
+
+            if      (ctag == "MESH") self.readMESH(buf, myIdx);
+            elif    (ctag == "BONE") self.readBONE(buf, myIdx);   // ← BONE no NODE
+            elif    (ctag == "ANIM") self.readANIM(buf);
+            elif    (ctag == "KEYS") self.readKEYS(buf, joint);
+            elif    (ctag == "NODE") self.readNODE(buf, myIdx);   // ← recursão activa!
+
+            self.popChunk(buf);
+        }
+
+        // resolve as surfaces deste NODE (depois das BONEs já terem sido lidas)
+        for (var si = surfsBefore; si < len(self.surfaces); si += 1)
+            self.resolveSurface(self.surfaces[si]);
+    }
+
+    // ----------------------------------------------------------
+    // MESH chunk
+    // ----------------------------------------------------------
+
+    def readMESH(buf, nodeIdx)
+    {
+        self._vtxStart = len(self._vtxPool);
+        buf.readInt();  // brush id
+
+        while (self.chunkSize(buf) > 0)
+        {
+            var ctag  = self.readTag(buf);
+            var csize = buf.readInt();
+            self.pushChunk(buf, csize);
+
+            if   (ctag == "VRTS") self.readVRTS(buf);
+            elif (ctag == "TRIS") self.readTRIS(buf);
+
+            self.popChunk(buf);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // VRTS chunk
+    // ----------------------------------------------------------
+
+    def readVRTS(buf)
+    {
+        var flags  = buf.readInt();
+        var numUV  = buf.readInt();
+        var uvSize = buf.readInt();
+
+        var stride = 12;
+        if (flags & 1) stride += 12;
+        if (flags & 2) stride += 16;
+        stride += numUV * uvSize * 4;
+
+        var count = self.chunkSize(buf) / stride;
+
+        for (var i = 0; i < count; i += 1)
+        {
+            var vt = B3DVertex();
+            vt.x = buf.readFloat();
+            vt.y = buf.readFloat();
+            vt.z = buf.readFloat();
+
+            if (flags & 1)
+            {
+                vt.nx = buf.readFloat();
+                vt.ny = buf.readFloat();
+                vt.nz = buf.readFloat();
+            }
+            if (flags & 2)
+            {
+                vt.r = buf.readFloat();
+                vt.g = buf.readFloat();
+                vt.b = buf.readFloat();
+                vt.a = buf.readFloat();
+            }
+            if (numUV >= 1)
+            {
+                vt.u = buf.readFloat();
+                vt.v = buf.readFloat();
+                if (uvSize == 3) buf.readFloat();
+                for (var j = 1; j < numUV; j += 1)
+                {
+                    buf.readFloat(); buf.readFloat();
+                    if (uvSize == 3) buf.readFloat();
+                }
+            }
+
+            self._vtxPool.push(vt);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // TRIS chunk — guarda índices globais, resolve depois
+    // ----------------------------------------------------------
+
+    def readTRIS(buf)
+    {
+        var brushId = buf.readInt();
+        var surf = B3DSurface();
+
+        if (brushId >= 0 && brushId < len(self.texIds))
+            surf.texId = self.texIds[brushId];
+
+        var triCount = self.chunkSize(buf) / 12;
+
+        for (var i = 0; i < triCount; i += 1)
+        {
+            surf.indices.push(buf.readInt() + self._vtxStart);
+            surf.indices.push(buf.readInt() + self._vtxStart);
+            surf.indices.push(buf.readInt() + self._vtxStart);
+        }
+
+        self.surfaces.push(surf);
+    }
+
+    // ----------------------------------------------------------
+    // resolveSurface — chamado após BONE, converte índices globais
+    // para locais, normaliza pesos e aloca skinned
+    // ----------------------------------------------------------
+
+    def resolveSurface(surf)
+    {
+        if (len(surf.vertices) > 0) return;  // já resolvido
+
+        var globalToLocal = {};
+        var newIndices = [];
+
+        for (var i = 0; i < len(surf.indices); i += 1)
+        {
+            var gIdx = surf.indices[i];
+            var key  = "" + gIdx;
+            var lIdx = -1;
+
+            if (globalToLocal[key] != nil)
+            {
+                lIdx = globalToLocal[key];
+            }
+            else
+            {
+                var vt = self._vtxPool[gIdx];
+                surf.vertices.push(vt);
+                lIdx = len(surf.vertices) - 1;
+                globalToLocal[key] = lIdx;
+            }
+            newIndices.push(lIdx);
+        }
+        surf.indices = newIndices;
+
+        // normaliza pesos e aloca buffer skinned
+        for (var vi = 0; vi < len(surf.vertices); vi += 1)
+        {
+            var vt = surf.vertices[vi];
+            var wsum = vt.w0 + vt.w1 + vt.w2 + vt.w3;
+            if (wsum > 0.0001)
+            {
+                vt.w0 = vt.w0 / wsum;
+                vt.w1 = vt.w1 / wsum;
+                vt.w2 = vt.w2 / wsum;
+                vt.w3 = vt.w3 / wsum;
+            }
+
+            var sv = B3DVertex();
+            sv.x=vt.x; sv.y=vt.y; sv.z=vt.z;
+            sv.nx=vt.nx; sv.ny=vt.ny; sv.nz=vt.nz;
+            sv.u=vt.u; sv.v=vt.v;
+            sv.r=vt.r; sv.g=vt.g; sv.b=vt.b; sv.a=vt.a;
+            surf.skinned.push(sv);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // BONE chunk — atribui pesos aos vértices do _vtxPool
+    // ----------------------------------------------------------
+
+    def readBONE(buf, jointIdx)
+    {
+        while (self.chunkSize(buf) > 0)
+        {
+            var globalVtx = buf.readInt() + self._vtxStart;
+            var weight    = buf.readFloat();
+
+            if (globalVtx < 0 || globalVtx >= len(self._vtxPool)) continue;
+            var vt = self._vtxPool[globalVtx];
+
+            if (weight > vt.w0)
+            {
+                vt.b3=vt.b2; vt.w3=vt.w2;
+                vt.b2=vt.b1; vt.w2=vt.w1;
+                vt.b1=vt.b0; vt.w1=vt.w0;
+                vt.b0=jointIdx; vt.w0=weight;
+            }
+            elif (weight > vt.w1)
+            {
+                vt.b3=vt.b2; vt.w3=vt.w2;
+                vt.b2=vt.b1; vt.w2=vt.w1;
+                vt.b1=jointIdx; vt.w1=weight;
+            }
+            elif (weight > vt.w2)
+            {
+                vt.b3=vt.b2; vt.w3=vt.w2;
+                vt.b2=jointIdx; vt.w2=weight;
+            }
+            elif (weight > vt.w3)
+            {
+                vt.b3=jointIdx; vt.w3=weight;
+            }
+        }
+    }
+
+    // ----------------------------------------------------------
+    // ANIM chunk
+    // ----------------------------------------------------------
+
+    def readANIM(buf)
+    {
+        buf.readInt();
+        self.numFrames = buf.readInt();
+        self.fps       = buf.readFloat();
+        if (self.fps <= 0) self.fps = 25.0;
+    }
+
+    // ----------------------------------------------------------
+    // KEYS chunk
+    // ----------------------------------------------------------
+
+    def readKEYS(buf, joint)
+    {
+        var flags = buf.readInt();
+
+        while (self.chunkSize(buf) > 0)
+        {
+            var aframe = buf.readInt();
+
+            if (flags & 1)  // position
+            {
+                var kx = buf.readFloat();
+                var ky = buf.readFloat();
+                var kz = buf.readFloat();
+                joint.posKeys.push(B3DPosKey(aframe, kx, ky, kz));
+            }
+            if (flags & 2)  // scale — skip
+            {
+                buf.readFloat(); buf.readFloat(); buf.readFloat();
+            }
+            if (flags & 4)  // rotation
+            {
+                var kw = buf.readFloat();
+                var kx = buf.readFloat();
+                var ky = buf.readFloat();
+                var kz = buf.readFloat();
+                joint.rotKeys.push(B3DRotKey(aframe, kx, ky, kz, -kw)); 
+            }
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Null-terminated string
+    // ----------------------------------------------------------
+
+    def readString(buf)
+    {
+        var s = "";
+        while (true)
+        {
+            var ch = buf.readByte();
+            if (ch == 0) break;
+            s = s + char(ch);
+        }
+        return s;
+    }
+
+    // ----------------------------------------------------------
+    // Build offset (inverse bind pose) matrices
+    // ----------------------------------------------------------
+
+    def buildOffsetMatrices()
+    {
+        for (var i = 0; i < len(self.joints); i += 1)
+        {
+            var j = self.joints[i];
+            var bindMat = j.buildBindMatrix();   
+            if (j.parentIndex < 0)
+                j.globalMat = bindMat;
+            else
+                j.globalMat = MatrixMultiply(bindMat,self.joints[j.parentIndex].globalMat );
+        }
+        for (var i = 0; i < len(self.joints); i += 1)
+        {
+            self.joints[i].offsetMat = MatrixInvert(self.joints[i].globalMat);
+            //self.skinMats[i] = self.joints[i].offsetMat;
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Update — anima joints e faz skinning CPU
+    // ----------------------------------------------------------
+
+    // def update(aframe)
+    // {
+    //     if (!self.ready) return;
+
+    //     // 1 — anima joints
+    //     for (var i = 0; i < len(self.joints); i += 1)
+    //     {
+    //         var j = self.joints[i];
+    //         j.buildLocalMatrix(aframe);
+    //         if (j.parentIndex < 0)
+    //             j.globalMat = j.localMat;
+    //         else
+    //             j.globalMat = MatrixMultiply(
+    //                 j.localMat,
+    //                 self.joints[j.parentIndex].globalMat
+    //             );
+    //         j.skinMat = MatrixMultiply(j.offsetMat, j.globalMat);
+    //     }
+
+    //     // 2 — skin vertices (CPU)
+    //     for (var si = 0; si < len(self.surfaces); si += 1)
+    //     {
+    //         var surf = self.surfaces[si];
+    //         for (var vi = 0; vi < len(surf.vertices); vi += 1)
+    //         {
+    //             var src = surf.vertices[vi];
+    //             var dst = surf.skinned[vi];
+
+    //             if (src.b0 < 0)
+    //             {
+    //                 dst.x=src.x; dst.y=src.y; dst.z=src.z;
+    //                 dst.nx=src.nx; dst.ny=src.ny; dst.nz=src.nz;
+    //                 continue;
+    //             }
+
+    //             var ox=0.0; var oy=0.0; var oz=0.0;
+    //             var onx=0.0; var ony=0.0; var onz=0.0;
+
+    //             var bones   = [src.b0, src.b1, src.b2, src.b3];
+    //             var weights = [src.w0, src.w1, src.w2, src.w3];
+
+    //             for (var bi = 0; bi < 4; bi += 1)
+    //             {
+    //                 var boneIdx = bones[bi];
+    //                 var w       = weights[bi];
+    //                 if (boneIdx < 0 || w <= 0.0) continue;
+
+    //                 var sm = self.joints[boneIdx].skinMat;
+
+    //                 ox  += (sm.m0*src.x + sm.m4*src.y + sm.m8 *src.z + sm.m12) * w;
+    //                 oy  += (sm.m1*src.x + sm.m5*src.y + sm.m9 *src.z + sm.m13) * w;
+    //                 oz  += (sm.m2*src.x + sm.m6*src.y + sm.m10*src.z + sm.m14) * w;
+
+    //                 onx += (sm.m0*src.nx + sm.m4*src.ny + sm.m8 *src.nz) * w;
+    //                 ony += (sm.m1*src.nx + sm.m5*src.ny + sm.m9 *src.nz) * w;
+    //                 onz += (sm.m2*src.nx + sm.m6*src.ny + sm.m10*src.nz) * w;
+    //             }
+
+    //             dst.x=ox; dst.y=oy; dst.z=oz;
+    //             dst.nx=onx; dst.ny=ony; dst.nz=onz;
+    //         }
+    //     }
+    // }
+
+    //otimize
+    def update(aframe)
+    {
+    if (!self.ready) return;
+
+    // 1 — anima joints
+    for (var i = 0; i < len(self.joints); i += 1)
+    {
+        var j = self.joints[i];
+        j.buildLocalMatrix(aframe);
+        if (j.parentIndex < 0)
+            j.globalMat = j.localMat;
+        else
+            j.globalMat = MatrixMultiply(j.localMat, self.joints[j.parentIndex].globalMat);
+        j.skinMat = MatrixMultiply(j.offsetMat, j.globalMat);
+    }
+
+        // 2 — cache skinMats num array local (evita double-dereference por vértice)
+    self.skinMats.clear();
+    for (var i = 0; i < len(self.joints); i += 1)
+        self.skinMats.push(self.joints[i].skinMat);
+
+    // 3 — skin vertices
+    for (var si = 0; si < len(self.surfaces); si += 1)
+    {
+        var surf = self.surfaces[si];
+        var verts = surf.vertices;
+        var skin  = surf.skinned;
+        var nv    = len(verts);
+
+        for (var vi = 0; vi < nv; vi += 1)
+        {
+            var src = verts[vi];
+            var dst = skin[vi];
+
+            if (src.b0 < 0)
+            {
+                dst.x=src.x; dst.y=src.y; dst.z=src.z;
+                dst.nx=src.nx; dst.ny=src.ny; dst.nz=src.nz;
+                continue;
+            }
+
+            var ox=0.0; var oy=0.0; var oz=0.0;
+            var onx=0.0; var ony=0.0; var onz=0.0;
+            var sm;
+
+            if (src.b0 >= 0 && src.w0 > 0.0) 
+            {
+                sm=self.skinMats[src.b0];
+                ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w0;
+                oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w0;
+                oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w0;
+                onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w0;
+                ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w0;
+                onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w0;
+            }
+            if (src.b1 >= 0 && src.w1 > 0.0) 
+            {
+                sm=self.skinMats[src.b1];
+                ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w1;
+                oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w1;
+                oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w1;
+                onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w1;
+                ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w1;
+                onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w1;
+            }
+            if (src.b2 >= 0 && src.w2 > 0.0) 
+            {
+                sm=self.skinMats[src.b2];
+                ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w2;
+                oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w2;
+                oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w2;
+                onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w2;
+                ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w2;
+                onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w2;
+            }
+            if (src.b3 >= 0 && src.w3 > 0.0) 
+            {
+                sm=self.skinMats[src.b3];
+                ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w3;
+                oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w3;
+                oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w3;
+                onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w3;
+                ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w3;
+                onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w3;
+            }
+
+            dst.x=ox; dst.y=oy; dst.z=oz;
+            dst.nx=onx; dst.ny=ony; dst.nz=onz;
+        }
+    }
+}
+
+    // ----------------------------------------------------------
+    // Draw
+    // ----------------------------------------------------------
+
+    def draw()
+    {
+        if (!self.ready) return;
+
+        glPushMatrix();
+        glTranslatef(self.posX, self.posY, self.posZ);
+        glRotatef(self.rotX, 1.0, 0.0, 0.0);
+        glRotatef(self.rotY, 0.0, 1.0, 0.0);
+        glRotatef(self.rotZ, 0.0, 0.0, 1.0);
+        glScalef(self.scaleVal, self.scaleVal, self.scaleVal);
+
+        for (var si = 0; si < len(self.surfaces); si += 1)
+            self.drawSurface(self.surfaces[si]);
+
+        if (self.showSkeleton)
+            self.drawSkeleton();
+
+        glPopMatrix();
+    }
+
+    def drawSurface(surf)
+    {
+        glEnable(GL_TEXTURE_2D);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+        if (surf.texId > 0) glBindTexture(GL_TEXTURE_2D, surf.texId);
+
+        glBegin(GL_TRIANGLES);
+        for (var i = 0; i < len(surf.indices); i += 1)
+        {
+            var idx = surf.indices[i];
+            var vt  = surf.skinned[idx];
+            glNormal3f(vt.nx, vt.ny, vt.nz);
+            glTexCoord2f(vt.u, vt.v);
+            glColor4f(vt.r, vt.g, vt.b, vt.a);
+            glVertex3f(vt.x, vt.y, vt.z);
+        }
+        glEnd();
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+    }
+
+    // ----------------------------------------------------------
+    // Stats
+    // ----------------------------------------------------------
+
+    def jointCount()   { return len(self.joints); }
+    def surfaceCount() { return len(self.surfaces); }
+    def triangleCount()
+    {
+        var total = 0;
+        for (var i = 0; i < len(self.surfaces); i += 1)
+            total += len(self.surfaces[i].indices) / 3;
+        return total;
+    }
+
+    def drawSkeleton()
+    {
+        if (!self.ready) return;
+
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(0.5);
+
+        for (var i = 0; i < len(self.joints); i += 1)
+        {
+            var j = self.joints[i];
+
+            // posição world do joint (coluna de translação da globalMat)
+            var jx = j.globalMat.m12;
+            var jy = j.globalMat.m13;
+            var jz = j.globalMat.m14;
+
+            // linha ao pai
+            if (j.parentIndex >= 0)
+            {
+                var p = self.joints[j.parentIndex];
+                var px = p.globalMat.m12;
+                var py = p.globalMat.m13;
+                var pz = p.globalMat.m14;
+
+                glBegin(GL_LINES);
+                glColor3f(1.0, 1.0, 0.0);
+                glVertex3f(px, py, pz);
+                glVertex3f(jx, jy, jz);
+                glEnd();
+            }
+
+            // eixos locais (X=vermelho, Y=verde, Z=azul)
+            var s = 0.5;
+            var m = j.globalMat;
+            glBegin(GL_LINES);
+            glColor3f(1.0, 0.2, 0.2);
+            glVertex3f(jx, jy, jz);
+            glVertex3f(jx + m.m0*s, jy + m.m1*s, jz + m.m2*s);
+            glColor3f(0.2, 1.0, 0.2);
+            glVertex3f(jx, jy, jz);
+            glVertex3f(jx + m.m4*s, jy + m.m5*s, jz + m.m6*s);
+            glColor3f(0.2, 0.5, 1.0);
+            glVertex3f(jx, jy, jz);
+            glVertex3f(jx + m.m8*s, jy + m.m9*s, jz + m.m10*s);
+            glEnd();
+
+            // ponto no joint
+            glPointSize(12.0);
+            glBegin(GL_POINTS);
+            glColor3f(1.0, 0.9, 0.1);
+            glVertex3f(jx, jy, jz);
+            glEnd();
+            glPointSize(1.0);
+        }
+
+        glLineWidth(1.0);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_TEXTURE_2D);
+    }
+}

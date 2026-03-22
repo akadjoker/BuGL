@@ -1,0 +1,255 @@
+// ================================================================
+// Demo: Blitz3D B3D renderer in BuLang
+//
+// Controls:
+//   - Mouse: look around
+//   - W/A/S/D: move
+//   - F: toggle brute force / BSP traversal
+//   - ESC: quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+
+include "lib_camera_fps.bu";
+include "lib_b3d.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.22, 0.26, 0.30, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+def drawAxes(size)
+{
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(2.0);
+    glBegin(GL_LINES);
+    glColor3f(1.0, 0.2, 0.2); glVertex3f(0,0,0); glVertex3f(size,0,0);
+    glColor3f(0.2, 1.0, 0.2); glVertex3f(0,0,0); glVertex3f(0,size,0);
+    glColor3f(0.2, 0.6, 1.0); glVertex3f(0,0,0); glVertex3f(0,0,size);
+    glEnd();
+    glLineWidth(1.0);
+}
+
+// ============================================================
+// Setup
+// ============================================================
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+SetGLAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+if (!SDL.Init("BuGL - B3D Viewer", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.07, 0.10, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+ 
+ 
+// ============================================================
+// Camera
+// ============================================================
+
+var cam = CameraFPS(0.0, 0.2, 1.0); // Posição inicial (X, Y, Z)
+cam.sensitivity = 0.12;
+cam.speed = 2.0;
+cam.yaw=-90;
+cam.mouseButton = 1; // Botão esquerdo do mouse para olhar ao redor
+
+//SetMouseRelative(true);
+
+// ============================================================
+// State
+// ============================================================
+
+var useBSPTraversal = true;
+var showGrid        = true;
+var showAxes        = true;
+var fpsSmooth       = 60.0;
+var bspScale        = 0.03;
+var wireframe       = false;
+
+
+
+var model = B3DModel();
+model.load("../assets/b3d/ninja.b3d", "../assets/b3d/");
+model.scaleVal = 0.05;
+
+ 
+
+
+print("B3D demo ready");
+ 
+
+// ============================================================
+// Main loop
+// ============================================================
+
+var currentFrame = 0;
+var maxFrame = model.numFrames - 1;
+
+var count=0;
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05)   dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+     
+    if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
+    if (IsKeyPressed(KEY_P))
+    {
+        wireframe = !wireframe;
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+ 
+
+ 
+    cam.update(dt);   
+    model.fps = 8.0; 
+    //currentFrame += model.fps * dt;
+    //if (currentFrame >= model.numFrames) currentFrame = 0.0;
+
+
+
+    if (IsResized())
+        glViewport(0, 0, GetWidth(), GetHeight());
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 70.0 * deg2rad, 0.05, 2000.0);
+    var eye  = cam.getEye();
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+    // Lighting simples
+    // glEnable(GL_LIGHTING);
+    // glEnable(GL_LIGHT0);
+    // glLightfv(GL_LIGHT0, GL_POSITION, [0.5, 1.0, 0.8, 0.0]);
+    // glLightfv(GL_LIGHT0, GL_DIFFUSE,  [1.0, 0.95, 0.9, 1.0]);
+    // glLightfv(GL_LIGHT0, GL_AMBIENT,  [0.3, 0.3,  0.3, 1.0]);
+
+    if (showGrid) drawGrid(-0.02, 50, 2.0);
+    if (showAxes) drawAxes(1.0);
+
+    model.update(currentFrame);
+    model.draw();
+ 
+ 
+
+    // ============================================================
+    // ImGui panel
+    // ============================================================
+
+    var panel = ImGui.Begin("B3D Viewer");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Separator();
+
+         
+
+            var (chAxes, nextAxes) = ImGui.Checkbox("Axes", showAxes);
+            if (chAxes) showAxes = nextAxes;
+            var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
+            if (chGrid) showGrid = nextGrid;
+
+            var (chWire, nextWire) = ImGui.Checkbox("Wireframe (W)", wireframe);
+            if (chWire)
+            {
+                wireframe = nextWire;
+                if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            }
+
+    
+            ImGui.Separator();
+            ImGui.Text("Camera:");
+            ImGui.Text("  eye: " + int(eye.x*100)/100.0 + ", " +
+                                   int(eye.y*100)/100.0 + ", " +
+                                   int(eye.z*100)/100.0);
+
+        
+        ImGui.Separator();
+        ImGui.Text("Frame");
+              
+
+        ImGui.Separator();
+        ImGui.Text("  Frame: " + currentFrame + " / " + maxFrame);
+        ImGui.Separator();
+        
+        //ImGui.SliderInt("Frame", currentFrame, 0, maxFrame);
+
+        var (_, nextCount) = ImGui.SliderInt("Count", currentFrame, 0, maxFrame);
+        currentFrame = nextCount;
+
+
+        var (showSkel, nextShowSkel) = ImGui.Checkbox("Show skeleton", model.showSkeleton);
+        if (showSkel) model.showSkeleton = nextShowSkel;
+        //ImGui.SliderFloat("##frame", currentFrame, 0.0, model.numFrames - 1, "Frame = %.1f");
+      
+
+        ImGui.Separator();
+        ImGui.Text("Controls:");
+        ImGui.Text("  Mouse: look");
+        ImGui.Text("  G: grid");
+        ImGui.Text("  W: wireframe");
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+// ============================================================
+// Cleanup
+// ============================================================
+ 
+Close();

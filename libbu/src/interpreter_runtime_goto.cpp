@@ -778,7 +778,167 @@ op_divide:
 
         PUSH(makeDouble(a.asDouble() / db));
         DISPATCH();
+    } else if (a.isByte() && b.isByte())
+    {
+        uint8 ib = b.asByte();
+        if (ib == 0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        uint8 ia = a.asByte();
+
+        if (ia % ib == 0)
+        {
+            PUSH(makeByte(ia / ib));
+        }
+        else
+        {
+            PUSH(makeDouble((double)ia / ib));
+        }
+        DISPATCH();
+    } else if (a.isByte() && b.isInt())
+    {
+        int ib = b.asInt();
+        if (ib == 0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        uint8 ia = a.asByte();
+
+        if (ia % ib == 0)
+        {
+            PUSH(makeByte(ia / ib));
+        }
+        else
+        {
+            PUSH(makeDouble((double)ia / ib));
+        }
+        DISPATCH();
+    } else if (a.isInt() && b.isByte())
+    {
+        uint8 ib = b.asByte();
+        if (ib == 0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        int ia = a.asInt();
+
+        if (ia % ib == 0)
+        {
+            PUSH(makeInt(ia / ib));
+        }
+        else
+        {
+            PUSH(makeDouble((double)ia / ib));
+        }
+        DISPATCH();
+    } else if (a.isDouble() && b.isByte())
+    {
+        uint8 ib = b.asByte();
+        if (ib == 0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        double da = a.asDouble();
+
+        PUSH(makeDouble(da / ib));
+        DISPATCH();
+    }else if (a.isByte() && b.isDouble())
+    {
+        double db = b.asDouble();
+        if (db == 0.0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        uint8 ia = a.asByte();
+
+        PUSH(makeDouble(ia / db));
+        DISPATCH();
+    } else if (a.isFloat() && b.isFloat())
+    {
+        float fb = b.asFloat();
+        if (fb == 0.0f)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        float fa = a.asFloat();
+        PUSH(makeFloat(fa / fb));
+        DISPATCH();
+    } else if (a.isFloat() && b.isInt())
+    {
+        int ib = b.asInt();
+        if (ib == 0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        float fa = a.asFloat();
+        PUSH(makeFloat(fa / ib));
+        DISPATCH();
+    } else if (a.isInt() && b.isFloat())
+    {
+        float fb = b.asFloat();
+        if (fb == 0.0f)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        int ia = a.asInt();
+        PUSH(makeFloat(ia / fb));
+        DISPATCH();
+    } else if (a.isFloat() && b.isByte())
+    {
+        uint8 ib = b.asByte();
+        if (ib == 0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        float fa = a.asFloat();
+        PUSH(makeFloat(fa / ib));
+        DISPATCH();
+    } else if (a.isByte() && b.isFloat())
+    {
+        float fb = b.asFloat();
+        if (fb == 0.0f)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        uint8 ia = a.asByte();
+
+        PUSH(makeFloat(ia / fb));
+        DISPATCH();
+    } else if(a.isFloat() && b.isDouble())
+    {
+        double db = b.asDouble();
+        if (db == 0.0)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        float fa = a.asFloat();
+        PUSH(makeDouble(fa / db));
+        DISPATCH();
+    } else if(a.isDouble() && b.isFloat())
+    {
+        float fb = b.asFloat();
+        if (fb == 0.0f)
+        {
+            THROW_DIV_ZERO();
+        }
+
+        double da = a.asDouble();
+        PUSH(makeDouble(da / fb));
+        DISPATCH();
     }
+    
 
     STORE_FRAME();
     runtimeError("Cannot apply '/' to %s and %s", getValueTypeName(a), getValueTypeName(b));
@@ -864,6 +1024,12 @@ op_negate:
     else if (a.isBool())
     {
         PUSH(makeBool(!a.asBool()));
+    } else if (a.isByte())
+    {
+        PUSH(makeByte(-a.asByte()));
+    } else if (a.isFloat())
+    {
+        PUSH(makeFloat(-a.asFloat()));
     }
     else
     {
@@ -2202,6 +2368,65 @@ op_invoke:
             ARGS_CLEANUP();
             PUSH(makeInt(len));
         }
+         else if (nameString == staticNames[(int)StaticNames::FIND])
+         {
+             if (argCount != 1)
+             {
+                 runtimeError("find() expects 1 argument");
+                 return {ProcessResult::PROCESS_DONE, 0};
+             }
+
+             Value substr = PEEK();
+             if (!substr.isString())
+             {
+                 runtimeError("find() expects string argument");
+                 return {ProcessResult::PROCESS_DONE, 0};
+             }
+
+             int index = stringPool.find(str, substr.asString());
+             ARGS_CLEANUP();
+             PUSH(makeInt(index));
+         }
+        else if (nameString == staticNames[(int)StaticNames::RFIND])
+        {
+            if (argCount < 1 || argCount > 2)
+            {
+                runtimeError("rfind() expects 1 or 2 arguments");
+                return {ProcessResult::PROCESS_DONE, 0};
+            }
+
+            Value substr;
+            int startIndex = -1;  // -1 = começa do fim
+
+            if (argCount == 1)
+            {
+                substr = PEEK();
+            }
+            else
+            {
+                Value startVal = PEEK();
+                substr = PEEK2();
+
+                if (!startVal.isNumber())
+                {
+                    runtimeError("rfind() startIndex must be number");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+
+                startIndex = (int)startVal.asNumber();
+            }
+
+            if (!substr.isString())
+            {
+                runtimeError("rfind() expects string argument");
+                return {ProcessResult::PROCESS_DONE, 0};
+            }
+
+            int result = stringPool.rfind(str, substr.asString(), startIndex);
+            ARGS_CLEANUP();
+            PUSH(makeInt(result));
+        }
+
         else if (nameString == staticNames[(int)StaticNames::UPPER])
         {
             ARGS_CLEANUP();
@@ -2254,6 +2479,55 @@ op_invoke:
                 (uint32_t)end.asNumber());
             ARGS_CLEANUP();
             PUSH(makeString(result));
+        }
+        else if (nameString == staticNames[(int)StaticNames::SUBSTR])
+        {
+            if (argCount < 1 || argCount > 2)
+            {
+                runtimeError("substr() expects (start) or (start, length)");
+                return {ProcessResult::PROCESS_DONE, 0};
+            }
+
+            int strLen = str->length();
+            int start  = 0;
+            int length = strLen;
+
+            if (argCount == 1)
+            {
+                Value startVal = PEEK();
+                if (!startVal.isNumber())
+                {
+                    runtimeError("substr() start must be number");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+                start = (int)startVal.asNumber();
+            }
+            else
+            {
+                Value startVal = PEEK2();
+                Value lenVal   = PEEK();
+                if (!startVal.isNumber() || !lenVal.isNumber())
+                {
+                    runtimeError("substr() expects number arguments");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+                start  = (int)startVal.asNumber();
+                length = (int)lenVal.asNumber();
+            }
+
+            // suporte a índices negativos estilo Python
+            if (start < 0) start = strLen + start;
+            if (start < 0) start = 0;
+            if (start > strLen) start = strLen;
+
+            int end = start + length;
+            if (end > strLen) end = strLen;
+            if (end < start)  end = start;
+
+            String *result = stringPool.substring(str, (uint32_t)start, (uint32_t)end);
+            ARGS_CLEANUP();
+            PUSH(makeString(result));
+        
         }
         else if (nameString == staticNames[(int)StaticNames::REPLACE])
         {
@@ -3810,8 +4084,14 @@ op_invoke:
                     return {ProcessResult::PROCESS_DONE, 0};
                 }
 
-                String *str = createString((const char *)(buf->data + buf->cursor),
-                                           (uint32)length);
+                const char *data_ptr = (const char *)(buf->data + buf->cursor);
+                size_t actual_length = 0;
+                while (actual_length < (size_t)length && data_ptr[actual_length] != '\0')
+                {
+                    actual_length++;
+                }
+
+                String *str = createString(data_ptr, (uint32)actual_length);
 
                 buf->cursor += length;
 

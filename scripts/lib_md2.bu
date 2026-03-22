@@ -1,0 +1,694 @@
+// ================================================================
+// lib_md2.bu — MD2 loader + legacy renderer in BuLang
+//
+// Focus:
+//   - Manual binary parsing in script
+//   - Frame interpolation on CPU
+//   - Old-school OpenGL textured triangles
+// ================================================================
+
+import file;
+import math;
+using math;
+import OpenGl;
+using OpenGl;
+import STB;
+using STB;
+import path;
+import regex;
+
+var MD2_IDENT = 844121161; // "IDP2"
+var MD2_VERSION = 8;
+
+class MD2Header
+{
+    var ident, version;
+    var skinWidth, skinHeight, frameSize;
+    var numSkins, numVerts, numUV, numTris, numGLCmds, numFrames;
+    var ofsSkins, ofsUV, ofsTris, ofsFrames, ofsGLCmds, ofsEnd;
+
+    def init()
+    {
+        self.ident = 0;
+        self.version = 0;
+        self.skinWidth = 0;
+        self.skinHeight = 0;
+        self.frameSize = 0;
+        self.numSkins = 0;
+        self.numVerts = 0;
+        self.numUV = 0;
+        self.numTris = 0;
+        self.numGLCmds = 0;
+        self.numFrames = 0;
+        self.ofsSkins = 0;
+        self.ofsUV = 0;
+        self.ofsTris = 0;
+        self.ofsFrames = 0;
+        self.ofsGLCmds = 0;
+        self.ofsEnd = 0;
+    }
+
+    def valid()
+    {
+        return self.ident == MD2_IDENT &&
+               self.version == MD2_VERSION &&
+               self.numVerts > 0 &&
+               self.numUV > 0 &&
+               self.numTris > 0 &&
+               self.numFrames > 0 &&
+               self.skinWidth > 0 &&
+               self.skinHeight > 0 &&
+               self.ofsEnd > 68;
+    }
+}
+
+class MD2Animation
+{
+    var name, first, last, fps;
+
+    def init(name, first, last, fps)
+    {
+        self.name = name;
+        self.first = first;
+        self.last = last;
+        self.fps = fps;
+    }
+}
+
+class MD2AnimState
+{
+    var first, last, fps;
+    var current, next, interp;
+    var accum;
+    var loop;
+    var playing;
+
+    def init()
+    {
+        self.first = 0;
+        self.last = 0;
+        self.fps = 6.0;
+        self.current = 0;
+        self.next = 0;
+        self.interp = 0.0;
+        self.accum = 0.0;
+        self.loop = true;
+        self.playing = true;
+    }
+
+    def setRange(first, last, fps, frameCount, shouldLoop)
+    {
+        if (frameCount <= 0) frameCount = 1;
+        if (first < 0) first = 0;
+        if (last < first) last = first;
+        if (last >= frameCount) last = frameCount - 1;
+        if (fps < 0.01) fps = 0.01;
+
+        self.first = first;
+        self.last = last;
+        self.fps = fps;
+        self.current = first;
+        self.next = first + 1;
+        if (self.next > last) self.next = first;
+        self.interp = 0.0;
+        self.accum = 0.0;
+        self.loop = shouldLoop;
+        self.playing = true;
+    }
+
+    def update(dt)
+    {
+        if (!self.playing) return;
+
+        var frameTime = 1.0 / self.fps;
+        self.accum = self.accum + dt;
+
+        while (self.accum >= frameTime)
+        {
+            self.accum = self.accum - frameTime;
+            self.current = self.next;
+            self.next = self.current + 1;
+
+            if (self.next > self.last)
+            {
+                if (self.loop)
+                {
+                    self.current = self.first;
+                    self.next = self.first + 1;
+                    if (self.next > self.last) self.next = self.first;
+                }
+                else
+                {
+                    self.current = self.last;
+                    self.next = self.last;
+                    self.playing = false;
+                    self.accum = 0.0;
+                    break;
+                }
+            }
+        }
+
+        self.interp = self.accum / frameTime;
+        if (self.interp < 0.0) self.interp = 0.0;
+        if (self.interp > 1.0) self.interp = 1.0;
+        if (!self.playing) self.interp = 0.0;
+    }
+}
+
+def md2ResolvePath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+def md2LoadFileBuffer(filePath)
+{
+    var handle = file.open(filePath, "r");
+    if (handle == nil || handle <= 0)
+    {
+        print("MD2: failed to open file: " + filePath);
+        return nil;
+    }
+
+    var size = file.size(handle);
+    if (size == nil || size <= 0)
+    {
+        file.close(handle);
+        print("MD2: invalid file size: " + filePath);
+        return nil;
+    }
+
+    var bytes = file.read_all(handle);
+    file.close(handle);
+    if (bytes == nil) return nil;
+    return bytes;
+}
+
+def md2StripExt(filename)
+{
+    return regex.replace("\\.[^.]+$", "", filename);
+}
+
+def md2LoadTexture2D(texPath)
+{
+    stbi_set_flip_vertically_on_load(0);
+    var (w, h, channels, pixels) = stbi_load(texPath, 4);
+    if (pixels == nil || w == nil || h == nil)
+    {
+        print("MD2: failed to load texture: " + texPath);
+        return 0;
+    }
+
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def md2FindTexturePath(modelPath)
+{
+    var dir = path.dirname(modelPath);
+    var base = md2StripExt(path.basename(modelPath));
+    var exts = [".png", ".jpg", ".jpeg", ".bmp", ".tga"];
+
+    for (var i = 0; i < len(exts); i = i + 1)
+    {
+        var candidate = path.join(dir, base + exts[i]);
+        if (path.exists(candidate)) return candidate;
+    }
+    return nil;
+}
+
+def md2DefaultAnimations()
+{
+    return [
+        MD2Animation("Stand", 0, 39, 9),
+        MD2Animation("Run", 40, 45, 10),
+        MD2Animation("Attack", 46, 53, 10),
+        MD2Animation("Pain A", 54, 57, 7),
+        MD2Animation("Pain B", 58, 61, 7),
+        MD2Animation("Pain C", 62, 65, 7),
+        MD2Animation("Jump", 66, 71, 7),
+        MD2Animation("Flip", 72, 83, 7),
+        MD2Animation("Salute", 84, 94, 7),
+        MD2Animation("Fallback", 95, 111, 10),
+        MD2Animation("Wave", 112, 122, 7),
+        MD2Animation("Pointing", 123, 134, 6),
+        MD2Animation("Crouch Stand", 135, 153, 10),
+        MD2Animation("Crouch Walk", 154, 159, 7),
+        MD2Animation("Crouch Attack", 160, 168, 10),
+        MD2Animation("Crouch Pain", 169, 172, 7),
+        MD2Animation("Crouch Death", 173, 177, 5),
+        MD2Animation("Death Fallback", 178, 183, 7),
+        MD2Animation("Death Fall Forward", 184, 189, 7),
+        MD2Animation("Death Fallback Slow", 190, 197, 7),
+        MD2Animation("Boom", 198, 198, 5)
+    ];
+}
+
+class MD2Model
+{
+    var header;
+    var framePositions;
+    var texcoords;
+    var vertexIndices;
+    var uvIndices;
+    var texture;
+    var texturePath;
+    var sourcePath;
+    var frameNames;
+    var ready;
+    var scale;
+    var positionX, positionY, positionZ;
+    var rotationX, rotationY, rotationZ;
+    var animations;
+    var animationIndex;
+    var anim;
+    var defaultBlendTime;
+    var transitionActive;
+    var transitionTime;
+    var transitionDuration;
+    var transitionFromCurrent;
+    var transitionFromNext;
+    var transitionFromInterp;
+
+    def init()
+    {
+        self.header = MD2Header();
+        self.framePositions = Float32Array(0);
+        self.texcoords = Float32Array(0);
+        self.vertexIndices = Uint16Array(0);
+        self.uvIndices = Uint16Array(0);
+        self.texture = 0;
+        self.texturePath = "";
+        self.sourcePath = "";
+        self.frameNames = [];
+        self.ready = false;
+        self.scale = 1.0;
+        self.positionX = 0.0;
+        self.positionY = 0.0;
+        self.positionZ = 0.0;
+        self.rotationX = 0.0;
+        self.rotationY = 0.0;
+        self.rotationZ = 0.0;
+        self.animations = md2DefaultAnimations();
+        self.animationIndex = 0;
+        self.anim = MD2AnimState();
+        self.defaultBlendTime = 0.16;
+        self.transitionActive = false;
+        self.transitionTime = 0.0;
+        self.transitionDuration = 0.0;
+        self.transitionFromCurrent = 0;
+        self.transitionFromNext = 0;
+        self.transitionFromInterp = 0.0;
+    }
+
+    def destroy()
+    {
+        if (self.texture > 0) glDeleteTextures(self.texture);
+        self.texture = 0;
+        self.ready = false;
+        self.transitionActive = false;
+        self.transitionTime = 0.0;
+        self.transitionDuration = 0.0;
+    }
+
+    def load(modelPath)
+    {
+        self.destroy();
+        self.sourcePath = modelPath;
+
+        var buf = md2LoadFileBuffer(modelPath);
+        if (buf == nil) return false;
+        if (buf.length() < 68)
+        {
+            print("MD2: file too small: " + modelPath);
+            return false;
+        }
+
+        self.readHeader(buf);
+        if (!self.header.valid())
+        {
+            print("MD2: invalid header in " + modelPath);
+            return false;
+        }
+        if (self.header.ofsEnd > buf.length())
+        {
+            print("MD2: truncated file: " + modelPath);
+            return false;
+        }
+
+        self.readTexcoords(buf);
+        self.readTriangles(buf);
+        self.readFrames(buf);
+
+        var texPath = md2FindTexturePath(modelPath);
+        if (texPath != nil)
+        {
+            self.texture = md2LoadTexture2D(texPath);
+            self.texturePath = texPath;
+        }
+
+        self.ready = self.header.numFrames > 0 &&
+                     self.header.numVerts > 0 &&
+                     self.header.numTris > 0 &&
+                     self.vertexIndices.length() >= self.header.numTris * 3 &&
+                     self.uvIndices.length() >= self.header.numTris * 3;
+
+        self.animationIndex = 0;
+        self.applyAnimationIndex(self.animationIndex);
+        return self.ready;
+    }
+
+    def readHeader(buf)
+    {
+        buf.seek(0);
+        self.header.ident = buf.readInt();
+        self.header.version = buf.readInt();
+        self.header.skinWidth = buf.readInt();
+        self.header.skinHeight = buf.readInt();
+        self.header.frameSize = buf.readInt();
+        self.header.numSkins = buf.readInt();
+        self.header.numVerts = buf.readInt();
+        self.header.numUV = buf.readInt();
+        self.header.numTris = buf.readInt();
+        self.header.numGLCmds = buf.readInt();
+        self.header.numFrames = buf.readInt();
+        self.header.ofsSkins = buf.readInt();
+        self.header.ofsUV = buf.readInt();
+        self.header.ofsTris = buf.readInt();
+        self.header.ofsFrames = buf.readInt();
+        self.header.ofsGLCmds = buf.readInt();
+        self.header.ofsEnd = buf.readInt();
+    }
+
+    def readTexcoords(buf)
+    {
+        self.texcoords = Float32Array(@(self.header.numUV * 2, TYPE_FLOAT));
+        buf.seek(self.header.ofsUV);
+
+        for (var i = 0; i < self.header.numUV; i = i + 1)
+        {
+            var s = buf.readShort();
+            var t = buf.readShort();
+            self.texcoords.set(i * 2 + 0, s / self.header.skinWidth);
+            self.texcoords.set(i * 2 + 1, t / self.header.skinHeight);
+        }
+    }
+
+    def readTriangles(buf)
+    {
+        self.vertexIndices = Uint16Array(@(self.header.numTris * 3, TYPE_UINT16));
+        self.uvIndices = Uint16Array(@(self.header.numTris * 3, TYPE_UINT16));
+        buf.seek(self.header.ofsTris);
+
+        for (var i = 0; i < self.header.numTris; i = i + 1)
+        {
+            var base = i * 3;
+            self.vertexIndices.set(base + 0, buf.readUShort());
+            self.vertexIndices.set(base + 1, buf.readUShort());
+            self.vertexIndices.set(base + 2, buf.readUShort());
+            self.uvIndices.set(base + 0, buf.readUShort());
+            self.uvIndices.set(base + 1, buf.readUShort());
+            self.uvIndices.set(base + 2, buf.readUShort());
+        }
+    }
+
+    def readFrames(buf)
+    {
+        var floatsPerFrame = self.header.numVerts * 3;
+        self.framePositions = Float32Array(@(self.header.numFrames * floatsPerFrame, TYPE_FLOAT));
+        self.frameNames = [];
+        var vx = 0;
+        var vy = 0;
+        var vz = 0;
+        var x = 0.0;
+        var y = 0.0;
+        var z = 0.0;
+        var dst = 0;
+
+        for (var frameIndex = 0; frameIndex < self.header.numFrames; frameIndex = frameIndex + 1)
+        {
+            buf.seek(self.header.ofsFrames + frameIndex * self.header.frameSize);
+
+            var scaleX = buf.readFloat();
+            var scaleY = buf.readFloat();
+            var scaleZ = buf.readFloat();
+            var transX = buf.readFloat();
+            var transY = buf.readFloat();
+            var transZ = buf.readFloat();
+            var name = buf.readString(16);
+            self.frameNames.push(name);
+
+            var frameBase = frameIndex * floatsPerFrame;
+            for (var v = 0; v < self.header.numVerts; v = v + 1)
+            {
+                vx = buf.readByte();
+                vy = buf.readByte();
+                vz = buf.readByte();
+                buf.readByte(); // light normal index
+
+                x = transX + vx * scaleX;
+                y = transZ + vz * scaleZ;
+                z = transY + vy * scaleY;
+                dst = frameBase + v * 3;
+                self.framePositions.set(dst + 0, x / 10.0);
+                self.framePositions.set(dst + 1, y / 10.0);
+                self.framePositions.set(dst + 2, z / 10.0);
+            }
+        }
+    }
+
+    def applyAnimationIndex(index)
+    {
+        if (len(self.animations) <= 0) return false;
+        if (index < 0) index = len(self.animations) - 1;
+        if (index >= len(self.animations)) index = 0;
+        self.animationIndex = index;
+        var a = self.animations[index];
+        self.anim.setRange(a.first, a.last, a.fps, self.header.numFrames, true);
+        self.transitionActive = false;
+        self.transitionTime = 0.0;
+        self.transitionDuration = 0.0;
+        return true;
+    }
+
+    def setAnimationByIndex(index)
+    {
+        return self.playAnimationByIndex(index, self.defaultBlendTime);
+    }
+
+    def findAnimationByName(name)
+    {
+        for (var i = 0; i < len(self.animations); i = i + 1)
+        {
+            if (self.animations[i].name == name) return i;
+        }
+        return -1;
+    }
+
+    def setAnimationByName(name)
+    {
+        var index = self.findAnimationByName(name);
+        if (index < 0) return false;
+        return self.playAnimationByIndex(index, self.defaultBlendTime);
+    }
+
+    def nextAnimation()
+    {
+        return self.playAnimationByIndex(self.animationIndex + 1, self.defaultBlendTime);
+    }
+
+    def prevAnimation()
+    {
+        return self.playAnimationByIndex(self.animationIndex - 1, self.defaultBlendTime);
+    }
+
+    def playAnimationByIndex(index, blendTime)
+    {
+        if (len(self.animations) <= 0) return false;
+        if (index < 0) index = len(self.animations) - 1;
+        if (index >= len(self.animations)) index = 0;
+        if (index == self.animationIndex && self.ready) return true;
+        if (!self.ready || blendTime <= 0.0) return self.applyAnimationIndex(index);
+
+        self.transitionFromCurrent = self.anim.current;
+        self.transitionFromNext = self.anim.next;
+        self.transitionFromInterp = self.anim.interp;
+        self.transitionActive = true;
+        self.transitionTime = 0.0;
+        self.transitionDuration = blendTime;
+
+        self.animationIndex = index;
+        var a = self.animations[index];
+        self.anim.setRange(a.first, a.last, a.fps, self.header.numFrames, true);
+        return true;
+    }
+
+    def playAnimationByName(name, blendTime)
+    {
+        var index = self.findAnimationByName(name);
+        if (index < 0) return false;
+        return self.playAnimationByIndex(index, blendTime);
+    }
+
+    def update(dt)
+    {
+        self.anim.update(dt);
+        if (self.transitionActive)
+        {
+            self.transitionTime = self.transitionTime + dt;
+            if (self.transitionTime >= self.transitionDuration)
+            {
+                self.transitionActive = false;
+                self.transitionTime = self.transitionDuration;
+            }
+        }
+    }
+
+    def animationName()
+    {
+        if (len(self.animations) <= 0) return "";
+        return self.animations[self.animationIndex].name;
+    }
+
+    def currentFrameName()
+    {
+        if (len(self.frameNames) <= 0) return "";
+        if (self.anim.current < 0 || self.anim.current >= len(self.frameNames)) return "";
+        return self.frameNames[self.anim.current];
+    }
+
+    def triangleCount()
+    {
+        return self.header.numTris;
+    }
+
+    def transitionBlend()
+    {
+        if (!self.transitionActive) return 1.0;
+        if (self.transitionDuration <= 0.000001) return 1.0;
+        var t = self.transitionTime / self.transitionDuration;
+        if (t < 0.0) t = 0.0;
+        if (t > 1.0) t = 1.0;
+        return t;
+    }
+
+    def draw()
+    {
+        if (!self.ready) return;
+
+        var frameSize = self.header.numVerts * 3;
+        var frameA = self.anim.current;
+        var frameB = self.anim.next;
+        if (frameA < 0) frameA = 0;
+        if (frameA >= self.header.numFrames) frameA = self.header.numFrames - 1;
+        if (frameB < 0) frameB = frameA;
+        if (frameB >= self.header.numFrames) frameB = frameA;
+
+        var baseA = frameA * frameSize;
+        var baseB = frameB * frameSize;
+        var t = self.anim.interp;
+        var vi = 0;
+        var ti = 0;
+        var pa = 0;
+        var pb = 0;
+        var x0 = 0.0;
+        var y0 = 0.0;
+        var z0 = 0.0;
+        var x1 = 0.0;
+        var y1 = 0.0;
+        var z1 = 0.0;
+        var sx0 = 0.0;
+        var sy0 = 0.0;
+        var sz0 = 0.0;
+        var sx1 = 0.0;
+        var sy1 = 0.0;
+        var sz1 = 0.0;
+        var sourceX = 0.0;
+        var sourceY = 0.0;
+        var sourceZ = 0.0;
+        var x = 0.0;
+        var y = 0.0;
+        var z = 0.0;
+        var uvBase = 0;
+        var u = 0.0;
+        var v = 0.0;
+        var blend = self.transitionBlend();
+        var srcBaseA = self.transitionFromCurrent * frameSize;
+        var srcBaseB = self.transitionFromNext * frameSize;
+        var srcT = self.transitionFromInterp;
+
+        glPushMatrix();
+        glTranslatef(self.positionX, self.positionY, self.positionZ);
+        glRotatef(self.rotationX, 1.0, 0.0, 0.0);
+        glRotatef(self.rotationY, 0.0, 1.0, 0.0);
+        glRotatef(self.rotationZ, 0.0, 0.0, 1.0);
+        glScalef(self.scale, self.scale, self.scale);
+
+        glEnable(GL_TEXTURE_2D);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+        glBindTexture(GL_TEXTURE_2D, self.texture);
+
+        glBegin(GL_TRIANGLES);
+        for (var tri = 0; tri < self.header.numTris; tri = tri + 1)
+        {
+            var triBase = tri * 3;
+            for (var k = 0; k < 3; k = k + 1)
+            {
+                vi = self.vertexIndices.get(triBase + k);
+                ti = self.uvIndices.get(triBase + k);
+                pa = baseA + vi * 3;
+                pb = baseB + vi * 3;
+
+                x0 = self.framePositions.get(pa + 0);
+                y0 = self.framePositions.get(pa + 1);
+                z0 = self.framePositions.get(pa + 2);
+                x1 = self.framePositions.get(pb + 0);
+                y1 = self.framePositions.get(pb + 1);
+                z1 = self.framePositions.get(pb + 2);
+
+                x = x0 + (x1 - x0) * t;
+                y = y0 + (y1 - y0) * t;
+                z = z0 + (z1 - z0) * t;
+
+                if (self.transitionActive)
+                {
+                    pa = srcBaseA + vi * 3;
+                    pb = srcBaseB + vi * 3;
+                    sx0 = self.framePositions.get(pa + 0);
+                    sy0 = self.framePositions.get(pa + 1);
+                    sz0 = self.framePositions.get(pa + 2);
+                    sx1 = self.framePositions.get(pb + 0);
+                    sy1 = self.framePositions.get(pb + 1);
+                    sz1 = self.framePositions.get(pb + 2);
+                    sourceX = sx0 + (sx1 - sx0) * srcT;
+                    sourceY = sy0 + (sy1 - sy0) * srcT;
+                    sourceZ = sz0 + (sz1 - sz0) * srcT;
+                    x = sourceX + (x - sourceX) * blend;
+                    y = sourceY + (y - sourceY) * blend;
+                    z = sourceZ + (z - sourceZ) * blend;
+                }
+
+                uvBase = ti * 2;
+                u = self.texcoords.get(uvBase + 0);
+                v = self.texcoords.get(uvBase + 1);
+
+                glTexCoord2f(u, v);
+                glVertex3f(x, y, z);
+            }
+        }
+        glEnd();
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glPopMatrix();
+    }
+}

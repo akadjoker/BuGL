@@ -1149,17 +1149,26 @@ import file;
 | `file.tell(id)` | 1 | Get cursor position → int |
 | `file.size(id)` | 1 | Get file size → int |
 | `file.write_byte(id, val)` | 2 | Write uint8 → bool |
+| `file.write_short(id, val)` | 2 | Write int16 → bool |
+| `file.write_ushort(id, val)` | 2 | Write uint16 → bool |
 | `file.write_int(id, val)` | 2 | Write int32 → bool |
+| `file.write_uint(id, val)` | 2 | Write uint32 → bool |
 | `file.write_float(id, val)` | 2 | Write float → bool |
 | `file.write_double(id, val)` | 2 | Write double → bool |
 | `file.write_bool(id, val)` | 2 | Write bool → bool |
 | `file.write_string(id, val)` | 2 | Write length-prefixed string → bool |
+| `file.write_buffer(id, buf)` | 2 | Write Buffer raw bytes → bool |
 | `file.read_byte(id)` | 1 | Read uint8 → int |
+| `file.read_short(id)` | 1 | Read int16 → int |
+| `file.read_ushort(id)` | 1 | Read uint16 → int |
 | `file.read_int(id)` | 1 | Read int32 → int |
+| `file.read_uint(id)` | 1 | Read uint32 → double |
 | `file.read_float(id)` | 1 | Read float → double |
 | `file.read_double(id)` | 1 | Read double → double |
 | `file.read_bool(id)` | 1 | Read bool → bool |
 | `file.read_string(id)` | 1 | Read length-prefixed string → string |
+| `file.read_bytes(id, count)` | 2 | Read up to `count` bytes → `Buffer(TYPE_UINT8)` |
+| `file.read_all(id)` | 1 | Read all remaining bytes → `Buffer(TYPE_UINT8)` |
 
 ---
 
@@ -1460,6 +1469,4 @@ primary        → INT | FLOAT | STRING | FSTRING | "true" | "false" | "nil"
                | mathFunc | "clock()" | "len(" expr ")" | "free(" expr ")"
                | "type" IDENT | "proc(" expr ")" | "get_id(" expr ")"
 ```
-
-
 

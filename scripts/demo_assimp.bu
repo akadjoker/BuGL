@@ -199,7 +199,7 @@ var yaw  = -90.0; var pitch = 0.0;
 var camSpeed = 3.0;  var sens  = 0.1;
 var firstMouse = true;
 
-SDL_SetRelativeMouseMode(true);
+SetMouseRelative(true);
 
 var lightX = 4.0; var lightY = 6.0; var lightZ = 4.0;
 var modelAngle = 0.0;

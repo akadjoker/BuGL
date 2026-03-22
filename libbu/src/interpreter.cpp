@@ -29,11 +29,14 @@ Interpreter::Interpreter()
   staticNames[(int)StaticNames::REMOVE] = createString("remove");
   staticNames[(int)StaticNames::INSERT] = createString("insert");
   staticNames[(int)StaticNames::FIND] = createString("find");
+  staticNames[(int)StaticNames::RFIND] = createString("rfind");
   staticNames[(int)StaticNames::CONTAINS] = createString("contains");
   staticNames[(int)StaticNames::REVERSE] = createString("reverse");
   staticNames[(int)StaticNames::SLICE] = createString("slice");
   staticNames[(int)StaticNames::CONCAT] = createString("concat");
   staticNames[(int)StaticNames::JOIN] = createString("join");
+  
+
   staticNames[(int)StaticNames::FIRST] = createString("first");
   staticNames[(int)StaticNames::LAST] = createString("last");
   staticNames[(int)StaticNames::FILL] = createString("fill");
@@ -47,6 +50,7 @@ Interpreter::Interpreter()
   staticNames[(int)StaticNames::LOWER] = createString("lower");
   staticNames[(int)StaticNames::CONCAT] = createString("concat");
   staticNames[(int)StaticNames::SUB] = createString("sub");
+  staticNames[(int)StaticNames::SUBSTR] = createString("substr");
   staticNames[(int)StaticNames::REPLACE] = createString("replace");
   staticNames[(int)StaticNames::AT] = createString("at");
   staticNames[(int)StaticNames::CONTAINS] = createString("contains");
@@ -962,6 +966,7 @@ bool Interpreter::run(const char *source, bool _dump)
 
   //  Debug::disassembleChunk(*mainProcess->frames[0].func->chunk,"#main");
   run_process(mainProcess);
+  currentProcess = nullptr;
 
   return !hasFatalError_;
 #endif

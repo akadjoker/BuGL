@@ -1,0 +1,371 @@
+// ================================================================
+// Demo: MD3 legacy renderer in BuLang
+//
+// Controls:
+//   - Right mouse drag: orbit camera
+//   - W/S or mouse wheel: zoom
+//   - 1..6 quick animation presets (Quake 3 names)
+//   - Space: pause / resume
+//   - ESC: quit
+// ================================================================
+
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+include "lib_camera_orbit.bu";
+include "lib_md3.bu";
+
+
+var deg2rad = 0.017453292519943295;
+
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.28, 0.32, 0.36, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+
+def drawAxes(size)
+{
+    glDisable(GL_TEXTURE_2D);
+    glBegin(GL_LINES);
+    glColor3f(1.0, 0.2, 0.2); glVertex3f(0.0, 0.0, 0.0); glVertex3f(size, 0.0, 0.0);
+    glColor3f(0.2, 1.0, 0.2); glVertex3f(0.0, 0.0, 0.0); glVertex3f(0.0, size, 0.0);
+    glColor3f(0.2, 0.7, 1.0); glVertex3f(0.0, 0.0, 0.0); glVertex3f(0.0, 0.0, size);
+    glEnd();
+}
+
+
+def drawTagMarkers(legs)
+{
+    if (legs.tagCount() <= 0) return;
+    var f = legs.anim.current;
+    for (var i = 0; i < legs.tagCount(); i = i + 1)
+    {
+        var tag = legs.tags[i];
+        var ox = tag.origins.get(f * 3 + 0);
+        var oy = tag.origins.get(f * 3 + 1);
+        var oz = tag.origins.get(f * 3 + 2);
+
+        glDisable(GL_TEXTURE_2D);
+        glPointSize(6.0);
+        glBegin(GL_POINTS);
+        glColor3f(1.0, 0.85, 0.1);
+        glVertex3f(ox, oy, oz);
+        glEnd();
+        glPointSize(1.0);
+    }
+}
+
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+
+if (!SDL.Init("BuGL - MD3 Legacy", 1280, 820, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+
+ImGui.StyleColorsDark();
+
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.06, 0.08, 0.11, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+
+ 
+
+var legs = MD3Model();
+if (!legs.load("../assets/md3/lower.md3"))
+{
+    print("Failed to load MD3: ../assets/md3/lower.md3");
+    Close();
+    return;
+}
+
+
+legs.scale     = 0.055;  // Quake 3 units are large
+ 
+legs.setSurfaceTexture(0,"../assets/md3/body.jpg");
+
+legs.addAnimation("DEATH1", 0,   30, true, 20.0);
+legs.addAnimation("DEAD1",  29,  1,  true, 20.0);
+legs.addAnimation("DEATH2", 30,  30, false, 20.0);
+legs.addAnimation("DEAD2",  59,  1,  false, 20.0);
+legs.addAnimation("DEATH3", 60,  30, false, 20.0);
+legs.addAnimation("DEAD3",  89,  1,  false, 20.0);
+legs.addAnimation("WALK",   90,  8,  true,  20.0);
+legs.addAnimation("RUN",    98,  12, true,  15.0);
+legs.addAnimation("BACK",   110, 11, true,  21.0);
+legs.addAnimation("SWIM",   121, 10, true,  20.0);
+legs.addAnimation("JUMP",   131, 10, false, 15.0);
+legs.addAnimation("LAND",   141, 10, false, 18.0);
+legs.addAnimation("JUMPB",  151, 6,  false, 20.0);
+legs.addAnimation("LANDB",  157, 8,  false, 15.0);
+legs.addAnimation("IDLE",   165, 1,  true,  15.0);
+legs.addAnimation("IDLECR", 166, 10, true,  15.0);
+legs.addAnimation("TURN",   177, 7,  true,  15.0);
+legs.setAnimationByIndex(7);  // default to first animation
+
+var upper = MD3Model();
+if (!upper.load("../assets/md3/upper.md3"))
+{
+    print("Failed to load MD3: ../assets/md3/upper.md3");
+    Close();
+    return;
+}
+upper.scale     = 0.055;  // Quake 3 units are large
+upper.setSurfaceTexture(0,"../assets/md3/body.jpg");
+upper.addAnimation("DEATH1",  0,   30, false, 20.0);
+upper.addAnimation("DEAD1",   29,  1,  false, 20.0);
+upper.addAnimation("DEATH2",  30,  30, false, 20.0);
+upper.addAnimation("DEAD2",   59,  1,  false, 20.0);
+upper.addAnimation("DEATH3",  60,  30, false, 20.0);
+upper.addAnimation("DEAD3",   89,  1,  false, 20.0);
+upper.addAnimation("GESTURE", 90,  40, true,  18.0);
+upper.addAnimation("ATTACK",  130, 6,  false, 15.0);
+upper.addAnimation("ATTACK2", 136, 6,  false, 15.0);
+upper.addAnimation("DROP",    142, 5,  false, 20.0);
+upper.addAnimation("RAISE",   147, 4,  false, 20.0);
+upper.addAnimation("STAND",   151, 1,  true,  15.0);
+upper.addAnimation("STAND2",  152, 1,  true,  15.0);
+upper.setAnimationByIndex(6);
+
+var head = MD3Model();
+if (!head.load("../assets/md3/head.md3"))
+{
+    print("Failed to load MD3: ../assets/md3/head.md3");
+    Close();
+    return;
+}
+head.scale     = 0.055;  // Quake 3 units are large
+head.setSurfaceTexture(0,"../assets/md3/head.jpg");
+
+var weapon = MD3Model();
+if (!weapon.load("../assets/md3/gun.md3"))
+{
+    print("Failed to load MD3: ../assets/md3/gun.md3");
+    Close();
+    return;
+}
+weapon.scale     = 0.055;  // Quake 3 units are large
+weapon.setSurfaceTexture(0,"../assets/md3/gun.jpg");
+ 
+
+
+var cam = CameraOrbit(0.0, 2.8, 0.0, 9.0);
+cam.setAngles(18.0, -16.0);
+cam.minDist = 2.0;
+cam.maxDist = 28.0;
+cam.zoomSpeed = 12.0;
+
+
+var paused      = false;
+var showTags    = true;
+var fpsSmooth   = 60.0;
+var animFps     = 10.0;
+var overrideFps = false;
+
+
+print("MD3 legacy demo");
+print("surfaces: " + legs.surfaceCount() + "  tags: " + legs.tagCount());
+print("1 LEGS_IDLE | 2 LEGS_WALK | 3 LEGS_RUN | 4 LEGS_JUMP | 5 TORSO_STAND | 6 TORSO_ATTACK");
+
+ 
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05)   dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_SPACE))  paused = !paused;
+    if (IsKeyPressed(KEY_1)) legs.setAnimationByName("LEGS_IDLE");
+    if (IsKeyPressed(KEY_2)) legs.setAnimationByName("LEGS_WALK");
+    if (IsKeyPressed(KEY_3)) legs.setAnimationByName("LEGS_RUN");
+    if (IsKeyPressed(KEY_4)) legs.setAnimationByName("LEGS_JUMP");
+    if (IsKeyPressed(KEY_5)) legs.setAnimationByName("TORSO_STAND");
+    if (IsKeyPressed(KEY_6)) legs.setAnimationByName("TORSO_ATTACK");
+    
+    
+    cam.update(dt);
+    if (!paused)
+    {
+        if (overrideFps) 
+        {
+        legs.anim.fps = animFps;
+        upper.anim.fps = animFps;
+        }
+        legs.update(dt);
+        upper.update(dt);
+    }
+    
+    
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+    
+    
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 55.0 * deg2rad, 0.1, 120.0);
+    
+    
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+    
+    
+    drawGrid(-0.01, 24, 1.0);
+    drawAxes(2.4);
+    
+    
+    glPushMatrix();
+    glTranslatef(0.0, 0.0, 0.0);
+    legs.draw();
+    if(showTags) legs.drawTags();
+   
+   
+// upper no espaço do tag_torso do lower
+    legs.pushTagSpace(0);
+        upper.drawSurfaces();
+        if(showTags) upper.drawTagsLocal();
+    
+            // head no espaço do tag_head do upper
+            upper.pushTagSpaceLocal(0);
+            head.drawSurfaces();
+            upper.popTagSpace();
+
+            // weapon no espaço do tag_weapon do upper
+            upper.pushTagSpaceLocal(1);
+            weapon.drawSurfaces();
+            upper.popTagSpace();
+
+    legs.popTagSpace();
+ 
+ 
+ 
+    glPopMatrix();
+
+
+    var panel = ImGui.Begin("MD3 Viewer");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Separator();
+        ImGui.Text("Legs");
+        ImGui.Text("surfaces: " + legs.surfaceCount());
+        ImGui.Text("tags:     " + legs.tagCount());
+        ImGui.Text("frames:   " + legs.frameCount());
+        ImGui.Text("tris:     " + legs.triangleCount());
+        ImGui.Separator();
+        ImGui.Text("anim: " + legs.animationName());
+        ImGui.Text("frame: " + legs.anim.current + " -> " + legs.anim.next + "  t=" +   legs.anim.interp);
+        ImGui.Separator();
+
+ 
+
+        // Tags list
+        if (legs.tagCount() > 0)
+        {
+            ImGui.Separator();
+            ImGui.Text("Tags:");
+            for (var i = 0; i < legs.tagCount(); i = i + 1)
+                ImGui.Text("  [" + i + "] " + legs.tags[i].name);
+        }
+        ImGui.Separator();
+        ImGui.Text("Upper");
+        ImGui.Text("surfaces: " + upper.surfaceCount());
+        ImGui.Text("tags:     " + upper.tagCount());
+        ImGui.Text("frames:   " + upper.frameCount());
+        ImGui.Text("tris:     " + upper.triangleCount());
+        ImGui.Separator();
+        ImGui.Text("anim: " + upper.animationName());
+        ImGui.Text("frame: " + upper.anim.current + " -> " + upper.anim.next + "  t=" + upper.anim.interp);
+        ImGui.Separator();
+
+
+
+        if (upper.tagCount() > 0)
+        {
+            ImGui.Text("Upper tags:");
+            for (var i = 0; i < upper.tagCount(); i = i + 1)
+                ImGui.Text("  [" + i + "] " + upper.tags[i].name);
+        }
+        ImGui.Separator();
+
+ 
+  
+
+        var pauseLabel = "Pause";
+        if (paused) pauseLabel = "Resume";
+        if (ImGui.Button(pauseLabel)) paused = !paused;
+
+        ImGui.Separator();
+
+        var (changedShowTags, nextShowTags) = ImGui.Checkbox("Show tag markers", showTags);
+        if (changedShowTags) showTags = nextShowTags;
+
+        var (changedOverride, nextOverride) = ImGui.Checkbox("Override fps", overrideFps);
+        if (changedOverride) overrideFps = nextOverride;
+
+        if (overrideFps)
+        {
+            var (changedFps, nextFps) = ImGui.SliderFloat("Anim fps", animFps, 1.0, 30.0, "%.1f");
+            if (changedFps) animFps = nextFps;
+        }
+
+        var (changedScale, nextScale) = ImGui.SliderFloat("Scale", legs.scale, 0.01, 0.2, "%.3f");
+        if (changedScale) legs.scale = nextScale;
+    }
+    ImGui.End();
+
+
+    Flip();
+}
+
+
+legs.destroy();
+Close();

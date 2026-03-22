@@ -170,8 +170,8 @@ ProcessDef *Interpreter::addProcess(const char *name, Function *func)
     proc->privates[23] = makeInt(1);    // show
     proc->privates[24] = makeInt(0);    // xold
     proc->privates[25] = makeInt(0);    // yold
-    proc->privates[26] = makeDouble(1.0);    // sizex
-    proc->privates[27] = makeDouble(1.0);    // sizex
+    proc->privates[26] = makeDouble(100.0);  // sizex (percentage, 100 = original size)
+    proc->privates[27] = makeDouble(100.0);  // sizey (percentage, 100 = original size)
 
 
     initFiber(proc, func);

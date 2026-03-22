@@ -1,0 +1,76 @@
+// ================================================================
+// Demo: MD2 binary dump with file module only
+// ================================================================
+
+import file;
+using file;
+import path;
+using path;
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+var p = resolveAssetPath("assets/md2/pknight.md2", "../assets/md2/pknight.md2");
+if (p == nil)
+{
+    print("MD2 asset not found.");
+    return;
+}
+
+var f = file.open(p, "r");
+if (f == nil || f <= 0)
+{
+    print("Failed to open: " + p);
+    return;
+}
+
+var labels = [
+    "ident", "version", "skinwidth", "skinheight", "framesize",
+    "num_skins", "num_xyz", "num_st", "num_tris", "num_glcmds",
+    "num_frames", "ofs_skins", "ofs_st", "ofs_tris", "ofs_frames",
+    "ofs_glcmds", "ofs_end"
+];
+
+var header = [];
+for (var i = 0; i < len(labels); i = i + 1)
+{
+    header.push(file.read_int(f));
+}
+
+for (var i = 0; i < len(labels); i = i + 1)
+{
+    print(labels[i], header[i]);
+}
+
+var ofsFrames = header[14];
+file.seek(f, ofsFrames);
+
+var scaleX = file.read_float(f);
+var scaleY = file.read_float(f);
+var scaleZ = file.read_float(f);
+var transX = file.read_float(f);
+var transY = file.read_float(f);
+var transZ = file.read_float(f);
+
+var nameBytes = file.read_bytes(f, 16);
+var frameName = "";
+if (nameBytes != nil) frameName = nameBytes.readString(16);
+
+print("scale", scaleX, scaleY, scaleZ);
+print("trans", transX, transY, transZ);
+print("name", frameName);
+
+for (var i = 0; i < 3; i = i + 1)
+{
+    var a = file.read_byte(f);
+    var b = file.read_byte(f);
+    var c = file.read_byte(f);
+    var n = file.read_byte(f);
+    print(i, a, b, c, n);
+}
+
+file.close(f);

@@ -1,0 +1,361 @@
+// ================================================================
+// Demo: Blitz3D B3D renderer in BuLang
+//
+// Controls:
+//   - Mouse: look around
+//   - W/A/S/D: move
+//   - F: toggle brute force / BSP traversal
+//   - ESC: quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+
+include "lib_camera_fps.bu";
+include "lib_b3d.bu";
+include "lib_trimesh.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.22, 0.26, 0.30, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+def drawAxes(size)
+{
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(2.0);
+    glBegin(GL_LINES);
+    glColor3f(1.0, 0.2, 0.2); glVertex3f(0,0,0); glVertex3f(size,0,0);
+    glColor3f(0.2, 1.0, 0.2); glVertex3f(0,0,0); glVertex3f(0,size,0);
+    glColor3f(0.2, 0.6, 1.0); glVertex3f(0,0,0); glVertex3f(0,0,size);
+    glEnd();
+    glLineWidth(1.0);
+}
+
+// ============================================================
+// Setup
+// ============================================================
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+SetGLAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+if (!SDL.Init("BuGL - B3D Viewer", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.07, 0.10, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+ 
+ 
+// ============================================================
+// Camera
+// ============================================================
+
+var cam = CameraFPS(-1.0, 5.2, 36.0); // Posição inicial (X, Y, Z)
+cam.sensitivity = 0.12;
+cam.speed = 10.0;
+cam.yaw=-90;
+cam.mouseButton = 1; // Botão esquerdo do mouse para olhar ao redor
+cam.lookOnly = true;  
+
+//SetMouseRelative(true);
+
+// ============================================================
+// State
+// ============================================================
+
+var useBSPTraversal = true;
+var showGrid        = true;
+var showAxes        = true;
+var fpsSmooth       = 60.0;
+var bspScale        = 0.03;
+var wireframe       = false;
+
+
+
+var model = B3DModel();
+model.load("../assets/b3d/castel/castel.b3d", "../assets/b3d/castel/textures/");
+model.scaleVal = 0.05;
+model.update(0);
+
+var colMesh = TriMesh();
+for (var si = 0; si < len(model.surfaces); si += 1)
+    colMesh.addSurfaceScaled(model.surfaces[si].vertices, model.surfaces[si].indices, model.scaleVal);
+colMesh.build();
+
+print("ColMesh: " + colMesh.triCount() + " triangulos"); 
+
+
+print("B3D demo ready");
+ 
+
+var GRAVITY           = -18.0;
+var PLAYER_RADIUS      = 0.4;
+var PLAYER_HALF_HEIGHT = 1.9;
+var PLAYER_SPEED      = 5.0;
+var JUMP_SPEED        = 6.0;
+
+var velY      = 0.0;
+var onGround  = false;
+var showColMesh = false;
+var showLastHitTri = false;
+var useGravity = false;
+
+
+// ============================================================
+// Main loop
+// ============================================================
+ 
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05)   dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+     
+    if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
+    if (IsKeyPressed(KEY_P))
+    {
+        wireframe = !wireframe;
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+
+    // // 1 — só mouse look (sem mover)
+    cam.update(dt);  // mantém o yaw/pitch mas vamos ignorar o movimento
+
+    // 2 — recalcula o forward/right a partir do yaw da câmera
+    var fwd = cam.getForward();
+    var right = cam.getRight();
+
+    // 3 — input de movimento
+    var moveX = 0.0; var moveY = 0.0; var moveZ = 0.0;
+    var mv = cam.speed * dt;
+    if (IsKeyDown(KEY_LEFT_SHIFT)) mv = mv * 2.0;
+
+    if (IsKeyDown(KEY_W)) { moveX += fwd.x * mv; moveZ += fwd.z * mv; }
+    if (IsKeyDown(KEY_S)) { moveX -= fwd.x * mv; moveZ -= fwd.z * mv; }
+    if (IsKeyDown(KEY_A)) { moveX += right.x * mv; moveZ += right.z * mv; }
+    if (IsKeyDown(KEY_D)) { moveX -= right.x * mv; moveZ -= right.z * mv; }
+
+    if (IsKeyDown(KEY_Q))  cam.y = cam.y - mv;
+    if (IsKeyDown(KEY_E))  cam.y = cam.y + mv;
+    
+
+    // gravidade
+    if (useGravity)
+    {
+        if (!onGround)
+            velY += GRAVITY * dt;
+        else
+            velY = 0.0;  
+    }
+    
+    moveY = velY * dt;
+    // 4 — slide move (máx 3 iterações)
+    var dx = moveX; 
+    var dy = moveY; 
+    var dz = moveZ;
+ 
+
+ 
+   // cam.update(dt);   
+
+
+     onGround = false;
+
+    for (var iter = 0; iter < 3; iter += 1)
+    {
+        var (frac, nx, ny, nz, hit) = colMesh.traceCapsule(
+            cam.x, cam.y, cam.z,
+            dx, dy, dz,
+            PLAYER_RADIUS, PLAYER_HALF_HEIGHT
+        );
+
+        // var (frac, nx, ny, nz, hit) = colMesh.traceSphere(
+        //     cam.x, cam.y , cam.z,
+        //     dx, dy, dz,
+        //     PLAYER_RADIUS
+        // );
+
+        cam.x += dx * frac;
+        cam.y += dy * frac;
+        cam.z += dz * frac;
+
+ 
+
+        if (!hit) break;
+
+        // chão
+        if (ny > 0.7)
+        {
+            onGround = true;
+            velY = 0.0;
+        }
+
+        // slide — remove componente normal
+        var dot = dx*nx + dy*ny + dz*nz;
+        dx -= nx * dot;
+        dy -= ny * dot;
+        dz -= nz * dot;
+
+        var vl = sqrt(dx*dx + dy*dy + dz*dz);
+        if (vl < 0.001) break;
+    }
+
+    // --- jump ---
+    if (onGround && IsKeyPressed(KEY_SPACE))
+    {
+        velY = JUMP_SPEED;
+        onGround = false;
+    }
+    
+
+
+    if (IsResized())
+        glViewport(0, 0, GetWidth(), GetHeight());
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 70.0 * deg2rad, 0.05, 2000.0);
+    var eye  = cam.getEye();
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+ 
+
+    if (showGrid) drawGrid(-0.02, 50, 2.0);
+    if (showAxes) drawAxes(1.0);
+
+ 
+    model.draw();
+    if(showColMesh) colMesh.draw();
+    if(showLastHitTri) colMesh.drawLastHit();
+
+
+ 
+ 
+
+    // ============================================================
+    // ImGui panel
+    // ============================================================
+
+    var panel = ImGui.Begin("B3D Viewer");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Separator();
+
+         
+
+            var (chAxes, nextAxes) = ImGui.Checkbox("Axes", showAxes);
+            if (chAxes) showAxes = nextAxes;
+            var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
+            if (chGrid) showGrid = nextGrid;
+
+            var (chWire, nextWire) = ImGui.Checkbox("Wireframe (W)", wireframe);
+            if (chWire)
+            {
+                wireframe = nextWire;
+                if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            }
+
+            ImGui.Separator();
+            var (chColMesh, nextColMesh) = ImGui.Checkbox("Show Collision Mesh", showColMesh);
+            if (chColMesh)
+            {
+                showColMesh = nextColMesh;
+
+            }
+                
+
+            var (chLastHit, nextLastHit) = ImGui.Checkbox("Show Last Hit Triangle", showLastHitTri);
+            if (chLastHit) 
+            {
+                showLastHitTri = nextLastHit;
+            }
+
+            var (chGravity, nextGravity) = ImGui.Checkbox("Use Gravity", useGravity);
+            if (chGravity)            
+            {
+                useGravity = nextGravity;
+                if (!useGravity)                
+                {
+                    velY = 0.0;
+                    onGround = false;
+                }
+            }
+
+    
+            ImGui.Separator();
+            ImGui.Text("Camera:");
+            ImGui.Text("  eye: " + int(eye.x*100)/100.0 + ", " +
+                                   int(eye.y*100)/100.0 + ", " +
+                                   int(eye.z*100)/100.0);
+
+      
+      
+
+        ImGui.Separator();
+        ImGui.Text("Controls:");
+        ImGui.Text("  Mouse: look");
+        ImGui.Text("  G: grid");
+        ImGui.Text("  W: wireframe");
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+// ============================================================
+// Cleanup
+// ============================================================
+ 
+Close();

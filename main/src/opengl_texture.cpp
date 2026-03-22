@@ -575,6 +575,21 @@ namespace SDLBindings
         return 0;
     }
 
+    //glMultiTexCoord2f
+
+    int native_glMultiTexCoord2f(Interpreter *vm, int argc, Value *args)
+    {
+        (void)vm;
+        if (argc != 3)
+        {
+            Error("glMultiTexCoord2f expects 3 arguments: target, s, t");
+            return 0;
+        }
+
+        glMultiTexCoord2f((GLenum)args[0].asNumber(), (GLfloat)args[1].asNumber(), (GLfloat)args[2].asNumber());
+        return 0;
+    }
+
     void register_opengl_texture(ModuleBuilder &module)
     {
         module.addFunction("glGenTextures", native_glGenTextures, 0)
@@ -592,7 +607,7 @@ namespace SDLBindings
             .addFunction("glCopyTexSubImage2D", native_glCopyTexSubImage2D, 8)
             .addFunction("glTexStorage2D", native_glTexStorage2D, 5)
             .addFunction("glTexStorage3D", native_glTexStorage3D, 6)
-
+            .addFunction("glMultiTexCoord2f", native_glMultiTexCoord2f, 3)
             .addInt("GL_TEXTURE_MIN_FILTER", GL_TEXTURE_MIN_FILTER)
             .addInt("GL_TEXTURE_MAG_FILTER", GL_TEXTURE_MAG_FILTER)
             .addInt("GL_TEXTURE_WRAP_S", GL_TEXTURE_WRAP_S)
@@ -613,6 +628,8 @@ namespace SDLBindings
             .addInt("GL_PACK_ALIGNMENT", GL_PACK_ALIGNMENT)
             .addInt("GL_TEXTURE_ENV", GL_TEXTURE_ENV)
             .addInt("GL_TEXTURE_ENV_MODE", GL_TEXTURE_ENV_MODE)
+            .addInt("GL_COMBINE_RGB", GL_COMBINE_RGB)
+            .addInt("GL_COMBINE", GL_COMBINE)
             .addInt("GL_MODULATE", GL_MODULATE)
             .addInt("GL_REPLACE", GL_REPLACE)
             .addInt("GL_RGBA16F", GL_RGBA16F)

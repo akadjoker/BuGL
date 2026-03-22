@@ -2,15 +2,15 @@
 // lib_camera_orbit.bu — Reusable Orbit Camera (third person / editor)
 //
 // Usage:
-//   import "lib_camera_orbit.bu";
-//   var cam = CameraOrbit(0.0, 1.0, 0.0, 15.0);  // target xyz + distance
+//   include "lib_camera_orbit.bu";
+//   var cam = CameraOrbit(0.0, 1.0, 0.0, 15.0);
 //   // in your loop:
 //   cam.update(dt);
 //   var view = cam.getViewMatrix();
 //   var proj = cam.getProjectionMatrix(aspect, fov, near, far);
 //
 // Controls:
-//   Arrow keys / mouse drag to orbit
+//   Arrow keys / right mouse drag to orbit
 //   W/S or scroll to zoom
 //   Middle mouse drag to pan target
 // ================================================================
@@ -20,7 +20,7 @@ using math;
 import GLM;
 using GLM;
 
-struct CameraOrbit
+class CameraOrbit
 {
     var targetX;
     var targetY;
@@ -36,7 +36,7 @@ struct CameraOrbit
     var zoomSpeed;
     var panSpeed;
     var sensitivity;
-    var smoothing;    // 0 = instant, 1 = max smooth
+    var smoothing;
     var _curYaw;
     var _curPitch;
     var _curDist;
@@ -47,136 +47,128 @@ struct CameraOrbit
 
     def init(tx, ty, tz, dist)
     {
-        this.targetX = tx;
-        this.targetY = ty;
-        this.targetZ = tz;
-        this.distance = dist;
-        this.yaw = 0.0;
-        this.pitch = -25.0;
-        this.minPitch = -85.0;
-        this.maxPitch = 85.0;
-        this.minDist = 1.0;
-        this.maxDist = 200.0;
-        this.orbitSpeed = 65.0;
-        this.zoomSpeed = 14.0;
-        this.panSpeed = 5.0;
-        this.sensitivity = 0.25;
-        this.smoothing = 0.08;
-        this._curYaw = this.yaw;
-        this._curPitch = this.pitch;
-        this._curDist = this.distance;
-        this._curTx = tx;
-        this._curTy = ty;
-        this._curTz = tz;
-        this._inited = false;
+        self.targetX = tx;
+        self.targetY = ty;
+        self.targetZ = tz;
+        self.distance = dist;
+        self.yaw = 0.0;
+        self.pitch = -25.0;
+        self.minPitch = -85.0;
+        self.maxPitch = 85.0;
+        self.minDist = 1.0;
+        self.maxDist = 200.0;
+        self.orbitSpeed = 65.0;
+        self.zoomSpeed = 14.0;
+        self.panSpeed = 5.0;
+        self.sensitivity = 0.25;
+        self.smoothing = 0.08;
+        self._curYaw = self.yaw;
+        self._curPitch = self.pitch;
+        self._curDist = self.distance;
+        self._curTx = tx;
+        self._curTy = ty;
+        self._curTz = tz;
+        self._inited = false;
     }
 
     def setTarget(tx, ty, tz)
     {
-        this.targetX = tx;
-        this.targetY = ty;
-        this.targetZ = tz;
+        self.targetX = tx;
+        self.targetY = ty;
+        self.targetZ = tz;
     }
 
     def setAngles(yawDeg, pitchDeg)
     {
-        this.yaw = yawDeg;
-        this.pitch = pitchDeg;
-        if (this.pitch < this.minPitch) this.pitch = this.minPitch;
-        if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
+        self.yaw = yawDeg;
+        self.pitch = pitchDeg;
+        if (self.pitch < self.minPitch) self.pitch = self.minPitch;
+        if (self.pitch > self.maxPitch) self.pitch = self.maxPitch;
     }
 
     def setDistance(d)
     {
-        this.distance = d;
-        if (this.distance < this.minDist) this.distance = this.minDist;
-        if (this.distance > this.maxDist) this.distance = this.maxDist;
+        self.distance = d;
+        if (self.distance < self.minDist) self.distance = self.minDist;
+        if (self.distance > self.maxDist) self.distance = self.maxDist;
     }
 
     def update(dt)
     {
-        var turn = this.orbitSpeed * dt;
-        var zoom = this.zoomSpeed * dt;
+        var turn = self.orbitSpeed * dt;
+        var zoom = self.zoomSpeed * dt;
 
-        // Keyboard orbit
-        if (IsKeyDown(KEY_LEFT))  this.yaw = this.yaw - turn;
-        if (IsKeyDown(KEY_RIGHT)) this.yaw = this.yaw + turn;
-        if (IsKeyDown(KEY_UP))    this.pitch = this.pitch + turn;
-        if (IsKeyDown(KEY_DOWN))  this.pitch = this.pitch - turn;
+        if (IsKeyDown(KEY_LEFT)) self.yaw = self.yaw - turn;
+        if (IsKeyDown(KEY_RIGHT)) self.yaw = self.yaw + turn;
+        if (IsKeyDown(KEY_UP)) self.pitch = self.pitch + turn;
+        if (IsKeyDown(KEY_DOWN)) self.pitch = self.pitch - turn;
 
-        // Keyboard zoom
-        if (IsKeyDown(KEY_W)) this.distance = this.distance - zoom;
-        if (IsKeyDown(KEY_S)) this.distance = this.distance + zoom;
+        if (IsKeyDown(KEY_W)) self.distance = self.distance - zoom;
+        if (IsKeyDown(KEY_S)) self.distance = self.distance + zoom;
 
-        // Mouse drag orbit (right button)
-        if (IsMouseDown(1))
+        if (IsMouseDown(MOUSE_RIGHT))
         {
             var (dx, dy) = GetMouseDelta();
-            this.yaw = this.yaw + dx * this.sensitivity;
-            this.pitch = this.pitch - dy * this.sensitivity;
+            self.yaw = self.yaw + dx * self.sensitivity;
+            self.pitch = self.pitch - dy * self.sensitivity;
         }
 
-        // Mouse drag pan (middle button)
-        if (IsMouseDown(2))
+        if (IsMouseDown(MOUSE_MIDDLE))
         {
             var deg2rad = 0.017453292519943295;
-            var yr = this.yaw * deg2rad;
+            var yr = self.yaw * deg2rad;
             var (dx, dy) = GetMouseDelta();
-            var panMul = this.panSpeed * dt;
-            // right vector (horizontal)
+            var panMul = self.panSpeed * dt;
             var rx = sin(yr);
             var rz = -cos(yr);
-            this.targetX = this.targetX - rx * dx * panMul;
-            this.targetZ = this.targetZ - rz * dx * panMul;
-            this.targetY = this.targetY + dy * panMul;
+            self.targetX = self.targetX - rx * dx * panMul;
+            self.targetZ = self.targetZ - rz * dx * panMul;
+            self.targetY = self.targetY + dy * panMul;
         }
 
-        // Scroll zoom (if available via GetMouseWheel)
-        // var scroll = GetMouseWheel();
-        // if (scroll != 0) this.distance = this.distance - scroll * this.zoomSpeed * 0.5;
+        var scroll = GetMouseWheelMoveV();
+        if (scroll != 0.0) self.distance = self.distance - scroll * self.zoomSpeed * 0.5;
 
-        // Clamp
-        if (this.pitch < this.minPitch) this.pitch = this.minPitch;
-        if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
-        if (this.distance < this.minDist) this.distance = this.minDist;
-        if (this.distance > this.maxDist) this.distance = this.maxDist;
+        if (self.pitch < self.minPitch) self.pitch = self.minPitch;
+        if (self.pitch > self.maxPitch) self.pitch = self.maxPitch;
+        if (self.distance < self.minDist) self.distance = self.minDist;
+        if (self.distance > self.maxDist) self.distance = self.maxDist;
 
-        // Smooth interpolation
-        if (!this._inited)
+        if (!self._inited)
         {
-            this._curYaw = this.yaw;
-            this._curPitch = this.pitch;
-            this._curDist = this.distance;
-            this._curTx = this.targetX;
-            this._curTy = this.targetY;
-            this._curTz = this.targetZ;
-            this._inited = true;
+            self._curYaw = self.yaw;
+            self._curPitch = self.pitch;
+            self._curDist = self.distance;
+            self._curTx = self.targetX;
+            self._curTy = self.targetY;
+            self._curTz = self.targetZ;
+            self._inited = true;
         }
         else
         {
-            var t = 1.0 - this.smoothing;
-            this._curYaw   = this._curYaw   + (this.yaw - this._curYaw) * t;
-            this._curPitch = this._curPitch + (this.pitch - this._curPitch) * t;
-            this._curDist  = this._curDist  + (this.distance - this._curDist) * t;
-            this._curTx    = this._curTx    + (this.targetX - this._curTx) * t;
-            this._curTy    = this._curTy    + (this.targetY - this._curTy) * t;
-            this._curTz    = this._curTz    + (this.targetZ - this._curTz) * t;
+            var t = 1.0 - self.smoothing;
+            self._curYaw = self._curYaw + (self.yaw - self._curYaw) * t;
+            self._curPitch = self._curPitch + (self.pitch - self._curPitch) * t;
+            self._curDist = self._curDist + (self.distance - self._curDist) * t;
+            self._curTx = self._curTx + (self.targetX - self._curTx) * t;
+            self._curTy = self._curTy + (self.targetY - self._curTy) * t;
+            self._curTz = self._curTz + (self.targetZ - self._curTz) * t;
         }
     }
 
     def getViewMatrix()
     {
         var deg2rad = 0.017453292519943295;
-        var yr = this._curYaw * deg2rad;
-        var pr = this._curPitch * deg2rad;
+        var yr = self._curYaw * deg2rad;
+        var pr = self._curPitch * deg2rad;
         var cp = cos(pr);
-        var camX = sin(yr) * cp * this._curDist + this._curTx;
-        var camY = sin(pr) * this._curDist + this._curTy;
-        var camZ = cos(yr) * cp * this._curDist + this._curTz;
+        var camX = sin(yr) * cp * self._curDist + self._curTx;
+        var camY = sin(pr) * self._curDist + self._curTy;
+        var camZ = cos(yr) * cp * self._curDist + self._curTz;
 
         var eye = Vector3(camX, camY, camZ);
-        var tgt = Vector3(this._curTx, this._curTy, this._curTz);
-        var up  = Vector3(0.0, 1.0, 0.0);
+        var tgt = Vector3(self._curTx, self._curTy, self._curTz);
+        var up = Vector3(0.0, 1.0, 0.0);
         return MatrixLookAt(eye, tgt, up);
     }
 
@@ -188,22 +180,22 @@ struct CameraOrbit
     def getEye()
     {
         var deg2rad = 0.017453292519943295;
-        var yr = this._curYaw * deg2rad;
-        var pr = this._curPitch * deg2rad;
+        var yr = self._curYaw * deg2rad;
+        var pr = self._curPitch * deg2rad;
         var cp = cos(pr);
-        var camX = sin(yr) * cp * this._curDist + this._curTx;
-        var camY = sin(pr) * this._curDist + this._curTy;
-        var camZ = cos(yr) * cp * this._curDist + this._curTz;
+        var camX = sin(yr) * cp * self._curDist + self._curTx;
+        var camY = sin(pr) * self._curDist + self._curTy;
+        var camZ = cos(yr) * cp * self._curDist + self._curTz;
         return Vector3(camX, camY, camZ);
     }
 
     def getTarget()
     {
-        return Vector3(this._curTx, this._curTy, this._curTz);
+        return Vector3(self._curTx, self._curTy, self._curTz);
     }
 
     def getDistance()
     {
-        return this._curDist;
+        return self._curDist;
     }
 }

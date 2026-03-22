@@ -9,6 +9,7 @@ option(BUGL_PORTABLE_RELEASE "Build release binaries without CPU-specific native
 option(BUGL_STRIP_RELEASE "Strip symbols from release binaries when supported" ON)
 option(BUGL_IMGUI_DEMO "Build Dear ImGui demo window support" OFF)
 option(BUGL_ENABLE_COMPILER_CACHE "Use compiler cache launcher (sccache/ccache) when available" ON)
+option(BUGL_BUILD_EDITOR "Build BuEditor alongside the BuGL runtime" OFF)
 
 if(BUGL_ENABLE_COMPILER_CACHE)
     if(NOT CMAKE_C_COMPILER_LAUNCHER AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
@@ -23,7 +24,7 @@ if(BUGL_ENABLE_COMPILER_CACHE)
     endif()
 endif()
 
-# Embutir as bibliotecas C/C++ padrão no executável Windows para evitar missing DLLs
+ 
 
 find_program(CLANG_TIDY_EXE NAMES clang-tidy)
 
@@ -103,9 +104,12 @@ set(SDL_VIVANTE OFF CACHE BOOL "Disable SDL Vivante backend in BuGL build" FORCE
 set(SDL_OFFSCREEN OFF CACHE BOOL "Disable SDL offscreen backend in BuGL build" FORCE)
 add_subdirectory(vendor/SDL)
 
+set(BU_EIGEN_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/vendor/eigen")
+set(BU_MINIDNN_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/vendor/MiniDNN/include")
 
 add_subdirectory(libbu)
 add_subdirectory(main)
+add_subdirectory(BuEditor)
 
 # Language test suite (lightweight: only needs libbu)
 enable_testing()

@@ -1,0 +1,1532 @@
+// ================================================================
+// lib_q3bsp.bu — Quake 3 BSP loader + legacy renderer in BuLang
+//
+// Phase 1: geometry + textures + lightmaps
+// Phase 2: BSP tree traversal
+// Phase 3: PVS culling (TODO)
+// Phase 4: Bezier patches (TODO)
+//
+// Quake 3 BSP format reference:
+//   https://www.mralligator.com/q3/
+// ================================================================
+
+import file;
+import fs;
+using math;
+import STB;
+using STB;
+import path;
+import OpenGl;
+using OpenGl;
+
+// ============================================================
+// Lump indices
+// ============================================================
+
+var Q3_LUMP_ENTITIES    = 0;
+var Q3_LUMP_TEXTURES    = 1;
+var Q3_LUMP_PLANES      = 2;
+var Q3_LUMP_NODES       = 3;
+var Q3_LUMP_LEAVES      = 4;
+var Q3_LUMP_LEAFFACES   = 5;
+var Q3_LUMP_LEAFBRUSHES = 6;
+var Q3_LUMP_MODELS      = 7;
+var Q3_LUMP_BRUSHES     = 8;
+var Q3_LUMP_BRUSHSIDES  = 9;
+var Q3_LUMP_VERTICES    = 10;
+var Q3_LUMP_MESHVERTS   = 11;
+var Q3_LUMP_EFFECTS     = 12;
+var Q3_LUMP_FACES       = 13;
+var Q3_LUMP_LIGHTMAPS   = 14;
+var Q3_LUMP_LIGHTVOLS   = 15;
+var Q3_LUMP_VISDATA     = 16;
+var Q3_NUM_LUMPS        = 17;
+
+// Face types
+var Q3_FACE_POLYGON = 1;
+var Q3_FACE_PATCH   = 2;
+var Q3_FACE_MESH    = 3;
+var Q3_FACE_BILLBOARD = 4;
+
+var Q3_IDENT   = 1347633737; // "IBSP"
+var Q3_VERSION = 46;
+
+// ============================================================
+// Lump descriptor
+// ============================================================
+
+class Q3Lump
+{
+    var offset, length;
+    def init() { self.offset = 0; self.length = 0; }
+}
+
+// ============================================================
+// Texture entry (shader name + flags)
+// ============================================================
+
+class Q3Texture
+{
+    var name, flags, contents;
+    var texId;   // GL texture id, 0 = not loaded
+
+    def init()
+    {
+        self.name     = "";
+        self.flags    = 0;
+        self.contents = 0;
+        self.texId    = 0;
+    }
+}
+
+// ============================================================
+// Vertex  (position + uv + lm_uv + normal + color)
+// ============================================================
+
+class Q3Vertex
+{
+    var x,  y,  z;
+    var u,  v;        // surface UV
+    var lu, lv;       // lightmap UV
+    var nx, ny, nz;   // normal
+    var r,  g,  b,  a; // vertex color
+
+    def init()
+    {
+        self.x = 0.0; self.y = 0.0; self.z = 0.0;
+        self.u = 0.0; self.v = 0.0;
+        self.lu= 0.0; self.lv= 0.0;
+        self.nx= 0.0; self.ny= 0.0; self.nz= 1.0;
+        self.r = 1.0; self.g = 1.0; self.b = 1.0; self.a = 1.0;
+    }
+}
+
+// ============================================================
+// Face
+// ============================================================
+
+class Q3Face
+{
+    var textureIdx;
+    var effectIdx;
+    var faceType;
+    var firstVert, numVerts;
+    var firstMeshVert, numMeshVerts;
+    var lmIdx;           // lightmap index (-1 = none)
+    var lmStart0, lmStart1;
+    var lmSize0,  lmSize1;
+    var lmOriginX, lmOriginY, lmOriginZ;
+    var normalX, normalY, normalZ;
+    var patchW, patchH;  // for patches only
+
+    def init()
+    {
+        self.textureIdx   = -1;
+        self.effectIdx    = -1;
+        self.faceType     = 0;
+        self.firstVert    = 0;
+        self.numVerts     = 0;
+        self.firstMeshVert= 0;
+        self.numMeshVerts = 0;
+        self.lmIdx        = -1;
+        self.lmStart0     = 0; self.lmStart1 = 0;
+        self.lmSize0      = 0; self.lmSize1  = 0;
+        self.lmOriginX    = 0.0; self.lmOriginY = 0.0; self.lmOriginZ = 0.0;
+        self.normalX      = 0.0; self.normalY   = 0.0; self.normalZ   = 1.0;
+        self.patchW       = 0;   self.patchH    = 0;
+    }
+}
+
+// ============================================================
+// BSP Node
+// ============================================================
+
+class Q3Node
+{
+    var plane;
+    var front, back;       // child indices (negative = leaf: -(idx+1))
+    var minX, minY, minZ;
+    var maxX, maxY, maxZ;
+
+    def init()
+    {
+        self.plane = 0;
+        self.front = 0; self.back = 0;
+        self.minX  = 0; self.minY = 0; self.minZ = 0;
+        self.maxX  = 0; self.maxY = 0; self.maxZ = 0;
+    }
+}
+
+// ============================================================
+// BSP Leaf
+// ============================================================
+
+class Q3Leaf
+{
+    var cluster;
+    var area;
+    var minX, minY, minZ;
+    var maxX, maxY, maxZ;
+    var firstLeafFace, numLeafFaces;
+    var firstLeafBrush, numLeafBrushes;
+
+    def init()
+    {
+        self.cluster        = -1;
+        self.area           = 0;
+        self.minX           = 0; self.minY = 0; self.minZ = 0;
+        self.maxX           = 0; self.maxY = 0; self.maxZ = 0;
+        self.firstLeafFace  = 0; self.numLeafFaces   = 0;
+        self.firstLeafBrush = 0; self.numLeafBrushes = 0;
+    }
+}
+
+// ============================================================
+// BSP Plane
+// ============================================================
+
+class Q3Plane
+{
+    var nx, ny, nz, dist;
+    def init() { self.nx=0.0; self.ny=0.0; self.nz=0.0; self.dist=0.0; }
+}
+
+
+class Q3Brush
+{
+    var firstSide, numSides, textureIdx;
+    def init() { self.firstSide=0; self.numSides=0; self.textureIdx=0; }
+}
+
+class Q3BrushSide
+{
+    var planeIdx, textureIdx;
+    def init() { self.planeIdx=0; self.textureIdx=0; }
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+def q3LoadFileBuffer(filePath)
+{
+    var handle = file.open(filePath, "r");
+    if (handle == nil || handle <= 0)
+    {
+        print("Q3BSP: failed to open: " + filePath);
+        return nil;
+    }
+    var size = file.size(handle);
+    if (size == nil || size <= 0)
+    {
+        file.close(handle);
+        print("Q3BSP: invalid size: " + filePath);
+        return nil;
+    }
+    var bytes = file.read_all(handle);
+    file.close(handle);
+    return bytes;
+}
+
+def q3LoadTexture2D(texPath)
+{
+    print("Q3BSP: loading texture: " + texPath);
+    stbi_set_flip_vertically_on_load(1);
+    var (w, h, channels, pixels) = stbi_load(texPath, 4);
+    if (pixels == nil || w == nil || h == nil) return 0;
+
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def q3ResolveTexture(baseDir, name)
+{
+    var file_exts = [".png", ".jpg", ".jpeg", ".bmp", ".tga"];
+    for (var i = 0; i < len(file_exts); i = i + 1)
+    {
+        var p = baseDir + name + file_exts[i];
+        if (path.exists(p)) return q3LoadTexture2D(p);
+    }
+
+    // tenta sem adicionar extensão (para ficheiros sem extensão ou quando o nome no mapa já tem a extensão incluída)
+    var pNoExt = baseDir + name;
+    if (path.exists(pNoExt)) return q3LoadTexture2D(pNoExt);
+
+    return 0;
+}
+
+// ============================================================
+// Q3BSP  
+// ============================================================
+
+class Q3BSP
+{
+    var lumps;        // array of Q3Lump [17]
+    var textures;     // array of Q3Texture
+    var vertices;     // array of Q3Vertex
+    var meshVerts;    // array of int  (índices relativos ao firstVert)
+    var faces;        // array of Q3Face
+    var lightmapIds;  // array of GL texture ids
+    var nodes;        // array of Q3Node
+    var leaves;       // array of Q3Leaf
+    var leafFaces;    // array of int
+    var planes;       // array of Q3Plane
+    var visData;      // raw bytes para PVS
+    var brushes;
+    var brushSides;
+    var leafBrushes;
+    var numClusters;
+    var clusterSize;
+    var entities;     // string
+
+    var ready;
+    var sourcePath;
+    var baseDir;
+    var scale;
+
+    var facesDrawn;   // bitset para evitar desenhar a mesma face 2x por frame
+
+    var brightness = 8.0; // multiplicador de brilho para lightmaps (pode ser ajustado dinamicamente)
+
+    def init()
+    {
+        self.lumps       = [];
+        self.textures    = [];
+        self.vertices    = [];
+        self.meshVerts   = [];
+        self.faces       = [];
+        self.lightmapIds = [];
+        self.nodes       = [];
+        self.leaves      = [];
+        self.leafFaces   = [];
+        self.planes      = [];
+        self.visData     = nil;
+        self.numClusters = 0;
+        self.clusterSize = 0;
+        self.entities    = "";
+        self.ready       = false;
+        self.sourcePath  = "";
+        self.baseDir     = "";
+        self.scale       = 0.03;   // Q3 units → metros
+        self.facesDrawn  = [];
+    }
+
+    def destroy()
+    {
+        // Apaga texturas GL
+        for (var i = 0; i < len(self.textures); i += 1)
+            if (self.textures[i].texId > 0)
+                glDeleteTextures(self.textures[i].texId);
+
+        for (var i = 0; i < len(self.lightmapIds); i += 1)
+            if (self.lightmapIds[i] > 0)
+                glDeleteTextures(self.lightmapIds[i]);
+
+        self.textures    = [];
+        self.vertices    = [];
+        self.meshVerts   = [];
+        self.faces       = [];
+        self.lightmapIds = [];
+        self.nodes       = [];
+        self.leaves      = [];
+        self.leafFaces   = [];
+        self.planes      = [];
+        self.ready       = false;
+    }
+
+    // ----------------------------------------------------------
+    // Load
+    // ----------------------------------------------------------
+
+    def load(bspPath,texturesPath)
+    {
+        self.destroy();
+        self.sourcePath = bspPath;
+        self.baseDir    = texturesPath;
+
+        var buf = q3LoadFileBuffer(bspPath);
+        if (buf == nil) return false;
+        if (buf.length() < 144)
+        {
+            print("Q3BSP: file too small");
+            return false;
+        }
+
+        // Header: ident(4) + version(4) + lumps[17]×8
+        buf.seek(0);
+        var ident   = buf.readInt();
+        var version = buf.readInt();
+
+        if (ident != Q3_IDENT || version != Q3_VERSION)
+        {
+            print("Q3BSP: invalid header ident=" + ident + " version=" + version);
+            return false;
+        }
+
+        // Lê os 17 lumps
+        self.lumps = [];
+        for (var i = 0; i < Q3_NUM_LUMPS; i += 1)
+        {
+            var lump = Q3Lump();
+            lump.offset = buf.readInt();
+            lump.length = buf.readInt();
+            self.lumps.push(lump);
+        }
+
+        self.readTextures(buf);
+        self.readVertices(buf);
+        self.readMeshVerts(buf);
+        self.readFaces(buf);
+        self.readLightmaps(buf);
+        self.readPlanes(buf);
+        self.readNodes(buf);
+        self.readLeaves(buf);
+        self.readLeafFaces(buf);
+        self.readVisData(buf);
+        self.readEntities(buf);
+        self.readBrushes(buf);
+        self.readBrushSides(buf);
+        self.readLeafBrushes(buf);
+        self.loadTextures();
+
+        // Inicializa bitset de faces
+        self.facesDrawn = [];
+        for (var i = 0; i < len(self.faces); i += 1)
+            self.facesDrawn.push(0);
+
+        self.ready = len(self.faces) > 0 && len(self.vertices) > 0;
+        print("Q3BSP loaded: " + len(self.faces) + " faces, " +
+              len(self.vertices) + " verts, " +
+              len(self.lightmapIds) + " lightmaps, " +
+              len(self.textures) + " textures");
+        return self.ready;
+    }
+
+    // ----------------------------------------------------------
+    // Binary readers
+    // ----------------------------------------------------------
+
+    def readTextures(buf)
+    {
+        self.textures = [];
+        var lump = self.lumps[Q3_LUMP_TEXTURES];
+        if (lump.length <= 0) return;
+
+        // Cada texture entry: name[64] + flags(4) + contents(4) = 72 bytes
+        var count = lump.length / 72;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+        {
+            var tx = Q3Texture();
+            tx.name     = buf.readString(64) ;
+            tx.flags    = buf.readInt();
+            tx.contents = buf.readInt();
+        
+            self.textures.push(tx);
+        }
+        print("Q3BSP: " + count + " texture entries");
+    }
+
+    def readVertices(buf)
+    {
+        self.vertices = [];
+        var lump = self.lumps[Q3_LUMP_VERTICES];
+        if (lump.length <= 0) return;
+
+        // Cada vértice: pos(3×4) + uv(2×4) + lm_uv(2×4) + normal(3×4) + color(4×1) = 44 bytes
+        var count = lump.length / 44;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+        {
+            var vt = Q3Vertex();
+            vt.x  = buf.readFloat();
+            vt.z  = buf.readFloat();
+            vt.y  = buf.readFloat();
+            vt.u  = buf.readFloat();
+            vt.v  = buf.readFloat();
+            vt.lu = buf.readFloat();
+            vt.lv = buf.readFloat();
+            vt.nx = buf.readFloat();
+            vt.nz = buf.readFloat();
+            vt.ny = buf.readFloat();
+            vt.r  = buf.readByte() / 255.0;
+            vt.g  = buf.readByte() / 255.0;
+            vt.b  = buf.readByte() / 255.0;
+            vt.a  = buf.readByte() / 255.0;
+            self.vertices.push(vt);
+        }
+        print("Q3BSP: " + count + " vertices");
+    }
+
+    def readMeshVerts(buf)
+    {
+        self.meshVerts = [];
+        var lump = self.lumps[Q3_LUMP_MESHVERTS];
+        if (lump.length <= 0) return;
+
+        var count = lump.length / 4;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+            self.meshVerts.push(buf.readInt());
+    }
+def readBrushes(buf)
+{
+    self.brushes = [];
+    var lump = self.lumps[Q3_LUMP_BRUSHES];
+    if (lump.length <= 0) return;
+    var count = lump.length / 12;
+    buf.seek(lump.offset);
+    for (var i = 0; i < count; i += 1)
+    {
+        var b = Q3Brush();
+        b.firstSide   = buf.readInt();
+        b.numSides    = buf.readInt();
+        b.textureIdx  = buf.readInt();
+        self.brushes.push(b);
+    }
+}
+
+def readBrushSides(buf)
+{
+    self.brushSides = [];
+    var lump = self.lumps[Q3_LUMP_BRUSHSIDES];
+    if (lump.length <= 0) return;
+    var count = lump.length / 8;
+    buf.seek(lump.offset);
+    for (var i = 0; i < count; i += 1)
+    {
+        var bs = Q3BrushSide();
+        bs.planeIdx   = buf.readInt();
+        bs.textureIdx = buf.readInt();
+        self.brushSides.push(bs);
+    }
+}
+
+def readLeafBrushes(buf)
+{
+    self.leafBrushes = [];
+    var lump = self.lumps[Q3_LUMP_LEAFBRUSHES];
+    if (lump.length <= 0) return;
+    var count = lump.length / 4;
+    buf.seek(lump.offset);
+    for (var i = 0; i < count; i += 1)
+        self.leafBrushes.push(buf.readInt());
+}
+    def readFaces(buf)
+    {
+        self.faces = [];
+        var lump = self.lumps[Q3_LUMP_FACES];
+        if (lump.length <= 0) return;
+
+        // Cada face: 104 bytes
+        // texture(4) + effect(4) + type(4) + firstVert(4) + numVerts(4) +
+        // firstMeshVert(4) + numMeshVerts(4) + lmIdx(4) +
+        // lmStart(2×4) + lmSize(2×4) + lmOrigin(3×4) + lmVec0(3×4) + lmVec1(3×4) +
+        // normal(3×4) + size(2×4)
+        var count = lump.length / 104;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+        {
+            var f = Q3Face();
+            f.textureIdx    = buf.readInt();
+            f.effectIdx     = buf.readInt();
+            f.faceType      = buf.readInt();
+            f.firstVert     = buf.readInt();
+            f.numVerts      = buf.readInt();
+            f.firstMeshVert = buf.readInt();
+            f.numMeshVerts  = buf.readInt();
+            f.lmIdx         = buf.readInt();
+            f.lmStart0      = buf.readInt();
+            f.lmStart1      = buf.readInt();
+            f.lmSize0       = buf.readInt();
+            f.lmSize1       = buf.readInt();
+            f.lmOriginX     = buf.readFloat();
+            f.lmOriginY     = buf.readFloat();
+            f.lmOriginZ     = buf.readFloat();
+            // lmVec0 (3 floats) — skip
+            buf.readFloat(); buf.readFloat(); buf.readFloat();
+            // lmVec1 (3 floats) — skip
+            buf.readFloat(); buf.readFloat(); buf.readFloat();
+            f.normalX       = buf.readFloat();
+            f.normalZ       = buf.readFloat();
+            f.normalY       = buf.readFloat();
+            f.patchW        = buf.readInt();
+            f.patchH        = buf.readInt();
+            self.faces.push(f);
+        }
+        print("Q3BSP: " + count + " faces");
+    }
+
+    def readLightmaps(buf)
+    {
+        self.lightmapIds = [];
+        var lump = self.lumps[Q3_LUMP_LIGHTMAPS];
+        if (lump.length <= 0) return;
+
+        // Cada lightmap: 128×128×3 bytes RGB = 49152 bytes
+        var LM_SIZE   = 128;
+        var LM_BYTES  = LM_SIZE * LM_SIZE * 3;
+        var count     = lump.length / LM_BYTES;
+
+        for (var i = 0; i < count; i += 1)
+        {
+            buf.seek(lump.offset + i * LM_BYTES);
+
+            // Converte RGB → RGBA para glTexImage2D
+            var pixels = @(LM_SIZE * LM_SIZE * 4, 0);
+            var p = 0;
+            for (var px = 0; px < LM_SIZE * LM_SIZE; px += 1)
+            {
+                var r = buf.readByte();
+                var g = buf.readByte();
+                var b = buf.readByte();
+               
+                pixels[p + 0] = int(clamp(r * self.brightness, 0, 255));
+                pixels[p + 1] = int(clamp(g * self.brightness, 0, 255));
+                pixels[p + 2] = int(clamp(b * self.brightness, 0, 255));
+                pixels[p + 3] = 255;
+                p += 4;
+            }
+
+            var tex = glGenTextures();
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, LM_SIZE, LM_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            self.lightmapIds.push(tex);
+        }
+        print("Q3BSP: " + count + " lightmaps");
+    }
+
+    def readPlanes(buf)
+    {
+        self.planes = [];
+        var lump = self.lumps[Q3_LUMP_PLANES];
+        if (lump.length <= 0) return;
+
+        var count = lump.length / 16;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+        {
+            var pl = Q3Plane();
+            pl.nx   = buf.readFloat();
+            pl.nz   = buf.readFloat();
+            pl.ny   = buf.readFloat();
+            pl.dist = buf.readFloat();
+            self.planes.push(pl);
+        }
+    }
+
+    def readNodes(buf)
+    {
+        self.nodes = [];
+        var lump = self.lumps[Q3_LUMP_NODES];
+        if (lump.length <= 0) return;
+
+        // Node: plane(4) + front(4) + back(4) + min(3×4) + max(3×4) = 36 bytes
+        var count = lump.length / 36;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+        {
+            var nd = Q3Node();
+            nd.plane = buf.readInt();
+            nd.front = buf.readInt();
+            nd.back  = buf.readInt();
+            nd.minX  = buf.readInt(); 
+            nd.minZ = buf.readInt(); 
+            nd.minY = buf.readInt();
+            nd.maxX  = buf.readInt(); 
+            nd.maxZ = buf.readInt(); 
+            nd.maxY = buf.readInt();
+            self.nodes.push(nd);
+        }
+    }
+
+    def readLeaves(buf)
+    {
+        self.leaves = [];
+        var lump = self.lumps[Q3_LUMP_LEAVES];
+        if (lump.length <= 0) return;
+
+        // Leaf: cluster(4)+area(4)+min(3×4)+max(3×4)+firstLeafFace(4)+numLeafFaces(4)+
+        //       firstLeafBrush(4)+numLeafBrushes(4) = 48 bytes
+        var count = lump.length / 48;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+        {
+            var lf = Q3Leaf();
+            lf.cluster         = buf.readInt();
+            lf.area            = buf.readInt();
+            lf.minX            = buf.readInt(); 
+            lf.minZ = buf.readInt();
+            lf.minY = buf.readInt();
+            lf.maxX            = buf.readInt(); 
+            lf.maxZ = buf.readInt();
+            lf.maxY = buf.readInt();
+            lf.firstLeafFace   = buf.readInt();
+            lf.numLeafFaces    = buf.readInt();
+            lf.firstLeafBrush  = buf.readInt();
+            lf.numLeafBrushes  = buf.readInt();
+            self.leaves.push(lf);
+        }
+        print("Q3BSP: " + count + " leaves");
+    }
+
+    def readLeafFaces(buf)
+    {
+        self.leafFaces = [];
+        var lump = self.lumps[Q3_LUMP_LEAFFACES];
+        if (lump.length <= 0) return;
+
+        var count = lump.length / 4;
+        buf.seek(lump.offset);
+        for (var i = 0; i < count; i += 1)
+            self.leafFaces.push(buf.readInt());
+    }
+
+    def readVisData(buf)
+    {
+        self.visData     = nil;
+        self.numClusters = 0;
+        self.clusterSize = 0;
+        var lump = self.lumps[Q3_LUMP_VISDATA];
+        if (lump.length <= 0) return;
+
+        buf.seek(lump.offset);
+        self.numClusters = buf.readInt();
+        self.clusterSize = buf.readInt();
+        // visData raw bytes — lido depois se necessário para PVS
+    }
+
+    def readEntities(buf)
+    {
+        self.entities = "";
+        var lump = self.lumps[Q3_LUMP_ENTITIES];
+        if (lump.length <= 0) return;
+        buf.seek(lump.offset);
+        self.entities = buf.readString(lump.length);
+    }
+
+    def loadTextures()
+    {
+        for (var i = 0; i < len(self.textures); i += 1)
+        {
+            var tx = self.textures[i];
+            tx.texId = q3ResolveTexture(self.baseDir, tx.name);
+            if (tx.texId <= 0)
+                print("Q3BSP: missing texture: " + tx.name);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Stats
+    // ----------------------------------------------------------
+
+    def faceCount()      { return len(self.faces); }
+    def vertexCount()    { return len(self.vertices); }
+    def lightmapCount()  { return len(self.lightmapIds); }
+    def textureCount()   { return len(self.textures); }
+
+    // ----------------------------------------------------------
+    // BSP traversal — encontra a leaf que contém o ponto
+    // ----------------------------------------------------------
+
+    def findLeaf(px, py, pz)
+    {
+        var nodeIdx = 0;
+        while (nodeIdx >= 0)
+        {
+            var nd = self.nodes[nodeIdx];
+            var pl = self.planes[nd.plane];
+            var dist = pl.nx * px + pl.ny * py + pl.nz * pz - pl.dist;
+            if (dist >= 0)
+                nodeIdx = nd.front;
+            else
+                nodeIdx = nd.back;
+        }
+        return -(nodeIdx + 1);  // converte para índice de leaf
+    }
+
+    // ----------------------------------------------------------
+    // Draw — brute force todas as faces (fase 1)
+    // ----------------------------------------------------------
+
+    def draw()
+    {
+        if (!self.ready) return;
+
+        glPushMatrix();
+        glScalef(self.scale, self.scale, self.scale);
+
+        // Reset bitset
+        for (var i = 0; i < len(self.facesDrawn); i += 1)
+            self.facesDrawn[i] = 0;
+
+        for (var i = 0; i < len(self.faces); i += 1)
+            self.drawFace(i);
+
+        glPopMatrix();
+    }
+
+    // Draw a partir da câmera — usa BSP tree para ordenar
+    def drawFromCamera(camX, camY, camZ)
+    {
+        if (!self.ready) return;
+
+        // Reset bitset
+        for (var i = 0; i < len(self.facesDrawn); i += 1)
+            self.facesDrawn[i] = 0;
+
+        glPushMatrix();
+        glScalef(self.scale, self.scale, self.scale);
+
+        // Câmera em unidades Q3 (inverte scale)
+        var qx = camX / self.scale;
+        var qy = camY / self.scale;
+        var qz = camZ / self.scale;
+
+        self.drawNode(0, qx, qy, qz);
+
+        glPopMatrix();
+    }
+
+    def drawNode(nodeIdx, camX, camY, camZ)
+    {
+        if (nodeIdx < 0)
+        {
+            // É uma leaf
+            var leafIdx = -(nodeIdx + 1);
+            if (leafIdx < 0 || leafIdx >= len(self.leaves)) return;
+            self.drawLeaf(leafIdx);
+            return;
+        }
+
+        if (nodeIdx >= len(self.nodes)) return;
+
+        var nd = self.nodes[nodeIdx];
+        var pl = self.planes[nd.plane];
+        var dist = pl.nx * camX + pl.ny * camY + pl.nz * camZ - pl.dist;
+
+        if (dist >= 0)
+        {
+            self.drawNode(nd.back,  camX, camY, camZ);
+            self.drawNode(nd.front, camX, camY, camZ);
+        }
+        else
+        {
+            self.drawNode(nd.front, camX, camY, camZ);
+            self.drawNode(nd.back,  camX, camY, camZ);
+        }
+    }
+
+    def drawLeaf(leafIdx)
+    {
+        var lf = self.leaves[leafIdx];
+        for (var i = 0; i < lf.numLeafFaces; i += 1)
+        {
+            var faceIdx = self.leafFaces[lf.firstLeafFace + i];
+            if (faceIdx < 0 || faceIdx >= len(self.faces)) continue;
+            if (self.facesDrawn[faceIdx] == 1) continue;
+            self.facesDrawn[faceIdx] = 1;
+            self.drawFace(faceIdx);
+        }
+    }
+
+    def drawFace(faceIdx)
+    {
+        var f = self.faces[faceIdx];
+
+        // Só polígonos e meshes 
+        if (f.faceType != Q3_FACE_POLYGON && f.faceType != Q3_FACE_MESH) return;
+        if (f.numMeshVerts <= 0) return;
+
+        // Bind textura
+        var texId = 0;
+        if (f.textureIdx >= 0 && f.textureIdx < len(self.textures))
+            texId = self.textures[f.textureIdx].texId;
+
+        // Bind lightmap na unidade 1
+        var lmId = 0;
+        if (f.lmIdx >= 0 && f.lmIdx < len(self.lightmapIds))
+            lmId = self.lightmapIds[f.lmIdx];
+
+        glActiveTexture(GL_TEXTURE0);
+        glEnable(GL_TEXTURE_2D);
+        if (texId > 0) glBindTexture(GL_TEXTURE_2D, texId);
+
+        glActiveTexture(GL_TEXTURE1);
+        glEnable(GL_TEXTURE_2D);
+        if (lmId > 0) glBindTexture(GL_TEXTURE_2D, lmId);
+
+        // Combiner: tex0 * tex1 * 2 (lightmap multiply)
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+
+        glBegin(GL_TRIANGLES);
+        for (var i = 0; i < f.numMeshVerts; i += 1)
+        {
+            var mvIdx = self.meshVerts[f.firstMeshVert + i];
+            var vIdx  = f.firstVert + mvIdx;
+            if (vIdx < 0 || vIdx >= len(self.vertices)) continue;
+
+            var vt = self.vertices[vIdx];
+
+            // Multitexture: UV0 = surface, UV1 = lightmap
+            glMultiTexCoord2f(GL_TEXTURE0, vt.u,  vt.v);
+            glMultiTexCoord2f(GL_TEXTURE1, vt.lu, vt.lv);
+            glNormal3f(vt.nx, vt.ny, vt.nz);
+            glColor4f(vt.r, vt.g, vt.b, vt.a);
+            glVertex3f(vt.x, vt.y, vt.z);
+        }
+        glEnd();
+
+        // Cleanup
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+    }
+ 
+    def traceSphereAll(px, py, pz, dx, dy, dz, radius)
+    {
+        var bestFrac = 1.0;
+        var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+        var hit = false;
+
+        var s   = self.scale;
+        var qpx = px / s; var qpy = py / s; var qpz = pz / s;
+        var qdx = dx / s; var qdy = dy / s; var qdz = dz / s;
+        var qr  = radius / s;
+
+        // testa TODOS os brushes — confirma se a geometria está certa
+        for (var bi = 0; bi < len(self.brushes); bi += 1)
+        {
+            var br = self.brushes[bi];
+            if (br.numSides <= 0) continue;
+
+            // filtra sólidos
+            if (br.textureIdx >= 0 && br.textureIdx < len(self.textures))
+            {
+                var contents = self.textures[br.textureIdx].contents;
+                if (!(contents & 1)) continue;
+            }
+
+            var (frac, nx, ny, nz) = self.traceBoxBrush(qpx, qpy, qpz, qdx, qdy, qdz, qr, br);
+            if (frac < bestFrac)
+            {
+                bestFrac = frac;
+                bestNX = nx; bestNY = ny; bestNZ = nz;
+                hit = true;
+            }
+        }
+        return (bestFrac, bestNX, bestNY, bestNZ, hit);
+    }
+
+ 
+
+    def traceSphere(px, py, pz, dx, dy, dz, radius)
+{
+    var bestFrac = 1.0;
+    var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+    var hit = false;
+
+    var s   = self.scale;
+    var qpx = px / s; var qpy = py / s; var qpz = pz / s;
+    var qdx = dx / s; var qdy = dy / s; var qdz = dz / s;
+    var qr  = radius / s;
+
+    // verifica 8 pontos à volta da esfera + centro atual + destino
+    var offsets = [
+        [0.0,  0.0,  0.0],
+        [qr,   0.0,  0.0], [-qr,  0.0,  0.0],
+        [0.0,  qr,   0.0], [0.0, -qr,   0.0],
+        [0.0,  0.0,  qr ], [0.0,  0.0, -qr ],
+        [qr,   0.0,  qr ], [-qr,  0.0, -qr ]
+    ];
+
+    var leafsSeen = [];
+    for (var oi = 0; oi < len(offsets); oi += 1)
+    {
+        var ox = offsets[oi][0]; var oy = offsets[oi][1]; var oz = offsets[oi][2];
+
+        var la = self.findLeaf(qpx + ox, qpy + oy, qpz + oz);
+        var lb = self.findLeaf(qpx + qdx + ox, qpy + qdy + oy, qpz + qdz + oz);
+
+        for (var li = 0; li < 2; li += 1)
+        {
+            var leafIdx = la;
+            if (li == 1) leafIdx = lb;
+            if (leafIdx < 0 || leafIdx >= len(self.leaves)) continue;
+
+            // verifica se já testamos esta leaf
+            var already = false;
+            for (var si = 0; si < len(leafsSeen); si += 1)
+                if (leafsSeen[si] == leafIdx) { already = true; break; }
+            if (already) continue;
+            leafsSeen.push(leafIdx);
+
+            var lf = self.leaves[leafIdx];
+            for (var i = 0; i < lf.numLeafBrushes; i += 1)
+            {
+                var bi = self.leafBrushes[lf.firstLeafBrush + i];
+                if (bi < 0 || bi >= len(self.brushes)) continue;
+                var br = self.brushes[bi];
+                if (br.numSides <= 0) continue;
+
+                if (br.textureIdx >= 0 && br.textureIdx < len(self.textures))
+                {
+                    var contents = self.textures[br.textureIdx].contents;
+                    if (!(contents & 1)) continue;
+                }
+
+                var (frac, nx, ny, nz) = self.traceBoxBrush(qpx, qpy, qpz, qdx, qdy, qdz, qr, br);
+                if (frac < bestFrac)
+                {
+                    bestFrac = frac;
+                    bestNX = nx; bestNY = ny; bestNZ = nz;
+                    hit = true;
+                }
+            }
+        }
+    }
+    return (bestFrac, bestNX, bestNY, bestNZ, hit);
+}
+
+
+    def traceBoxBrush(px, py, pz, dx, dy, dz, radius, brush)
+    {
+        var enterFrac = -1.0;
+        var leaveFrac =  1.0;
+        var nx = 0.0; var ny = 1.0; var nz = 0.0;
+        var startsOut = false;
+
+        for (var i = 0; i < brush.numSides; i += 1)
+        {
+            var si = brush.firstSide + i;
+            if (si < 0 || si >= len(self.brushSides)) continue;
+            var bs = self.brushSides[si];
+            if (bs.planeIdx < 0 || bs.planeIdx >= len(self.planes)) continue;
+            var pl = self.planes[bs.planeIdx];
+
+            // tudo em unidades Q3 — sem scale
+            var d1 = pl.nx * px + pl.ny * py + pl.nz * pz - pl.dist - radius;
+            var d2 = pl.nx * (px + dx) + pl.ny * (py + dy) + pl.nz * (pz + dz) - pl.dist - radius;
+
+            if (d1 > 0) startsOut = true;
+
+            // ambos fora deste lado — brush não é atingido
+            if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+
+            // ambos dentro — continua para o próximo lado
+            if (d1 <= 0 && d2 <= 0) continue;
+
+            var f = d1 / (d1 - d2);
+
+            if (d1 > d2)
+            {
+                // a entrar no brush
+                if (f > enterFrac)
+                {
+                    enterFrac = f;
+                    nx = pl.nx;
+                    ny = pl.ny;
+                    nz = pl.nz;
+                }
+            }
+            else
+            {
+                // a sair do brush
+                if (f < leaveFrac)
+                    leaveFrac = f;
+            }
+        }
+
+        // se começou dentro do brush, ignora (já está em colisão)
+        if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+
+        // colisão válida
+        if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+            return (max(0.0, enterFrac - 0.001), nx, ny, nz);
+
+        return (1.0, 0.0, 1.0, 0.0);
+    }
+    def traceCapsuleBrush(px, py, pz, dx, dy, dz, radius, halfHeight, brush)
+{
+    var enterFrac = -1.0;
+    var leaveFrac =  1.0;
+    var rnx = 0.0; var rny = 1.0; var rnz = 0.0;
+    var startsOut = false;
+
+    for (var i = 0; i < brush.numSides; i += 1)
+    {
+        var si = brush.firstSide + i;
+        if (si < 0 || si >= len(self.brushSides)) continue;
+        var bs = self.brushSides[si];
+        if (bs.planeIdx < 0 || bs.planeIdx >= len(self.planes)) continue;
+        var pl = self.planes[bs.planeIdx];
+
+        // escolhe o ponto da cápsula mais próximo do plano
+        var capOffset = 0.0;
+        if (pl.ny > 0.0)       capOffset = -halfHeight;
+        elif (pl.ny < 0.0)     capOffset =  halfHeight;
+
+        var cy0 = py + capOffset;
+        var cy1 = py + dy + capOffset;
+
+        var d1 = pl.nx * px + pl.ny * cy0 + pl.nz * pz - pl.dist - radius;
+        var d2 = pl.nx * (px+dx) + pl.ny * cy1 + pl.nz * (pz+dz) - pl.dist - radius;
+
+        if (d1 > 0) startsOut = true;
+        if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+        if (d1 <= 0 && d2 <= 0) continue;
+
+        var f = d1 / (d1 - d2);
+        if (d1 > d2)
+        {
+            if (f > enterFrac) { enterFrac = f; rnx = pl.nx; rny = pl.ny; rnz = pl.nz; }
+        }
+        else
+        {
+            if (f < leaveFrac) leaveFrac = f;
+        }
+    }
+
+    if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+    if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+        return (max(0.0, enterFrac - 0.001), rnx, rny, rnz);
+    return (1.0, 0.0, 1.0, 0.0);
+}
+
+def traceCapsule(px, py, pz, dx, dy, dz, radius, halfHeight)
+{
+    var bestFrac = 1.0;
+    var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+    var hit = false;
+
+    var s   = self.scale;
+    var qpx = px / s; var qpy = py / s; var qpz = pz / s;
+    var qdx = dx / s; var qdy = dy / s; var qdz = dz / s;
+    var qr  = radius / s;
+    var qhh = halfHeight / s;
+
+    var offsets = [
+        [0.0,  0.0,  0.0],
+        [qr,   0.0,  0.0], [-qr,  0.0,  0.0],
+        [0.0,  0.0,  qr ], [0.0,  0.0, -qr ],
+        [0.0,  qhh,  0.0], [0.0, -qhh,  0.0],
+        [qr,   qhh,  0.0], [-qr, -qhh,  0.0]
+    ];
+
+    var leafsSeen = [];
+    for (var oi = 0; oi < len(offsets); oi += 1)
+    {
+        var ox = offsets[oi][0]; var oy = offsets[oi][1]; var oz = offsets[oi][2];
+        var la = self.findLeaf(qpx + ox,       qpy + oy,       qpz + oz);
+        var lb = self.findLeaf(qpx + qdx + ox, qpy + qdy + oy, qpz + qdz + oz);
+
+        for (var li = 0; li < 2; li += 1)
+        {
+            var leafIdx = la;
+            if (li == 1) leafIdx = lb;
+            if (leafIdx < 0 || leafIdx >= len(self.leaves)) continue;
+
+            var already = false;
+            for (var si = 0; si < len(leafsSeen); si += 1)
+                if (leafsSeen[si] == leafIdx) { already = true; break; }
+            if (already) continue;
+            leafsSeen.push(leafIdx);
+
+            var lf = self.leaves[leafIdx];
+            for (var i = 0; i < lf.numLeafBrushes; i += 1)
+            {
+                var bi = self.leafBrushes[lf.firstLeafBrush + i];
+                if (bi < 0 || bi >= len(self.brushes)) continue;
+                var br = self.brushes[bi];
+                if (br.numSides <= 0) continue;
+
+                if (br.textureIdx >= 0 && br.textureIdx < len(self.textures))
+                {
+                    var contents = self.textures[br.textureIdx].contents;
+                    if (!(contents & 1)) continue;
+                }
+
+                var (frac, nx, ny, nz) = self.traceCapsuleBrush(qpx, qpy, qpz, qdx, qdy, qdz, qr, qhh, br);
+                if (frac < bestFrac)
+                {
+                    bestFrac = frac;
+                    bestNX = nx; bestNY = ny; bestNZ = nz;
+                    hit = true;
+                }
+            }
+        }
+    }
+    return (bestFrac, bestNX, bestNY, bestNZ, hit);
+}
+
+
+   
+
+}
+
+
+
+
+class Q3Player
+{
+    var x, y, z;          // posição do centro da cápsula
+    var velX, velY, velZ;
+    var radius;            // raio da cápsula
+    var halfHeight;        // meia altura do cilindro (sem as esferas)
+    var speed;
+    var sprintMult;
+    var jumpSpeed;
+    var gravity;
+    var onGround;
+    var noclip;
+    var stepHeight;        // altura máxima de degrau
+
+    // debug
+    var lastFrac;
+    var lastNX, lastNY, lastNZ;
+    var lastHit;
+
+    def init()
+    {
+        self.x          = 0.0; self.y = 2.0; self.z = 0.0;
+        self.velX       = 0.0; self.velY = 0.0; self.velZ = 0.0;
+        self.radius     = 0.55;
+        self.halfHeight = 0.85;   // total height = halfHeight*2 + radius*2 ≈ 1.7 + 0.7 = 2.4m... 
+        self.speed      = 10.0;
+        self.sprintMult = 2.0;
+        self.jumpSpeed  = 7.0;
+        self.gravity    = -22.0;
+        self.onGround   = false;
+        self.noclip     = false;
+        self.stepHeight = 0.35;
+        self.lastFrac   = 1.0;
+        self.lastNX     = 0.0; self.lastNY = 1.0; self.lastNZ = 0.0;
+        self.lastHit    = false;
+    }
+
+    def spawn(px, py, pz)
+    {
+        self.x = px; self.y = py; self.z = pz;
+        self.velX = 0.0; self.velY = 0.0; self.velZ = 0.0;
+        self.onGround = false;
+    }
+
+    // ----------------------------------------------------------
+    // Capsule trace contra um brush
+    // A cápsula é representada por dois centros de esfera:
+    //   bottom = (px, py - halfHeight, pz)
+    //   top    = (px, py + halfHeight, pz)
+    // Cada plano do brush é expandido por radius
+    // ----------------------------------------------------------
+
+    def traceCapsuleBrush(px, py, pz, dx, dy, dz, brush, bsp)
+    {
+        var enterFrac = -1.0;
+        var leaveFrac =  1.0;
+        var rnx = 0.0; var rny = 1.0; var rnz = 0.0;
+        var startsOut = false;
+
+        var r  = self.radius;
+        var hh = self.halfHeight;
+
+        for (var i = 0; i < brush.numSides; i += 1)
+        {
+            var si = brush.firstSide + i;
+            if (si < 0 || si >= len(bsp.brushSides)) continue;
+            var bs = bsp.brushSides[si];
+            if (bs.planeIdx < 0 || bs.planeIdx >= len(bsp.planes)) continue;
+            var pl = bsp.planes[bs.planeIdx];
+
+            // escolhe o ponto da cápsula mais próximo do plano
+            // se o plano aponta para cima usa o bottom, se para baixo usa o top
+            // para os lados usa o centro
+            var capOffset = 0.0;
+            if (pl.ny > 0.0)
+                capOffset = -hh;   // plano aponta para cima → usa bottom sphere
+            elif (pl.ny < 0.0)
+                capOffset = hh;    // plano aponta para baixo → usa top sphere
+            // lados: capOffset = 0 (centro)
+
+            // posição do centro relevante da cápsula
+            var cy0 = py + capOffset;
+            var cy1 = py + dy + capOffset;
+
+            // distâncias ao plano expandido por radius
+            var d1 = pl.nx * px + pl.ny * cy0 + pl.nz * pz - pl.dist - r;
+            var d2 = pl.nx * (px+dx) + pl.ny * cy1 + pl.nz * (pz+dz) - pl.dist - r;
+
+            if (d1 > 0) startsOut = true;
+
+            // ambos fora — sem colisão com este lado
+            if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+
+            // ambos dentro — continua
+            if (d1 <= 0 && d2 <= 0) continue;
+
+            var f = d1 / (d1 - d2);
+
+            if (d1 > d2)
+            {
+                // a entrar
+                if (f > enterFrac)
+                {
+                    enterFrac = f;
+                    rnx = pl.nx; rny = pl.ny; rnz = pl.nz;
+                }
+            }
+            else
+            {
+                // a sair
+                if (f < leaveFrac) leaveFrac = f;
+            }
+        }
+
+        if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+
+        if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+            return (max(0.0, enterFrac - 0.001), rnx, rny, rnz);
+
+        return (1.0, 0.0, 1.0, 0.0);
+    }
+
+    // ----------------------------------------------------------
+    // Trace da cápsula contra o mundo
+    // ----------------------------------------------------------
+
+    def traceCapsule(px, py, pz, dx, dy, dz, bsp)
+    {
+        var bestFrac = 1.0;
+        var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+        var hit = false;
+
+        var s = bsp.scale;
+
+        // converte para unidades Q3
+        var qpx = px / s; var qpy = py / s; var qpz = pz / s;
+        var qdx = dx / s; var qdy = dy / s; var qdz = dz / s;
+
+        // amostra várias leaves à volta da cápsula
+        var qr  = self.radius / s;
+        var qhh = self.halfHeight / s;
+
+        var offsets = [
+            [0.0,     0.0,  0.0 ],
+            [qr,      0.0,  0.0 ], [-qr,  0.0,   0.0],
+            [0.0,     0.0,  qr  ], [0.0,  0.0,  -qr ],
+            [0.0,     qhh,  0.0 ], [0.0, -qhh,   0.0],
+            [qr,      qhh,  0.0 ], [-qr, -qhh,   0.0]
+        ];
+
+        var leafsSeen = [];
+
+        for (var oi = 0; oi < len(offsets); oi += 1)
+        {
+            var ox = offsets[oi][0];
+            var oy = offsets[oi][1];
+            var oz = offsets[oi][2];
+
+            var la = bsp.findLeaf(qpx + ox,       qpy + oy,       qpz + oz);
+            var lb = bsp.findLeaf(qpx + qdx + ox, qpy + qdy + oy, qpz + qdz + oz);
+
+            for (var li = 0; li < 2; li += 1)
+            {
+                var leafIdx = la;
+                if (li == 1) leafIdx = lb;
+                if (leafIdx < 0 || leafIdx >= len(bsp.leaves)) continue;
+
+                var already = false;
+                for (var si = 0; si < len(leafsSeen); si += 1)
+                    if (leafsSeen[si] == leafIdx) { already = true; break; }
+                if (already) continue;
+                leafsSeen.push(leafIdx);
+
+                var lf = bsp.leaves[leafIdx];
+                for (var i = 0; i < lf.numLeafBrushes; i += 1)
+                {
+                    var bi = bsp.leafBrushes[lf.firstLeafBrush + i];
+                    if (bi < 0 || bi >= len(bsp.brushes)) continue;
+                    var br = bsp.brushes[bi];
+                    if (br.numSides <= 0) continue;
+
+                    // só sólidos
+                    if (br.textureIdx >= 0 && br.textureIdx < len(bsp.textures))
+                    {
+                        var contents = bsp.textures[br.textureIdx].contents;
+                        if (!(contents & 1)) continue;
+                    }
+
+                    var (frac, nx, ny, nz) = self.traceCapsuleBrush(qpx, qpy, qpz, qdx, qdy, qdz, br, bsp);
+                    if (frac < bestFrac)
+                    {
+                        bestFrac = frac;
+                        bestNX = nx; bestNY = ny; bestNZ = nz;
+                        hit = true;
+                    }
+                }
+            }
+        }
+
+        self.lastFrac = bestFrac;
+        self.lastNX = bestNX; self.lastNY = bestNY; self.lastNZ = bestNZ;
+        self.lastHit = hit;
+
+        return (bestFrac, bestNX, bestNY, bestNZ, hit);
+    }
+
+    // ----------------------------------------------------------
+    // Slide move
+    // ----------------------------------------------------------
+
+    def slideMove(dx, dy, dz, bsp)
+    {
+        var ox = self.x; var oy = self.y; var oz = self.z;
+
+        for (var iter = 0; iter < 4; iter += 1)
+        {
+            var (frac, nx, ny, nz, hit) = self.traceCapsule(self.x, self.y, self.z, dx, dy, dz, bsp);
+
+            self.x += dx * frac;
+            self.y += dy * frac;
+            self.z += dz * frac;
+
+            if (!hit) break;
+
+            // chão
+            if (ny > 0.7)
+            {
+                self.onGround = true;
+                self.velY = 0.0;
+            }
+
+            // slide — remove a componente normal do movimento restante
+            var dot = dx * nx + dy * ny + dz * nz;
+            dx -= nx * dot;
+            dy -= ny * dot;
+            dz -= nz * dot;
+
+            // se o movimento restante é muito pequeno, para
+            var len2 = dx*dx + dy*dy + dz*dz;
+            if (len2 < 0.000001) break;
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Step — tenta subir degraus
+    // ----------------------------------------------------------
+
+    def tryStep(dx, dz, bsp)
+    {
+        // tenta mover para cima pelo stepHeight, depois move horizontal, depois desce
+        var stepDy = self.stepHeight;
+
+        // sobe
+        var (frac, nx, ny, nz, hit) = self.traceCapsule(self.x, self.y, self.z, 0.0, stepDy, 0.0, bsp);
+        var stepY = self.y + stepDy * frac;
+
+        // move horizontal a partir da posição elevada
+        var savedX = self.x; var savedY = self.y; var savedZ = self.z;
+        self.y = stepY;
+        var (frac2, nx2, ny2, nz2, hit2) = self.traceCapsule(self.x, self.y, self.z, dx, 0.0, dz, bsp);
+        self.x += dx * frac2;
+        self.z += dz * frac2;
+
+        // se não moveu nada, volta à posição original
+        var movedX = abs(self.x - savedX);
+        var movedZ = abs(self.z - savedZ);
+        if (movedX < 0.001 && movedZ < 0.001)
+        {
+            self.x = savedX; self.y = savedY; self.z = savedZ;
+            return false;
+        }
+
+        // desce até ao chão
+        var (frac3, nx3, ny3, nz3, hit3) = self.traceCapsule(self.x, self.y, self.z, 0.0, -stepDy * 2.0, 0.0, bsp);
+        self.y += -stepDy * 2.0 * frac3;
+
+        // se ficou mais alto que antes, aceita o step
+        if (self.y >= savedY - 0.01)
+            return true;
+
+        // volta atrás
+        self.x = savedX; self.y = savedY; self.z = savedZ;
+        return false;
+    }
+
+    // ----------------------------------------------------------
+    // Update principal
+    // ----------------------------------------------------------
+
+    def update(dt, bsp, cam)
+    {
+        self.onGround = false;
+
+        if (self.noclip)
+        {
+            // noclip — usa o movimento da câmera diretamente
+            self.x = cam.x; self.y = cam.y; self.z = cam.z;
+            return;
+        }
+
+        var fwd   = cam.getForward();
+        var right = cam.getRight();
+
+        var mv = self.speed * dt;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) mv = mv * self.sprintMult;
+
+        var moveX = 0.0; var moveZ = 0.0;
+        if (IsKeyDown(KEY_W)) { moveX += fwd.x * mv;   moveZ += fwd.z * mv; }
+        if (IsKeyDown(KEY_S)) { moveX -= fwd.x * mv;   moveZ -= fwd.z * mv; }
+        if (IsKeyDown(KEY_A)) { moveX += right.x * mv; moveZ += right.z * mv; }
+        if (IsKeyDown(KEY_D)) { moveX -= right.x * mv; moveZ -= right.z * mv; }
+
+        // gravidade
+        self.velY += self.gravity * dt;
+        var moveY = self.velY * dt;
+
+        // tenta step antes do slide move horizontal
+        if ((abs(moveX) > 0.001 || abs(moveZ) > 0.001) && self.onGround)
+            self.tryStep(moveX, moveZ, bsp);
+
+        // slide move completo
+        self.slideMove(moveX, moveY, moveZ, bsp);
+
+        // verifica chão com pequeno probe para baixo
+        var (gfrac, gnx, gny, gnz, ghit) = self.traceCapsule(self.x, self.y, self.z, 0.0, -0.05, 0.0, bsp);
+        if (ghit && gny > 0.7)
+        {
+            self.onGround = true;
+            self.velY = 0.0;
+        }
+
+        // jump
+        if (self.onGround && IsKeyPressed(KEY_SPACE))
+        {
+            self.velY = self.jumpSpeed;
+            self.onGround = false;
+        }
+
+        // sincroniza câmera com o jogador
+        cam.x = self.x;
+        cam.y = self.y + self.halfHeight + self.radius * 0.5;  // olhos no topo
+        cam.z = self.z;
+    }
+}

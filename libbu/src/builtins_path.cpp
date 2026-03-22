@@ -116,6 +116,46 @@ int native_path_dirname(Interpreter *vm, int argCount, Value *args)
     return 1;
 }
 
+int native_path_filename(Interpreter *vm, int argCount, Value *args)
+{
+    if (!args[0].isString())
+        return 0;
+
+    std::string path = args[0].asStringChars();
+
+    // basename primeiro
+    size_t sep = path.find_last_of("/\\");
+    std::string base = (sep != std::string::npos) ? path.substr(sep + 1) : path;
+
+    // remove extensão
+    size_t dot = base.find_last_of('.');
+    if (dot != std::string::npos)
+        base = base.substr(0, dot);
+
+    vm->push(vm->makeString(base.c_str()));
+    return 1;
+}
+
+int native_path_extension(Interpreter *vm, int argCount, Value *args)
+{
+    if (!args[0].isString())
+        return 0;
+
+    std::string path = args[0].asStringChars();
+
+    // basename primeiro
+    size_t sep = path.find_last_of("/\\");
+    std::string base = (sep != std::string::npos) ? path.substr(sep + 1) : path;
+
+    // extrai extensão incluindo o ponto
+    size_t dot = base.find_last_of('.');
+    if (dot != std::string::npos)
+        vm->push(vm->makeString(base.substr(dot).c_str()));
+    else
+        vm->push(vm->makeString(""));
+
+    return 1;
+}
 int native_path_exists(Interpreter *vm, int argCount, Value *args)
 {
     if (!args[0].isString())
@@ -204,7 +244,9 @@ void Interpreter::registerPath()
         .addFunction("extname", native_path_extname, 1)
         .addFunction("exists", native_path_exists, 1)
         .addFunction("isdir", native_path_isdir, 1)
-        .addFunction("isfile", native_path_isfile, 1);
+        .addFunction("isfile", native_path_isfile, 1)
+        .addFunction("filename",  native_path_filename,  1)
+        .addFunction("extension", native_path_extension, 1);
 }
 
 #endif

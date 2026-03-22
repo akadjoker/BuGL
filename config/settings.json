@@ -1,0 +1,25 @@
+{
+  "autosave_enabled": true,
+  "autosave_interval_ms": 1500,
+  "bugl_path": "bugl",
+  "bytecode_output_path": "scripts/demo_water_legacy.buc",
+  "console_visible": false,
+  "file_explorer_visible": true,
+  "font_choice": "default",
+  "font_path": "",
+  "font_scale": 1.0,
+  "last_file_path": "scripts/demo_water_legacy.bu",
+  "minimap_visible": false,
+  "outline_side": "right",
+  "outline_visible": true,
+  "palette": "vscode_dark",
+  "runtime": {
+    "binary_path": "bugl",
+    "profile_name": "bugl"
+  },
+  "workspace": {
+    "bytecode_output_path": "scripts/demo_water_legacy.buc",
+    "entry_script": "scripts/demo_water_legacy.bu",
+    "root_path": ""
+  }
+}

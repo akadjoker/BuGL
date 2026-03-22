@@ -1,0 +1,225 @@
+// ================================================================
+// Demo: MD2 legacy renderer in BuLang
+//
+// Controls:
+//   - Right mouse drag / arrows: orbit camera
+//   - W/S or mouse wheel: zoom
+//   - Prev/Next animation via ImGui
+//   - Space: pause / resume
+//   - 1..5 quick animation presets
+//   - ESC: quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+include "lib_camera_orbit.bu";
+include "lib_md2.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.28, 0.32, 0.36, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y, halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f(halfSize, y, i);
+    }
+    glEnd();
+}
+
+def drawAxes(size)
+{
+    glDisable(GL_TEXTURE_2D);
+    glBegin(GL_LINES);
+    glColor3f(1.0, 0.2, 0.2);
+    glVertex3f(0.0, 0.0, 0.0);
+    glVertex3f(size, 0.0, 0.0);
+    glColor3f(0.2, 1.0, 0.2);
+    glVertex3f(0.0, 0.0, 0.0);
+    glVertex3f(0.0, size, 0.0);
+    glColor3f(0.2, 0.7, 1.0);
+    glVertex3f(0.0, 0.0, 0.0);
+    glVertex3f(0.0, 0.0, size);
+    glEnd();
+}
+
+def drawGround()
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor3f(0.10, 0.12, 0.15);
+    glBegin(GL_QUADS);
+    glVertex3f(-24.0, 0.0, -24.0);
+    glVertex3f(24.0, 0.0, -24.0);
+    glVertex3f(24.0, 0.0, 24.0);
+    glVertex3f(-24.0, 0.0, 24.0);
+    glEnd();
+}
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("BuGL - MD2 Legacy", 1280, 820, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.06, 0.08, 0.11, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+var modelPath = resolveAssetPath("assets/md2/pknight.md2", "../assets/md2/pknight.md2");
+if (modelPath == nil)
+{
+    print("MD2 asset not found: assets/md2/pknight.md2");
+    Close();
+    return;
+}
+
+var knight = MD2Model();
+if (!knight.load(modelPath))
+{
+    print("Failed to load MD2 model: " + modelPath);
+    Close();
+    return;
+}
+
+knight.scale = 1.35;
+knight.positionX = 0.0;
+knight.positionY = 0.0;
+knight.positionZ = 0.0;
+knight.rotationY = 180.0;
+knight.playAnimationByName("Stand", 0.0);
+
+var cam = CameraOrbit(0.0, 1.8, 0.0, 9.5);
+cam.setAngles(18.0, -16.0);
+cam.minDist = 3.0;
+cam.maxDist = 24.0;
+cam.zoomSpeed = 12.0;
+
+var fpsSmooth = 60.0;
+var paused = false;
+
+print("MD2 legacy demo");
+print("1 Stand | 2 Run | 3 Attack | 4 Wave | 5 Salute | Space pause");
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05) dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_SPACE)) paused = !paused;
+    if (IsKeyPressed(KEY_1)) knight.playAnimationByName("Stand", 0.16);
+    if (IsKeyPressed(KEY_2)) knight.playAnimationByName("Run", 0.16);
+    if (IsKeyPressed(KEY_3)) knight.playAnimationByName("Attack", 0.12);
+    if (IsKeyPressed(KEY_4)) knight.playAnimationByName("Wave", 0.18);
+    if (IsKeyPressed(KEY_5)) knight.playAnimationByName("Salute", 0.18);
+
+    cam.update(dt);
+    if (!paused) knight.update(dt);
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 55.0 * deg2rad, 0.1, 120.0);
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+    //drawGround();
+    drawGrid(-1.0, 24, 1.0);
+    drawAxes(2.4);
+
+    glPushMatrix();
+    glTranslatef(0.0, 3.0, 0.0);
+    knight.draw();
+    glPopMatrix();
+
+    var panel = ImGui.Begin("MD2 Knight");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Text("model: " + path.basename(modelPath));
+        ImGui.Text("texture: " + path.basename(knight.texturePath));
+        ImGui.Text("frames: " + knight.header.numFrames + "  verts: " + knight.header.numVerts);
+        ImGui.Text("tris: " + knight.triangleCount());
+        ImGui.Text("anim: " + knight.animationName());
+        ImGui.Text("frame: " + knight.anim.current + " -> " + knight.anim.next + "  t=" + format("{}", knight.anim.interp));
+        ImGui.Text("frame name: " + knight.currentFrameName());
+        ImGui.Text("blend: " + format("{}", knight.transitionBlend()));
+        ImGui.Separator();
+
+        if (ImGui.Button("Prev Anim"))
+        {
+            knight.prevAnimation();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Next Anim"))
+        {
+            knight.nextAnimation();
+        }
+        ImGui.SameLine();
+        var pauseLabel = "Pause";
+        if (paused) pauseLabel = "Resume";
+        if (ImGui.Button(pauseLabel))
+        {
+            paused = !paused;
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Stand")) knight.setAnimationByName("Stand");
+        ImGui.SameLine();
+        if (ImGui.Button("Run")) knight.setAnimationByName("Run");
+        ImGui.SameLine();
+        if (ImGui.Button("Attack")) knight.setAnimationByName("Attack");
+        if (ImGui.Button("Wave")) knight.setAnimationByName("Wave");
+        ImGui.SameLine();
+        if (ImGui.Button("Salute")) knight.setAnimationByName("Salute");
+        ImGui.SameLine();
+        if (ImGui.Button("Jump")) knight.setAnimationByName("Jump");
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+knight.destroy();
+Close();

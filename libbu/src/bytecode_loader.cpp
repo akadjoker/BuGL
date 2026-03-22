@@ -14,6 +14,7 @@
 namespace
 {
 static const uint32 kInvalidIpOffset = 0xFFFFFFFFu;
+static const char *kMainProcessName = "__main_process__";
 
 class BytecodeReader
 {
@@ -191,6 +192,32 @@ bool stringEquals(String *a, String *b)
     return false;
   }
   return compare_strings(a, b);
+}
+
+ProcessDef *findBootstrapProcess(const Vector<ProcessDef *> &processes)
+{
+  ProcessDef *fallback = nullptr;
+
+  for (size_t i = 0; i < processes.size(); ++i)
+  {
+    ProcessDef *proc = processes[i];
+    if (!proc)
+    {
+      continue;
+    }
+
+    if (!fallback)
+    {
+      fallback = proc;
+    }
+
+    if (proc->name && std::strcmp(proc->name->chars(), kMainProcessName) == 0)
+    {
+      return proc;
+    }
+  }
+
+  return fallback;
 }
 
 bool readString(Interpreter *vm, BytecodeReader &reader, String **out)
@@ -1848,9 +1875,10 @@ bool Interpreter::loadBytecode(const char *filename)
 
   // Match Interpreter::run() bootstrap behavior:
   // spawn the first process as main and execute initial script pass.
-  if (!processes.empty() && processes[0] != nullptr)
+  ProcessDef *bootstrapProcess = findBootstrapProcess(processes);
+  if (bootstrapProcess != nullptr)
   {
-    mainProcess = spawnProcess(processes[0]);
+    mainProcess = spawnProcess(bootstrapProcess);
     if (!mainProcess)
     {
       safetimeError("loadBytecode: failed to spawn main process from '%s'", filename);
@@ -1860,6 +1888,7 @@ bool Interpreter::loadBytecode(const char *filename)
 
     currentProcess = mainProcess;
     run_process(mainProcess);
+    currentProcess = nullptr;
     if (hasFatalError_)
     {
       safetimeError("loadBytecode: fatal error while bootstrapping '%s'", filename);

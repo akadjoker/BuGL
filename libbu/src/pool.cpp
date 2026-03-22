@@ -522,6 +522,88 @@ String *StringPool::format(const char *fmt, ...)
     return create(buffer, len);
 }
 
+// ========================================
+// FIND - primeira ocorrência (wrapper de indexOf mais limpo)
+// ========================================
+
+int StringPool::find(String *str, String *substr, int startIndex)
+{
+    if (!str || !substr) return -1;
+    if (substr->length() == 0) return startIndex;
+
+    int strLen = str->length();
+    if (startIndex < 0) startIndex = 0;
+    if (startIndex >= strLen) return -1;
+
+    const char *found = strstr(str->chars() + startIndex, substr->chars());
+    if (!found) return -1;
+    return (int)(found - str->chars());
+}
+
+int StringPool::find(String *str, const char *substr, int startIndex)
+{
+    if (!str || !substr) return -1;
+    if (startIndex < 0) startIndex = 0;
+    if (startIndex >= (int)str->length()) return -1;
+
+    const char *found = strstr(str->chars() + startIndex, substr);
+    if (!found) return -1;
+    return (int)(found - str->chars());
+}
+
+// ========================================
+// RFIND - última ocorrência
+// ========================================
+
+int StringPool::rfind(String *str, String *substr, int startIndex)
+{
+    if (!str || !substr) return -1;
+
+    int strLen    = (int)str->length();
+    int subLen    = (int)substr->length();
+
+    if (subLen == 0) return strLen;
+
+    // startIndex = posição máxima onde pode começar o match
+    if (startIndex < 0 || startIndex > strLen - subLen)
+        startIndex = strLen - subLen;
+
+    if (startIndex < 0) return -1;
+
+    const char *s   = str->chars();
+    const char *sub = substr->chars();
+
+    // varre de trás para a frente
+    for (int i = startIndex; i >= 0; i--)
+    {
+        if (strncmp(s + i, sub, subLen) == 0)
+            return i;
+    }
+    return -1;
+}
+
+int StringPool::rfind(String *str, const char *substr, int startIndex)
+{
+    if (!str || !substr) return -1;
+
+    int strLen = (int)str->length();
+    int subLen = (int)strlen(substr);
+
+    if (subLen == 0) return strLen;
+
+    if (startIndex < 0 || startIndex > strLen - subLen)
+        startIndex = strLen - subLen;
+
+    if (startIndex < 0) return -1;
+
+    const char *s = str->chars();
+    for (int i = startIndex; i >= 0; i--)
+    {
+        if (strncmp(s + i, substr, subLen) == 0)
+            return i;
+    }
+    return -1;
+}
 String *StringPool::getString(int index)
 {
     if (index < 0 || index >= map.size())

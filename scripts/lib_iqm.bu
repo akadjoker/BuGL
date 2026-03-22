@@ -1,0 +1,1117 @@
+// ================================================================
+// lib_iqm.bu — Inter-Quake Model (IQM v2) loader + CPU skinning
+//
+// Usage:
+//   include "lib_iqm.bu";
+//   var model = IQMModel();
+//   model.load("model.iqm", "textures/");
+//   // aloop:
+//   model.update(dt);
+//   model.draw();
+// ================================================================
+
+import file;
+using math;
+import STB;
+using STB;
+import path;
+import OpenGl;
+using OpenGl;
+import GLM;
+using GLM;
+
+// ============================================================
+// IQM constants
+// ============================================================
+
+var IQM_MAGIC   = "INTERQUAKEMODEL\0";
+var IQM_VERSION = 2;
+
+// vertex array types
+var IQM_POSITION     = 0;
+var IQM_TEXCOORD     = 1;
+var IQM_NORMAL       = 2;
+var IQM_TANGENT      = 3;
+var IQM_BLENDINDEXES = 4;
+var IQM_BLENDWEIGHTS = 5;
+var IQM_COLOR        = 6;
+
+// vertex array formats
+var IQM_BYTE   = 0;
+var IQM_UBYTE  = 1;
+var IQM_SHORT  = 2;
+var IQM_USHORT = 3;
+var IQM_INT    = 4;
+var IQM_UINT   = 5;
+var IQM_FLOAT  = 7;
+
+// anim flags
+var IQM_LOOP = 1;
+
+// ============================================================
+// Animation clip
+// ============================================================
+
+class IQMAnim
+{
+    var name;
+    var firstFrame;
+    var numFrames;
+    var framerate;
+    var aloop;
+
+    def init(n, first, num, fps, lp)
+    {
+        self.name       = n;
+        self.firstFrame = first;
+        self.numFrames  = num;
+        self.framerate  = fps;
+        self.aloop       = lp;
+    }
+
+    def lastFrame() { return self.firstFrame + self.numFrames - 1; }
+}
+
+// ============================================================
+// Animation state
+// ============================================================
+
+class IQMAnimState
+{
+    var first, last, fps;
+    var current, next;
+    var interp, accum;
+    var aloop, playing;
+
+    def init()
+    {
+        self.first   = 0; self.last  = 0;
+        self.fps     = 25.0;
+        self.current = 0; self.next  = 1;
+        self.interp  = 0.0; self.accum = 0.0;
+        self.aloop    = true; self.playing = true;
+    }
+
+    def setRange(first, last, fps, shouldLoop)
+    {
+        if (fps < 0.01) fps = 0.01;
+        self.first   = first;
+        self.last    = last;
+        self.fps     = fps;
+        self.current = first;
+        self.next    = first + 1;
+        if (self.next > last) self.next = first;
+        self.interp  = 0.0;
+        self.accum   = 0.0;
+        self.aloop    = shouldLoop;
+        self.playing = true;
+    }
+
+    def update(dt)
+    {
+        if (!self.playing) return;
+        var frameTime = 1.0 / self.fps;
+        self.accum = self.accum + dt;
+
+        while (self.accum >= frameTime)
+        {
+            self.accum   = self.accum - frameTime;
+            self.current = self.next;
+            self.next    = self.current + 1;
+
+            if (self.next > self.last)
+            {
+                if (self.aloop)
+                {
+                    self.current = self.first;
+                    self.next    = self.first + 1;
+                    if (self.next > self.last) self.next = self.first;
+                }
+                else
+                {
+                    self.current = self.last;
+                    self.next    = self.last;
+                    self.playing = false;
+                    self.accum   = 0.0;
+                    break;
+                }
+            }
+        }
+
+        self.interp = self.accum / frameTime;
+        if (self.interp < 0.0) self.interp = 0.0;
+        if (self.interp > 1.0) self.interp = 1.0;
+        if (!self.playing) self.interp = 0.0;
+    }
+}
+
+// ============================================================
+// Joint (bind pose + runtime matrices)
+// ============================================================
+
+class IQMJoint
+{
+    var name;
+    var parent;         // -1 = root
+
+    // bind pose (from iqmjoint struct)
+    var tx, ty, tz;     // translation
+    var qx, qy, qz, qw; // rotation quaternion
+    var sx, sy, sz;     // scale
+
+    // runtime
+    var localMat;
+    var globalMat;
+    var offsetMat;
+    var skinMat;
+
+    def init(n, p)
+    {
+        self.name   = n;
+        self.parent = p;
+        self.tx=0.0; self.ty=0.0; self.tz=0.0;
+        self.qx=0.0; self.qy=0.0; self.qz=0.0; self.qw=1.0;
+        self.sx=1.0; self.sy=1.0; self.sz=1.0;
+        self.localMat  = MatrixIdentity();
+        self.globalMat = MatrixIdentity();
+        self.offsetMat = MatrixIdentity();
+        self.skinMat   = MatrixIdentity();
+    }
+
+    def buildMatrix(tx, ty, tz, qx, qy, qz, qw, sx, sy, sz)
+    {
+        var q   = Quaternion(qx, qy, qz, qw);
+        var m   = QuaternionToMatrix(q);
+        // apply scale to rotation columns
+        m.m0  = m.m0  * sx; m.m1  = m.m1  * sx; m.m2  = m.m2  * sx;
+        m.m4  = m.m4  * sy; m.m5  = m.m5  * sy; m.m6  = m.m6  * sy;
+        m.m8  = m.m8  * sz; m.m9  = m.m9  * sz; m.m10 = m.m10 * sz;
+        m.m12 = tx; m.m13 = ty; m.m14 = tz;
+        return m;
+    }
+
+    def buildBindMatrix()
+    {
+        return self.buildMatrix(
+            self.tx, self.ty, self.tz,
+            self.qx, self.qy, self.qz, self.qw,
+            self.sx, self.sy, self.sz
+        );
+    }
+}
+
+// ============================================================
+// Pose channel (per joint per frame)
+// ============================================================
+
+class IQMPose
+{
+    var parent;
+    var channelmask;
+    var offset;   // array[10] of float
+    var scale;    // array[10] of float
+
+    def init(p)
+    {
+        self.parent      = p;
+        self.channelmask = 0;
+        self.offset      = [0.0,0.0,0.0, 0.0,0.0,0.0,1.0, 1.0,1.0,1.0];
+        self.scale       = [1.0,1.0,1.0, 1.0,1.0,1.0,1.0, 1.0,1.0,1.0];
+    }
+}
+
+// ============================================================
+// Vertex
+// ============================================================
+
+class IQMVertex
+{
+    var x, y, z;
+    var nx, ny, nz;
+    var u, v;
+    var r, g, b, a;
+    var b0, b1, b2, b3;
+    var w0, w1, w2, w3;
+
+    def init()
+    {
+        self.x=0.0; self.y=0.0; self.z=0.0;
+        self.nx=0.0; self.ny=0.0; self.nz=1.0;
+        self.u=0.0; self.v=0.0;
+        self.r=1.0; self.g=1.0; self.b=1.0; self.a=1.0;
+        self.b0=0; self.b1=0; self.b2=0; self.b3=0;
+        self.w0=1.0; self.w1=0.0; self.w2=0.0; self.w3=0.0;
+    }
+}
+
+// ============================================================
+// Surface (one mesh)
+// ============================================================
+
+class IQMSurface
+{
+    var name;
+    var material;
+    var texId;
+    var firstVertex, numVertices;
+    var firstTriangle, numTriangles;
+    var vertices;   // array of IQMVertex (bind pose)
+    var skinned;    // array of IQMVertex (animated)
+    var indices;    // array of int
+
+    def init()
+    {
+        self.name          = "";
+        self.material      = "";
+        self.texId         = 0;
+        self.firstVertex   = 0;
+        self.numVertices   = 0;
+        self.firstTriangle = 0;
+        self.numTriangles  = 0;
+        self.vertices      = [];
+        self.skinned       = [];
+        self.indices       = [];
+    }
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+def iqmLoadFileBuffer(filePath)
+{
+    var handle = file.open(filePath, "r");
+    if (handle == nil || handle <= 0)
+    {
+        print("IQM: failed to open: " + filePath);
+        return nil;
+    }
+    var sz = file.size(handle);
+    if (sz == nil || sz <= 0) { file.close(handle); return nil; }
+    var bytes = file.read_all(handle);
+    file.close(handle);
+    return bytes;
+}
+
+def iqmUploadTex(p)
+{
+    stbi_set_flip_vertically_on_load(0);
+    var (w, h, ch, pixels) = stbi_load(p, 4);
+    if (pixels == nil) return 0;
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def iqmLoadTexture(texDir, name)
+{
+    if (name == "") return 0;
+    var base = path.filename(name) + ".png";
+    if (path.exists(texDir + base)) return iqmUploadTex(texDir + base);
+    if (path.exists(name))          return iqmUploadTex(name);
+    print("IQM: texture not found: " + texDir + base);
+    return 0;
+}
+
+// ============================================================
+// IQM Model
+// ============================================================
+
+class IQMModel
+{
+    var joints;     // array of IQMJoint
+    var poses;      // array of IQMPose
+    var surfaces;   // array of IQMSurface
+    var anims;      // array of IQMAnim
+    var animState;
+    var animIndex;
+
+    // raw frame data: array of ushort, size = numFrames * numFrameChannels
+    var frameData;
+    var numFrames;
+    var numFrameChannels;
+
+    var ready;
+    var texDir;
+
+    // transform
+    var posX, posY, posZ;
+    var rotX, rotY, rotZ;
+    var scaleVal;
+    var showSkeleton;
+
+    def init()
+    {
+        self.joints            = [];
+        self.poses             = [];
+        self.surfaces          = [];
+        self.anims             = [];
+        self.animState         = IQMAnimState();
+        self.animIndex         = 0;
+        self.frameData         = [];
+        self.numFrames         = 0;
+        self.numFrameChannels  = 0;
+        self.ready             = false;
+        self.texDir            = "";
+        self.posX=0.0; self.posY=0.0; self.posZ=0.0;
+        self.rotX=0.0; self.rotY=0.0; self.rotZ=0.0;
+        self.scaleVal          = 1.0;
+        self.showSkeleton      = false;
+    }
+
+    // ----------------------------------------------------------
+    // Load
+    // ----------------------------------------------------------
+
+    def load(filePath, texturesDir)
+    {
+        self.texDir = texturesDir;
+        var buf = iqmLoadFileBuffer(filePath);
+        if (buf == nil) return false;
+
+        // --- header ---
+        // magic: 16 bytes
+        var magic = buf.readString(16);
+        var version        = buf.readInt();
+        var filesize       = buf.readInt();
+        var flags          = buf.readInt();
+        var num_text       = buf.readInt();
+        var ofs_text       = buf.readInt();
+        var num_meshes     = buf.readInt();
+        var ofs_meshes     = buf.readInt();
+        var num_varrays    = buf.readInt();
+        var num_vertexes   = buf.readInt();
+        var ofs_varrays    = buf.readInt();
+        var num_triangles  = buf.readInt();
+        var ofs_triangles  = buf.readInt();
+        var ofs_adjacency  = buf.readInt();
+        var num_joints     = buf.readInt();
+        var ofs_joints     = buf.readInt();
+        var num_poses      = buf.readInt();
+        var ofs_poses      = buf.readInt();
+        var num_anims      = buf.readInt();
+        var ofs_anims      = buf.readInt();
+        var num_frames     = buf.readInt();
+        var num_framechans = buf.readInt();
+        var ofs_frames     = buf.readInt();
+        var ofs_bounds     = buf.readInt();
+        var num_comment    = buf.readInt();
+        var ofs_comment    = buf.readInt();
+        var num_ext        = buf.readInt();
+        var ofs_ext        = buf.readInt();
+
+        if (version != 2)
+        {
+            print("IQM: unsupported version: " + version);
+            return false;
+        }
+
+        print("IQM loading: " + filePath);
+        print("  meshes=" + num_meshes + " verts=" + num_vertexes +
+              " tris=" + num_triangles + " joints=" + num_joints +
+              " anims=" + num_anims + " frames=" + num_frames);
+
+        // --- text table ---
+        var textTable = self.readTextTable(buf, ofs_text, num_text);
+
+        // --- joints ---
+        self.readJoints(buf, ofs_joints, num_joints, textTable);
+
+        // --- build offset matrices from bind pose ---
+        self.buildOffsetMatrices();
+
+        // --- poses ---
+        self.readPoses(buf, ofs_poses, num_poses);
+
+        // --- frame data (ushort array) ---
+        self.numFrames        = num_frames;
+        self.numFrameChannels = num_framechans;
+        self.readFrameData(buf, ofs_frames, num_frames * num_framechans);
+
+        // --- anims ---
+        self.readAnims(buf, ofs_anims, num_anims, textTable);
+
+        // --- vertex arrays ---
+        var varrays = self.readVertexArrays(buf, ofs_varrays, num_varrays);
+
+        // --- triangles ---
+        var triangles = self.readTriangles(buf, ofs_triangles, num_triangles);
+
+        // --- build per-vertex data from arrays ---
+        var allVerts = self.buildVertices(buf, varrays, num_vertexes);
+
+        // --- meshes ---
+        self.readMeshes(buf, ofs_meshes, num_meshes, textTable,
+                        allVerts, triangles);
+
+        // set default animation
+        if (len(self.anims) > 0)
+            self.setAnimByIndex(0);
+        elif (self.numFrames > 0)
+            self.animState.setRange(0, self.numFrames - 1, 25.0, true);
+
+        self.ready = len(self.surfaces) > 0;
+        print("IQM loaded: " + len(self.joints) + " joints, " +
+              len(self.surfaces) + " surfaces, " +
+              len(self.anims) + " anims, " +
+              self.numFrames + " frames");
+        return self.ready;
+    }
+
+    // ----------------------------------------------------------
+    // Text table — big null-terminated string blob
+    // returns array of strings indexed by offset
+    // ----------------------------------------------------------
+
+    def readTextTable(buf, ofs, num)
+    {
+        if (ofs == 0 || num == 0) return [];
+        buf.seek(ofs);
+        var bytes = [];
+        for (var i = 0; i < num; i += 1)
+            bytes.push(buf.readByte());
+        return bytes;
+    }
+
+    def textAt(table, ofs)
+    {
+        if (ofs >= len(table)) return "";
+        var s = "";
+        var i = ofs;
+        while (i < len(table) && table[i] != 0)
+        {
+            s = s + char(table[i]);
+            i += 1;
+        }
+        return s;
+    }
+
+    // ----------------------------------------------------------
+    // Joints
+    // ----------------------------------------------------------
+
+    def readJoints(buf, ofs, num, textTable)
+    {
+        if (ofs == 0 || num == 0) return;
+        buf.seek(ofs);
+        // iqmjoint: uint name, int parent, float[3] translate, float[4] rotate, float[3] scale
+        // = 4 + 4 + 12 + 16 + 12 = 48 bytes
+        for (var i = 0; i < num; i += 1)
+        {
+            var nameOfs = buf.readInt();
+            var parent  = buf.readInt();  // signed
+            var tx = buf.readFloat(); var ty = buf.readFloat(); var tz = buf.readFloat();
+            var qx = buf.readFloat(); var qy = buf.readFloat();
+            var qz = buf.readFloat(); var qw = buf.readFloat();
+            var sx = buf.readFloat(); var sy = buf.readFloat(); var sz = buf.readFloat();
+
+            var name  = self.textAt(textTable, nameOfs);
+            var joint = IQMJoint(name, parent);
+            joint.tx=tx; joint.ty=ty; joint.tz=tz;
+            joint.qx=qx; joint.qy=qy; joint.qz=qz; joint.qw=qw;
+            joint.sx=sx; joint.sy=sy; joint.sz=sz;
+            self.joints.push(joint);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Build bind pose offset matrices
+    // ----------------------------------------------------------
+
+    def buildOffsetMatrices()
+    {
+        for (var i = 0; i < len(self.joints); i += 1)
+        {
+            var j = self.joints[i];
+            var bm = j.buildBindMatrix();
+            if (j.parent < 0)
+                j.globalMat = bm;
+            else
+                j.globalMat = MatrixMultiply(bm, self.joints[j.parent].globalMat);
+        }
+        for (var i = 0; i < len(self.joints); i += 1)
+            self.joints[i].offsetMat = MatrixInvert(self.joints[i].globalMat);
+    }
+
+    // ----------------------------------------------------------
+    // Poses
+    // ----------------------------------------------------------
+
+    def readPoses(buf, ofs, num)
+    {
+        if (ofs == 0 || num == 0) return;
+        buf.seek(ofs);
+        // iqmpose: int parent, uint channelmask, float[10] offset, float[10] scale
+        // = 4 + 4 + 40 + 40 = 88 bytes
+        for (var i = 0; i < num; i += 1)
+        {
+            var parent = buf.readInt();
+            var pose   = IQMPose(parent);
+            pose.channelmask = buf.readInt();
+            for (var c = 0; c < 10; c += 1)
+                pose.offset[c] = buf.readFloat();
+            for (var c = 0; c < 10; c += 1)
+                pose.scale[c] = buf.readFloat();
+            self.poses.push(pose);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Frame data (packed ushorts)
+    // ----------------------------------------------------------
+
+    def readFrameData(buf, ofs, count)
+    {
+        self.frameData = [];
+        if (ofs == 0 || count == 0) return;
+        buf.seek(ofs);
+        for (var i = 0; i < count; i += 1)
+            self.frameData.push(buf.readUShort());
+    }
+
+    // ----------------------------------------------------------
+    // Decode one frame into joint matrices
+    // Uses poses + frameData to reconstruct TRS per joint
+    // ----------------------------------------------------------
+
+    def decodePoseFrame(frameIdx)
+    {
+        if (len(self.poses) == 0 || len(self.frameData) == 0) return;
+
+        var base = frameIdx * self.numFrameChannels;
+        var p    = 0;  // channel pointer within this frame
+
+        for (var i = 0; i < len(self.poses); i += 1)
+        {
+            var pose = self.poses[i];
+            var mask = pose.channelmask;
+
+            // decode 10 channels
+            var ch = [];
+            for (var c = 0; c < 10; c += 1)
+            {
+                var val = pose.offset[c];
+                if (mask & (1 << c))
+                {
+                    val = val + self.frameData[base + p] * pose.scale[c];
+                    p += 1;
+                }
+                ch.push(val);
+            }
+
+            // ch[0..2] = translate, ch[3..6] = rotate (xyzw), ch[7..9] = scale
+            var tx = ch[0]; var ty = ch[1]; var tz = ch[2];
+            var qx = ch[3]; var qy = ch[4]; var qz = ch[5]; var qw = ch[6];
+            var sx = ch[7]; var sy = ch[8]; var sz = ch[9];
+
+            // normalise quaternion
+            var qlen = sqrt(qx*qx + qy*qy + qz*qz + qw*qw);
+            if (qlen > 0.00001) { qx=qx/qlen; qy=qy/qlen; qz=qz/qlen; qw=qw/qlen; }
+
+            var j   = self.joints[i];
+            var lm  = j.buildMatrix(tx, ty, tz, qx, qy, qz, qw, sx, sy, sz);
+            j.localMat = lm;
+
+            if (j.parent < 0)
+                j.globalMat = lm;
+            else
+                j.globalMat = MatrixMultiply(lm, self.joints[j.parent].globalMat);
+
+            j.skinMat = MatrixMultiply(j.offsetMat, j.globalMat);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Vertex arrays
+    // ----------------------------------------------------------
+
+    def readVertexArrays(buf, ofs, num)
+    {
+        var va = [];
+        if (ofs == 0 || num == 0) return va;
+        buf.seek(ofs);
+        // iqmvertexarray: uint type, uint flags, uint format, uint size, uint offset
+        for (var i = 0; i < num; i += 1)
+        {
+            var vtype  = buf.readInt();
+            var vflags = buf.readInt();
+            var vfmt   = buf.readInt();
+            var vsize  = buf.readInt();
+            var vofs   = buf.readInt();
+            va.push([vtype, vflags, vfmt, vsize, vofs]);
+        }
+        return va;
+    }
+
+    // ----------------------------------------------------------
+    // Triangles
+    // ----------------------------------------------------------
+
+    def readTriangles(buf, ofs, num)
+    {
+        var tris = [];
+        if (ofs == 0 || num == 0) return tris;
+        buf.seek(ofs);
+        for (var i = 0; i < num; i += 1)
+        {
+            tris.push(buf.readInt());
+            tris.push(buf.readInt());
+            tris.push(buf.readInt());
+        }
+        return tris;
+    }
+
+    // ----------------------------------------------------------
+    // Build per-vertex structs from separate arrays
+    // ----------------------------------------------------------
+
+    def buildVertices(buf, varrays, numVerts)
+    {
+        // allocate
+        var verts = [];
+        for (var i = 0; i < numVerts; i += 1)
+            verts.push(IQMVertex());
+
+        for (var ai = 0; ai < len(varrays); ai += 1)
+        {
+            var vtype = varrays[ai][0];
+            var vfmt  = varrays[ai][2];
+            var vsize = varrays[ai][3];
+            var vofs  = varrays[ai][4];
+
+            buf.seek(vofs);
+
+            if (vtype == IQM_POSITION && vfmt == IQM_FLOAT && vsize == 3)
+            {
+                for (var i = 0; i < numVerts; i += 1)
+                {
+                    verts[i].x = buf.readFloat();
+                    verts[i].y = buf.readFloat();
+                    verts[i].z = buf.readFloat();
+                }
+            }
+            elif (vtype == IQM_TEXCOORD && vfmt == IQM_FLOAT && vsize == 2)
+            {
+                for (var i = 0; i < numVerts; i += 1)
+                {
+                    verts[i].u = buf.readFloat();
+                    verts[i].v = buf.readFloat();
+                }
+            }
+            elif (vtype == IQM_NORMAL && vfmt == IQM_FLOAT && vsize == 3)
+            {
+                for (var i = 0; i < numVerts; i += 1)
+                {
+                    verts[i].nx = buf.readFloat();
+                    verts[i].ny = buf.readFloat();
+                    verts[i].nz = buf.readFloat();
+                }
+            }
+            elif (vtype == IQM_BLENDINDEXES && vfmt == IQM_UBYTE && vsize == 4)
+            {
+                for (var i = 0; i < numVerts; i += 1)
+                {
+                    verts[i].b0 = buf.readByte();
+                    verts[i].b1 = buf.readByte();
+                    verts[i].b2 = buf.readByte();
+                    verts[i].b3 = buf.readByte();
+                }
+            }
+            elif (vtype == IQM_BLENDWEIGHTS && vfmt == IQM_UBYTE && vsize == 4)
+            {
+                for (var i = 0; i < numVerts; i += 1)
+                {
+                    var bw0 = buf.readByte();
+                    var bw1 = buf.readByte();
+                    var bw2 = buf.readByte();
+                    var bw3 = buf.readByte();
+                    var sum = bw0 + bw1 + bw2 + bw3;
+                    
+                    if (sum > 0.0)
+                    {
+                        verts[i].w0 = bw0 / sum;
+                        verts[i].w1 = bw1 / sum;
+                        verts[i].w2 = bw2 / sum;
+                        verts[i].w3 = bw3 / sum;
+                    }
+                }
+            }
+            elif (vtype == IQM_COLOR && vfmt == IQM_UBYTE && vsize == 4)
+            {
+                for (var i = 0; i < numVerts; i += 1)
+                {
+                    verts[i].r = buf.readByte() / 255.0;
+                    verts[i].g = buf.readByte() / 255.0;
+                    verts[i].b = buf.readByte() / 255.0;
+                    verts[i].a = buf.readByte() / 255.0;
+                }
+            }
+            // IQM_TANGENT skipped — not needed for fixed-function GL
+        }
+
+        return verts;
+    }
+
+    // ----------------------------------------------------------
+    // Meshes
+    // ----------------------------------------------------------
+
+    def readMeshes(buf, ofs, num, textTable, allVerts, triangles)
+    {
+        if (ofs == 0 || num == 0) return;
+        buf.seek(ofs);
+        // iqmmesh: uint name, uint material, uint first_vertex, uint num_vertexes,
+        //          uint first_triangle, uint num_triangles  — 24 bytes
+        for (var mi = 0; mi < num; mi += 1)
+        {
+            var nameOfs  = buf.readInt();
+            var matOfs   = buf.readInt();
+            var firstV   = buf.readInt();
+            var numV     = buf.readInt();
+            var firstT   = buf.readInt();
+            var numT     = buf.readInt();
+
+            var surf = IQMSurface();
+            surf.name          = self.textAt(textTable, nameOfs);
+            surf.material      = self.textAt(textTable, matOfs);
+            surf.firstVertex   = firstV;
+            surf.numVertices   = numV;
+            surf.firstTriangle = firstT;
+            surf.numTriangles  = numT;
+            print("surf.material = '" + surf.material + "'");
+            surf.texId         = iqmLoadTexture(self.texDir, surf.material);
+
+            // copy vertices
+            for (var vi = firstV; vi < firstV + numV; vi += 1)
+                surf.vertices.push(allVerts[vi]);
+
+            // copy indices (remapped to surface-local)
+            var triBase = firstT * 3;
+            for (var ti = 0; ti < numT * 3; ti += 1)
+                surf.indices.push(triangles[triBase + ti] - firstV);
+
+            // allocate skinned buffer
+            for (var vi = 0; vi < numV; vi += 1)
+            {
+                var sv = IQMVertex();
+                var src = surf.vertices[vi];
+                sv.x=src.x; sv.y=src.y; sv.z=src.z;
+                sv.nx=src.nx; sv.ny=src.ny; sv.nz=src.nz;
+                sv.u=src.u; sv.v=src.v;
+                sv.r=src.r; sv.g=src.g; sv.b=src.b; sv.a=src.a;
+                surf.skinned.push(sv);
+            }
+
+            self.surfaces.push(surf);
+            print("IQM mesh: '" + surf.name + "' mat='" + surf.material +
+                  "' verts=" + numV + " tris=" + numT);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Anims
+    // ----------------------------------------------------------
+
+    def readAnims(buf, ofs, num, textTable)
+    {
+        if (ofs == 0 || num == 0) return;
+        buf.seek(ofs);
+        // iqmanim: uint name, uint first_frame, uint num_frames, float framerate, uint flags
+        for (var i = 0; i < num; i += 1)
+        {
+            var nameOfs   = buf.readInt();
+            var firstFrame = buf.readInt();
+            var numFrames  = buf.readInt();
+            var framerate  = buf.readFloat();
+            var aflags     = buf.readInt();
+
+            var name = self.textAt(textTable, nameOfs);
+            var aloop = true;//(aflags & IQM_LOOP) != 0;
+            if (framerate <= 0) framerate = 25.0;
+            self.anims.push(IQMAnim(name, firstFrame, numFrames, framerate, aloop));
+            print("IQM anim: '" + name + "' frames=" + firstFrame + ".." +
+                  (firstFrame + numFrames - 1) + " fps=" + framerate, " Loop=" , aloop);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Animation API
+    // ----------------------------------------------------------
+
+    def setAnimByIndex(index)
+    {
+        if (len(self.anims) == 0) return false;
+        if (index < 0) index = len(self.anims) - 1;
+        if (index >= len(self.anims)) index = 0;
+        self.animIndex = index;
+        var a = self.anims[index];
+        self.animState.setRange(a.firstFrame, a.lastFrame(), a.framerate, a.aloop);
+        return true;
+    }
+
+    def setAnimByName(name)
+    {
+        for (var i = 0; i < len(self.anims); i += 1)
+            if (self.anims[i].name == name) return self.setAnimByIndex(i);
+        print("IQM: anim not found: " + name);
+        return false;
+    }
+
+    def nextAnim() { return self.setAnimByIndex(self.animIndex + 1); }
+    def prevAnim() { return self.setAnimByIndex(self.animIndex - 1); }
+
+    def animName()
+    {
+        if (self.animIndex < 0 || self.animIndex >= len(self.anims)) return "";
+        return self.anims[self.animIndex].name;
+    }
+
+    // ----------------------------------------------------------
+    // Update
+    // ----------------------------------------------------------
+
+    def update(dt)
+    {
+        if (!self.ready) return;
+        self.animState.update(dt);
+
+        var frameA = self.animState.current;
+        var frameB = self.animState.next;
+        var t      = self.animState.interp;
+
+        if (len(self.poses) == 0) return;
+
+        // decode frame A
+        self.decodePoseFrame(frameA);
+
+        // if t > 0, blend with frame B
+        if (t > 0.0 && frameB != frameA)
+        {
+            // save frame A skinMats
+            var matsA = [];
+            for (var i = 0; i < len(self.joints); i += 1)
+                matsA.push(self.joints[i].skinMat);
+
+            // decode frame B
+            self.decodePoseFrame(frameB);
+
+            // lerp between A and B skinMats
+            for (var i = 0; i < len(self.joints); i += 1)
+            {
+                var ma = matsA[i];
+                var mb = self.joints[i].skinMat;
+                var m  = self.joints[i].skinMat;
+                // lerp all 16 components
+                m.m0  = ma.m0  + (mb.m0  - ma.m0)  * t;
+                m.m1  = ma.m1  + (mb.m1  - ma.m1)  * t;
+                m.m2  = ma.m2  + (mb.m2  - ma.m2)  * t;
+                m.m3  = ma.m3  + (mb.m3  - ma.m3)  * t;
+                m.m4  = ma.m4  + (mb.m4  - ma.m4)  * t;
+                m.m5  = ma.m5  + (mb.m5  - ma.m5)  * t;
+                m.m6  = ma.m6  + (mb.m6  - ma.m6)  * t;
+                m.m7  = ma.m7  + (mb.m7  - ma.m7)  * t;
+                m.m8  = ma.m8  + (mb.m8  - ma.m8)  * t;
+                m.m9  = ma.m9  + (mb.m9  - ma.m9)  * t;
+                m.m10 = ma.m10 + (mb.m10 - ma.m10) * t;
+                m.m11 = ma.m11 + (mb.m11 - ma.m11) * t;
+                m.m12 = ma.m12 + (mb.m12 - ma.m12) * t;
+                m.m13 = ma.m13 + (mb.m13 - ma.m13) * t;
+                m.m14 = ma.m14 + (mb.m14 - ma.m14) * t;
+                m.m15 = ma.m15 + (mb.m15 - ma.m15) * t;
+                self.joints[i].skinMat = m;
+            }
+        }
+
+        // cache skinMats
+        var skinMats = [];
+        for (var i = 0; i < len(self.joints); i += 1)
+            skinMats.push(self.joints[i].skinMat);
+
+        // skin vertices
+        for (var si = 0; si < len(self.surfaces); si += 1)
+        {
+            var surf  = self.surfaces[si];
+            var verts = surf.vertices;
+            var skin  = surf.skinned;
+            var nv    = len(verts);
+
+            for (var vi = 0; vi < nv; vi += 1)
+            {
+                var src = verts[vi];
+                var dst = skin[vi];
+                var sm;
+
+                var ox=0.0; var oy=0.0; var oz=0.0;
+                var onx=0.0; var ony=0.0; var onz=0.0;
+
+                if (src.w0 > 0.0)
+                {
+                    sm=skinMats[src.b0];
+                    ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w0;
+                    oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w0;
+                    oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w0;
+                    onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w0;
+                    ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w0;
+                    onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w0;
+                }
+                if (src.w1 > 0.0)
+                {
+                    sm=skinMats[src.b1];
+                    ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w1;
+                    oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w1;
+                    oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w1;
+                    onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w1;
+                    ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w1;
+                    onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w1;
+                }
+                if (src.w2 > 0.0)
+                {
+                    sm=skinMats[src.b2];
+                    ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w2;
+                    oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w2;
+                    oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w2;
+                    onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w2;
+                    ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w2;
+                    onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w2;
+                }
+                if (src.w3 > 0.0)
+                {
+                    sm=skinMats[src.b3];
+                    ox +=(sm.m0*src.x+sm.m4*src.y+sm.m8 *src.z+sm.m12)*src.w3;
+                    oy +=(sm.m1*src.x+sm.m5*src.y+sm.m9 *src.z+sm.m13)*src.w3;
+                    oz +=(sm.m2*src.x+sm.m6*src.y+sm.m10*src.z+sm.m14)*src.w3;
+                    onx+=(sm.m0*src.nx+sm.m4*src.ny+sm.m8 *src.nz)*src.w3;
+                    ony+=(sm.m1*src.nx+sm.m5*src.ny+sm.m9 *src.nz)*src.w3;
+                    onz+=(sm.m2*src.nx+sm.m6*src.ny+sm.m10*src.nz)*src.w3;
+                }
+
+                dst.x=ox; dst.y=oy; dst.z=oz;
+                dst.nx=onx; dst.ny=ony; dst.nz=onz;
+            }
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Draw
+    // ----------------------------------------------------------
+
+ def draw()
+{
+    if (!self.ready) return;
+
+    glPushMatrix();
+    glTranslatef(self.posX, self.posY, self.posZ);
+    glRotatef(-90.0, 1.0, 0.0, 0.0);  // ← Z up → Y up
+    glRotatef(self.rotX, 1.0, 0.0, 0.0);
+    glRotatef(self.rotY, 0.0, 1.0, 0.0);
+    glRotatef(self.rotZ, 0.0, 0.0, 1.0);
+    glScalef(self.scaleVal, self.scaleVal, self.scaleVal);
+
+    for (var si = 0; si < len(self.surfaces); si += 1)
+        self.drawSurface(self.surfaces[si]);
+
+    if (self.showSkeleton)
+        self.drawSkeleton();
+
+    glPopMatrix();
+}
+
+    def drawSurface(surf)
+    {
+        glEnable(GL_TEXTURE_2D);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+        if (surf.texId > 0) glBindTexture(GL_TEXTURE_2D, surf.texId);
+
+        glBegin(GL_TRIANGLES);
+        for (var i = 0; i < len(surf.indices); i += 1)
+        {
+            var idx = surf.indices[i];
+            var vt  = surf.skinned[idx];
+            glNormal3f(vt.nx, vt.ny, vt.nz);
+            glTexCoord2f(vt.u, vt.v);
+            //glColor4f(vt.r, vt.g, vt.b, vt.a);
+            glColor4f(1.0, 1.0, 1.0, 1.0);
+            glVertex3f(vt.x, vt.y, vt.z);
+        }
+        glEnd();
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+    }
+
+    // ----------------------------------------------------------
+    // Skeleton debug
+    // ----------------------------------------------------------
+
+    def drawSkeleton()
+    {
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(2.0);
+
+        for (var i = 0; i < len(self.joints); i += 1)
+        {
+            var j  = self.joints[i];
+            var jx = j.globalMat.m12;
+            var jy = j.globalMat.m13;
+            var jz = j.globalMat.m14;
+
+            if (j.parent >= 0)
+            {
+                var p  = self.joints[j.parent];
+                glBegin(GL_LINES);
+                glColor3f(1.0, 1.0, 0.0);
+                glVertex3f(p.globalMat.m12, p.globalMat.m13, p.globalMat.m14);
+                glVertex3f(jx, jy, jz);
+                glEnd();
+            }
+
+            var s = 2.0;
+            var m = j.globalMat;
+            glBegin(GL_LINES);
+            glColor3f(1.0, 0.2, 0.2);
+            glVertex3f(jx,jy,jz); glVertex3f(jx+m.m0*s, jy+m.m1*s, jz+m.m2*s);
+            glColor3f(0.2, 1.0, 0.2);
+            glVertex3f(jx,jy,jz); glVertex3f(jx+m.m4*s, jy+m.m5*s, jz+m.m6*s);
+            glColor3f(0.2, 0.5, 1.0);
+            glVertex3f(jx,jy,jz); glVertex3f(jx+m.m8*s, jy+m.m9*s, jz+m.m10*s);
+            glEnd();
+
+            glPointSize(6.0);
+            glBegin(GL_POINTS);
+            glColor3f(1.0, 0.9, 0.1);
+            glVertex3f(jx, jy, jz);
+            glEnd();
+            glPointSize(1.0);
+        }
+
+        glLineWidth(1.0);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_TEXTURE_2D);
+    }
+
+    // ----------------------------------------------------------
+    // Stats
+    // ----------------------------------------------------------
+
+    def jointCount()   { return len(self.joints); }
+    def surfaceCount() { return len(self.surfaces); }
+    def animCount()    { return len(self.anims); }
+    def frameCount()   { return self.numFrames; }
+    def triangleCount()
+    {
+        var total = 0;
+        for (var i = 0; i < len(self.surfaces); i += 1)
+            total += self.surfaces[i].numTriangles;
+        return total;
+    }
+}

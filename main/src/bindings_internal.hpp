@@ -9,6 +9,8 @@ namespace ImGuiBindings
     bool ensure_context(Interpreter *vm, const char *fn);
     int push_nil(Interpreter *vm);
     int push_nils(Interpreter *vm, int count);
+        int push_false(Interpreter *vm);
+        int push_falses(Interpreter *vm, int count);
     bool optional_number_arg(Value *args, int index, int argCount, float defaultValue, float *out);
     bool optional_int_arg(Value *args, int index, int argCount, int defaultValue, int *out);
     bool optional_string_arg(Value *args, int index, int argCount, const char *defaultValue, const char **out);

@@ -1,0 +1,863 @@
+// ================================================================
+// Demo: Legacy Water Plane + Terrain Arrays
+//
+// Uses:
+//   - OpenGL 2.1 compatibility profile
+//   - Client arrays legacy for terrain
+//   - Offscreen FBOs for reflection + refraction
+//   - Existing water shaders from assets/shaders/water_*.glsl
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import STB;
+using STB;
+import path;
+include "lib_camera_free.bu";
+
+var deg2rad = 0.017453292519943295;
+var timeSec = 0.0;
+
+struct RenderTarget
+{
+    var fbo;
+    var tex;
+    var rbo;
+    var width;
+    var height;
+    var ok;
+}
+
+struct SkyBox
+{
+    var front;
+    var back;
+    var left;
+    var right;
+    var top;
+    var bottom;
+    var ok;
+}
+
+def makeRenderTarget(w, h)
+{
+    var rt = RenderTarget(glGenFramebuffers(), glGenTextures(), glGenRenderbuffers(), 0, 0, false);
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    rt.width = w;
+    rt.height = h;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, rt.fbo);
+    glBindTexture(GL_TEXTURE_2D, rt.tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rt.tex, 0);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, rt.rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rt.rbo);
+
+    var status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    rt.ok = (status == GL_FRAMEBUFFER_COMPLETE);
+    if (!rt.ok) print("RenderTarget incomplete: " + status);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return rt;
+}
+
+def resizeRenderTarget(rt, w, h)
+{
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    if (rt.width == w && rt.height == h) return;
+
+    rt.width = w;
+    rt.height = h;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, rt.fbo);
+    glBindTexture(GL_TEXTURE_2D, rt.tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rt.tex, 0);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, rt.rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rt.rbo);
+
+    var status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    rt.ok = (status == GL_FRAMEBUFFER_COMPLETE);
+    if (!rt.ok) print("RenderTarget incomplete: " + status);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+def destroyRenderTarget(rt)
+{
+    if (rt.rbo > 0) glDeleteRenderbuffers(rt.rbo);
+    if (rt.tex > 0) glDeleteTextures(rt.tex);
+    if (rt.fbo > 0) glDeleteFramebuffers(rt.fbo);
+}
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+def loadWaterShaderAuto()
+{
+    var rootV = "assets/shaders/water_vs.glsl";
+    var rootF = "assets/shaders/water_ps.glsl";
+    var scriptV = "../assets/shaders/water_vs.glsl";
+    var scriptF = "../assets/shaders/water_ps.glsl";
+
+    var prog = 0;
+    if (path.exists(rootV) && path.exists(rootF))
+        prog = LoadShaderProgram(rootV, rootF, true);
+    else if (path.exists(scriptV) && path.exists(scriptF))
+        prog = LoadShaderProgram(scriptV, scriptF, true);
+    else
+        print("Water shaders not found in assets/shaders or ../assets/shaders");
+
+    if (prog == nil) prog = 0;
+    return prog;
+}
+
+def loadWaterBumpTexture(path)
+{
+    stbi_set_flip_vertically_on_load(0);
+    var (w, h, channels, pixels) = stbi_load(path, 4);
+    if (pixels == nil || w == nil || h == nil)
+    {
+        print("Failed to load water bump texture: " + path);
+        return 0;
+    }
+
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def makeWaterBumpTexture(size)
+{
+    var pixels = @(size * size * 4, 0);
+    var p = 0;
+
+    for (var y = 0; y < size; y++)
+    {
+        for (var x = 0; x < size; x++)
+        {
+            var fx = x / size;
+            var fy = y / size;
+            var sx = sin(fx * 6.28318 * 4.0 + cos(fy * 6.28318 * 1.5) * 2.0);
+            var sy = cos(fy * 6.28318 * 5.0 + sin(fx * 6.28318 * 2.5) * 2.0);
+            var swirl = sin((fx + fy) * 6.28318 * 3.0);
+
+            pixels[p + 0] = floor(clamp(128.0 + (sx * 0.7 + swirl * 0.3) * 110.0, 0.0, 255.0));
+            pixels[p + 1] = floor(clamp(128.0 + (sy * 0.7 - swirl * 0.3) * 110.0, 0.0, 255.0));
+            pixels[p + 2] = 255;
+            pixels[p + 3] = 255;
+            p = p + 4;
+        }
+    }
+
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def loadImageTextureClamp(path)
+{
+    stbi_set_flip_vertically_on_load(1);
+    var (w, h, channels, pixels) = stbi_load(path, 4);
+    if (pixels == nil || w == nil || h == nil)
+    {
+        print("Failed to load texture: " + path);
+        return 0;
+    }
+
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def resolveSkyBoxFacePath(name)
+{
+    return resolveAssetPath("assets/Sky Box/" + name, "../assets/Sky Box/" + name);
+}
+
+def loadSkyBox()
+{
+    var frontPath = resolveSkyBoxFacePath("Front.bmp");
+    var backPath = resolveSkyBoxFacePath("Back.bmp");
+    var leftPath = resolveSkyBoxFacePath("Left.bmp");
+    var rightPath = resolveSkyBoxFacePath("Right.bmp");
+    var topPath = resolveSkyBoxFacePath("Top.bmp");
+    var bottomPath = resolveSkyBoxFacePath("Bottom.bmp");
+
+    if (frontPath == nil || backPath == nil || leftPath == nil || rightPath == nil || topPath == nil || bottomPath == nil)
+    {
+        print("Skybox faces not found in assets/Sky Box");
+        return SkyBox(0, 0, 0, 0, 0, 0, false);
+    }
+
+    var sky = SkyBox(
+        loadImageTextureClamp(frontPath),
+        loadImageTextureClamp(backPath),
+        loadImageTextureClamp(leftPath),
+        loadImageTextureClamp(rightPath),
+        loadImageTextureClamp(topPath),
+        loadImageTextureClamp(bottomPath),
+        false
+    );
+
+    sky.ok = sky.front > 0 && sky.back > 0 && sky.left > 0 && sky.right > 0 && sky.top > 0 && sky.bottom > 0;
+    return sky;
+}
+
+def destroySkyBox(sky)
+{
+    if (sky.front > 0) glDeleteTextures(sky.front);
+    if (sky.back > 0) glDeleteTextures(sky.back);
+    if (sky.left > 0) glDeleteTextures(sky.left);
+    if (sky.right > 0) glDeleteTextures(sky.right);
+    if (sky.top > 0) glDeleteTextures(sky.top);
+    if (sky.bottom > 0) glDeleteTextures(sky.bottom);
+}
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawBox(hx, hy, hz)
+{
+    glBegin(GL_QUADS);
+    glNormal3f(0.0, 0.0, 1.0);
+    glVertex3f(-hx, -hy,  hz); glVertex3f( hx, -hy,  hz);
+    glVertex3f( hx,  hy,  hz); glVertex3f(-hx,  hy,  hz);
+
+    glNormal3f(0.0, 0.0, -1.0);
+    glVertex3f( hx, -hy, -hz); glVertex3f(-hx, -hy, -hz);
+    glVertex3f(-hx,  hy, -hz); glVertex3f( hx,  hy, -hz);
+
+    glNormal3f(-1.0, 0.0, 0.0);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx, -hy,  hz);
+    glVertex3f(-hx,  hy,  hz); glVertex3f(-hx,  hy, -hz);
+
+    glNormal3f(1.0, 0.0, 0.0);
+    glVertex3f( hx, -hy,  hz); glVertex3f( hx, -hy, -hz);
+    glVertex3f( hx,  hy, -hz); glVertex3f( hx,  hy,  hz);
+
+    glNormal3f(0.0, 1.0, 0.0);
+    glVertex3f(-hx,  hy,  hz); glVertex3f( hx,  hy,  hz);
+    glVertex3f( hx,  hy, -hz); glVertex3f(-hx,  hy, -hz);
+
+    glNormal3f(0.0, -1.0, 0.0);
+    glVertex3f(-hx, -hy, -hz); glVertex3f( hx, -hy, -hz);
+    glVertex3f( hx, -hy,  hz); glVertex3f(-hx, -hy,  hz);
+    glEnd();
+}
+
+def drawSky(sky, eye)
+{
+    if (!sky.ok) return;
+
+    var s = 72.0;
+    var x0 = eye.x - s;
+    var x1 = eye.x + s;
+    var y0 = eye.y - s;
+    var y1 = eye.y + s;
+    var z0 = eye.z - s;
+    var z1 = eye.z + s;
+
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(false);
+    glEnable(GL_TEXTURE_2D);
+    glColor3f(1.0, 1.0, 1.0);
+
+    glBindTexture(GL_TEXTURE_2D, sky.back);
+    glBegin(GL_QUADS);
+    glTexCoord2f(1.0, 0.0); glVertex3f(x1, y0, z0);
+    glTexCoord2f(1.0, 1.0); glVertex3f(x1, y1, z0);
+    glTexCoord2f(0.0, 1.0); glVertex3f(x0, y1, z0);
+    glTexCoord2f(0.0, 0.0); glVertex3f(x0, y0, z0);
+    glEnd();
+
+    glBindTexture(GL_TEXTURE_2D, sky.front);
+    glBegin(GL_QUADS);
+    glTexCoord2f(1.0, 0.0); glVertex3f(x0, y0, z1);
+    glTexCoord2f(1.0, 1.0); glVertex3f(x0, y1, z1);
+    glTexCoord2f(0.0, 1.0); glVertex3f(x1, y1, z1);
+    glTexCoord2f(0.0, 0.0); glVertex3f(x1, y0, z1);
+    glEnd();
+
+    glBindTexture(GL_TEXTURE_2D, sky.bottom);
+    glBegin(GL_QUADS);
+    glTexCoord2f(1.0, 0.0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(1.0, 1.0); glVertex3f(x0, y0, z1);
+    glTexCoord2f(0.0, 1.0); glVertex3f(x1, y0, z1);
+    glTexCoord2f(0.0, 0.0); glVertex3f(x1, y0, z0);
+    glEnd();
+
+    glBindTexture(GL_TEXTURE_2D, sky.top);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0, 1.0); glVertex3f(x1, y1, z0);
+    glTexCoord2f(0.0, 0.0); glVertex3f(x1, y1, z1);
+    glTexCoord2f(1.0, 0.0); glVertex3f(x0, y1, z1);
+    glTexCoord2f(1.0, 1.0); glVertex3f(x0, y1, z0);
+    glEnd();
+
+    glBindTexture(GL_TEXTURE_2D, sky.left);
+    glBegin(GL_QUADS);
+    glTexCoord2f(1.0, 1.0); glVertex3f(x0, y1, z0);
+    glTexCoord2f(0.0, 1.0); glVertex3f(x0, y1, z1);
+    glTexCoord2f(0.0, 0.0); glVertex3f(x0, y0, z1);
+    glTexCoord2f(1.0, 0.0); glVertex3f(x0, y0, z0);
+    glEnd();
+
+    glBindTexture(GL_TEXTURE_2D, sky.right);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0, 0.0); glVertex3f(x1, y0, z0);
+    glTexCoord2f(1.0, 0.0); glVertex3f(x1, y0, z1);
+    glTexCoord2f(1.0, 1.0); glVertex3f(x1, y1, z1);
+    glTexCoord2f(0.0, 1.0); glVertex3f(x1, y1, z0);
+    glEnd();
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glDisable(GL_TEXTURE_2D);
+    glDepthMask(true);
+    glEnable(GL_DEPTH_TEST);
+}
+
+def smooth01(t)
+{
+    if (t < 0.0) return 0.0;
+    if (t > 1.0) return 1.0;
+    return t * t * (3.0 - 2.0 * t);
+}
+
+def terrainRawHeight(x, z, waterLevel)
+{
+    var n0 = stb_perlin_fbm_noise3(x * 0.040 + 13.7, 1.3, z * 0.040 - 8.1, 2.05, 0.50, 5);
+    var n1 = stb_perlin_fbm_noise3(x * 0.105 - 4.2, 5.9, z * 0.105 + 9.4, 2.10, 0.55, 4);
+    var n2 = stb_perlin_fbm_noise3(x * 0.235 + 7.1, 11.6, z * 0.235 - 2.8, 2.00, 0.60, 3);
+
+    var h = n0 * 4.0 + n1 * 1.6 + n2 * 0.45 + 1.2;
+    var dist = sqrt(x * x + z * z);
+    var lake = smooth01((13.0 - dist) / 13.0);
+    var island = smooth01((4.6 - dist) / 4.6);
+    var ring = 1.0 - smooth01(abs(dist - 11.5) / 4.5);
+
+    h = h - lake * 5.4;
+    h = h + island * 7.8;
+    h = h + ring * 1.35;
+
+    if (h < waterLevel - 4.5) h = waterLevel - 4.5;
+    return h;
+}
+
+def terrainColor(h, ny, waterLevel)
+{
+    var slope = 1.0 - clamp(ny, 0.0, 1.0);
+    var r = 0.22;
+    var g = 0.40;
+    var b = 0.18;
+
+    if (h < waterLevel - 0.8)
+    {
+        r = 0.05; g = 0.10; b = 0.12;
+    }
+    else if (h < waterLevel + 0.35)
+    {
+        r = 0.74; g = 0.68; b = 0.46;
+    }
+    else if (slope > 0.32)
+    {
+        r = 0.35; g = 0.33; b = 0.31;
+    }
+    else if (h > waterLevel + 4.8)
+    {
+        r = 0.46; g = 0.50; b = 0.42;
+    }
+    else
+    {
+        r = 0.21; g = 0.44; b = 0.18;
+    }
+
+    return Vector3(r, g, b);
+}
+
+class TerrainArrayMesh
+{
+    var cells;
+    var halfSize;
+    var step;
+    var waterLevel;
+    var verts;
+    var indices;
+    var strideBytes;
+    var indexCount;
+
+    def init(cells, halfSize, waterLevel)
+    {
+        self.cells = cells;
+        self.halfSize = halfSize;
+        self.step = (halfSize * 2.0) / cells;
+        self.waterLevel = waterLevel;
+        self.strideBytes = 9 * 4;
+        self.verts = Float32Array((cells + 1) * (cells + 1) * 9);
+        self.indices = Uint16Array(cells * cells * 6);
+        self.rebuild();
+    }
+
+    def rebuild()
+    {
+        self.verts.clear();
+        self.indices.clear();
+
+        var x = 0.0;
+        var z = 0.0;
+        var h = 0.0;
+        var hL = 0.0;
+        var hR = 0.0;
+        var hD = 0.0;
+        var hU = 0.0;
+        var nx = 0.0;
+        var ny = 0.0;
+        var nz = 0.0;
+        var nl = 0.0;
+        var col = Vector3(0.0, 0.0, 0.0);
+        var a = 0;
+        var b = 0;
+
+        for (var iz = 0; iz <= self.cells; iz = iz + 1)
+        {
+            for (var ix = 0; ix <= self.cells; ix = ix + 1)
+            {
+                x = -self.halfSize + ix * self.step;
+                z = -self.halfSize + iz * self.step;
+                h = terrainRawHeight(x, z, self.waterLevel);
+                hL = terrainRawHeight(x - self.step, z, self.waterLevel);
+                hR = terrainRawHeight(x + self.step, z, self.waterLevel);
+                hD = terrainRawHeight(x, z - self.step, self.waterLevel);
+                hU = terrainRawHeight(x, z + self.step, self.waterLevel);
+
+                nx = hL - hR;
+                ny = self.step * 2.0;
+                nz = hD - hU;
+                nl = sqrt(nx * nx + ny * ny + nz * nz);
+                if (nl < 0.0001) nl = 1.0;
+
+                nx = nx / nl;
+                ny = ny / nl;
+                nz = nz / nl;
+
+                col = terrainColor(h, ny, self.waterLevel);
+                self.verts.add(x, h, z, nx, ny, nz, col.x, col.y, col.z);
+            }
+        }
+
+        for (var iz = 0; iz < self.cells; iz = iz + 1)
+        {
+            for (var ix = 0; ix < self.cells; ix = ix + 1)
+            {
+                a = iz * (self.cells + 1) + ix;
+                b = a + self.cells + 1;
+                self.indices.add(a, b, a + 1);
+                self.indices.add(b, b + 1, a + 1);
+            }
+        }
+
+        self.indexCount = self.indices.length();
+    }
+
+    def draw()
+    {
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glEnableClientState(GL_COLOR_ARRAY);
+
+        glVertexPointer(3, GL_FLOAT, self.strideBytes, self.verts, 0);
+        glNormalPointer(GL_FLOAT, self.strideBytes, self.verts, 3 * 4);
+        glColorPointer(3, GL_FLOAT, self.strideBytes, self.verts, 6 * 4);
+        glDrawElementsLegacy(GL_TRIANGLES, self.indexCount, GL_UNSIGNED_SHORT, self.indices);
+
+        glDisableClientState(GL_COLOR_ARRAY);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+    }
+}
+
+class WaterShader
+{
+    var program;
+    var uWorldViewProj;
+    var uWorldReflectionViewProj;
+    var uWaveLength;
+    var uTime;
+    var uWindForce;
+    var uWindDirection;
+    var uCameraPosition;
+    var uWaveHeight;
+    var uWaterColor;
+    var uColorBlendFactor;
+    var uWaterBump;
+    var uRefractionMap;
+    var uReflectionMap;
+    var uFogEnabled;
+    var uFogMode;
+
+    def init(program)
+    {
+        self.program = program;
+        self.cacheUniforms();
+    }
+
+    def cacheUniforms()
+    {
+        self.uWorldViewProj = glGetUniformLocation(self.program, "WorldViewProj");
+        self.uWorldReflectionViewProj = glGetUniformLocation(self.program, "WorldReflectionViewProj");
+        self.uWaveLength = glGetUniformLocation(self.program, "WaveLength");
+        self.uTime = glGetUniformLocation(self.program, "Time");
+        self.uWindForce = glGetUniformLocation(self.program, "WindForce");
+        self.uWindDirection = glGetUniformLocation(self.program, "WindDirection");
+        self.uCameraPosition = glGetUniformLocation(self.program, "CameraPosition");
+        self.uWaveHeight = glGetUniformLocation(self.program, "WaveHeight");
+        self.uWaterColor = glGetUniformLocation(self.program, "WaterColor");
+        self.uColorBlendFactor = glGetUniformLocation(self.program, "ColorBlendFactor");
+        self.uWaterBump = glGetUniformLocation(self.program, "WaterBump");
+        self.uRefractionMap = glGetUniformLocation(self.program, "RefractionMap");
+        self.uReflectionMap = glGetUniformLocation(self.program, "ReflectionMap");
+        self.uFogEnabled = glGetUniformLocation(self.program, "FogEnabled");
+        self.uFogMode = glGetUniformLocation(self.program, "FogMode");
+    }
+
+    def reload()
+    {
+        if (ReloadShaderProgram(self.program))
+        {
+            self.cacheUniforms();
+            return true;
+        }
+        return false;
+    }
+}
+
+def drawWaterPlane(shader, texBump, texRefract, texReflect, eye, view, proj, reflectionView, waveLength, waveHeight, windForce, windDirX, windDirY, waterColorR, waterColorG, waterColorB, waterColorA, colorBlend, timeSec)
+{
+    var worldViewProj = MatrixMultiply(view, proj);
+    var worldReflectionViewProj = MatrixMultiply(reflectionView, proj);
+    var bufWorldViewProj = MatrixToBuffer(worldViewProj);
+    var bufWorldReflectionViewProj = MatrixToBuffer(worldReflectionViewProj);
+
+    glUseProgram(shader.program);
+
+    if (shader.uWorldViewProj >= 0) glUniformMatrix4fv(shader.uWorldViewProj, 1, false, bufWorldViewProj);
+    if (shader.uWorldReflectionViewProj >= 0) glUniformMatrix4fv(shader.uWorldReflectionViewProj, 1, false, bufWorldReflectionViewProj);
+    if (shader.uWaveLength >= 0) glUniform1f(shader.uWaveLength, waveLength);
+    if (shader.uTime >= 0) glUniform1f(shader.uTime, timeSec);
+    if (shader.uWindForce >= 0) glUniform1f(shader.uWindForce, windForce);
+    if (shader.uWindDirection >= 0) glUniform2f(shader.uWindDirection, windDirX, windDirY);
+    if (shader.uCameraPosition >= 0) glUniform3f(shader.uCameraPosition, eye.x, eye.y, eye.z);
+    if (shader.uWaveHeight >= 0) glUniform1f(shader.uWaveHeight, waveHeight);
+    if (shader.uWaterColor >= 0) glUniform4f(shader.uWaterColor, waterColorR, waterColorG, waterColorB, waterColorA);
+    if (shader.uColorBlendFactor >= 0) glUniform1f(shader.uColorBlendFactor, colorBlend);
+    if (shader.uFogEnabled >= 0) glUniform1i(shader.uFogEnabled, 0);
+    if (shader.uFogMode >= 0) glUniform1i(shader.uFogMode, 0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texBump);
+    if (shader.uWaterBump >= 0) glUniform1i(shader.uWaterBump, 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texRefract);
+    if (shader.uRefractionMap >= 0) glUniform1i(shader.uRefractionMap, 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, texReflect);
+    if (shader.uReflectionMap >= 0) glUniform1i(shader.uReflectionMap, 2);
+
+    glColor4f(1.0, 1.0, 1.0, 1.0);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0, 0.0);   glVertex3f(-18.0, 0.0, -18.0);
+    glTexCoord2f(24.0, 0.0);  glVertex3f(18.0, 0.0, -18.0);
+    glTexCoord2f(24.0, 24.0); glVertex3f(18.0, 0.0, 18.0);
+    glTexCoord2f(0.0, 24.0);  glVertex3f(-18.0, 0.0, 18.0);
+    glEnd();
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+}
+
+def drawWorld(terrain, timeSec, waterLevel)
+{
+    terrain.draw();
+
+    for (var j = 0; j < 5; j = j + 1)
+    {
+        var phase = timeSec * 0.9 + j * 1.17;
+        var x = cos(phase) * 4.8;
+        var z = sin(phase * 1.4) * 5.8;
+        var base = terrainRawHeight(x, z, waterLevel);
+        var y = base + 1.0 + sin(phase * 2.1) * 0.55;
+
+        glPushMatrix();
+        glTranslatef(x, y, z);
+        glRotatef(timeSec * 70.0 + j * 29.0, 1.0, 1.0, 0.0);
+        glColor3f(0.95, 0.45 + 0.10 * j, 0.18 + 0.12 * j);
+        drawBox(0.38, 0.38, 0.38);
+        glPopMatrix();
+    }
+}
+
+def renderSceneToTarget(target, eye, sky, view, proj, clipEquation, terrain, waterLevel)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, target.fbo);
+    glViewport(0, 0, target.width, target.height);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    applyCamera(view, proj);
+    drawSky(sky, eye);
+
+    if (clipEquation != nil)
+    {
+        glClipPlane(GL_CLIP_PLANE0, clipEquation);
+        glEnable(GL_CLIP_PLANE0);
+    }
+
+    drawWorld(terrain, timeSec, waterLevel);
+
+    if (clipEquation != nil) glDisable(GL_CLIP_PLANE0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+SetGLAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+if (!SDL.Init("BuGL - Legacy Water Arrays", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.08, 0.14, 0.22, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_BLEND);
+
+var waterProgram = loadWaterShaderAuto();
+if (waterProgram <= 0)
+{
+    print("Failed to load water shader program.");
+    Close();
+    return;
+}
+var waterShader = WaterShader(waterProgram);
+
+var bumpPath = resolveAssetPath("assets/waterbump.png", "../assets/waterbump.png");
+var bumpTex = 0;
+if (bumpPath != nil) bumpTex = loadWaterBumpTexture(bumpPath);
+if (bumpTex == nil) bumpTex = 0;
+if (bumpTex <= 0) bumpTex = makeWaterBumpTexture(128);
+
+var sky = loadSkyBox();
+var rtRefraction = makeRenderTarget(GetWidth(), GetHeight());
+var rtReflection = makeRenderTarget(GetWidth(), GetHeight());
+
+var waterLevel = 0.0;
+var terrain = TerrainArrayMesh(48, 26.0, waterLevel);
+
+var cam = CameraFree(0.0, 6.0, 18.0);
+cam.speed = 9.5;
+cam.sensitivity = 0.12;
+cam.setAngles(-118.0, -12.0, 0.0);
+cam.alwaysCapture = false;
+
+var waveLength = 0.12;
+var waveHeight = 0.09;
+var windForce = 0.22;
+var windDirX = 0.85;
+var windDirY = 0.30;
+var colorBlend = 0.18;
+var waterColorR = 0.06;
+var waterColorG = 0.20;
+var waterColorB = 0.38;
+var waterColorA = 1.0;
+var useClipPlanes = true;
+var fpsSmooth = 60.0;
+
+print("Legacy water arrays demo");
+print("terrain: client arrays + indexed triangles");
+print("water: shader + reflection/refraction FBO");
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05) dt = 0.05;
+    timeSec = timeSec + dt;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_F5))
+    {
+        if (waterShader.reload()) print("Water shader reloaded.");
+    }
+
+    cam.update(dt);
+
+    if (IsResized())
+    {
+        glViewport(0, 0, GetWidth(), GetHeight());
+        resizeRenderTarget(rtRefraction, GetWidth(), GetHeight());
+        resizeRenderTarget(rtReflection, GetWidth(), GetHeight());
+    }
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var eye = cam.getEye();
+    var fwd = cam.getForward();
+    var up = cam.getUp();
+    var targetPos = Vector3(eye.x + fwd.x, eye.y + fwd.y, eye.z + fwd.z);
+
+    var proj = cam.getProjectionMatrix(aspect, 60.0 * deg2rad, 0.1, 520.0);
+    var view = cam.getViewMatrix();
+
+    var reflectedEye = Vector3(eye.x, waterLevel * 2.0 - eye.y, eye.z);
+    var reflectedTarget = Vector3(targetPos.x, waterLevel * 2.0 - targetPos.y, targetPos.z);
+    var upY = up.y;
+    if (upY == nil) upY = 1.0;
+    var reflectedUp = Vector3(up.x, 0.0 - upY, up.z);
+    var reflectionView = MatrixLookAt(reflectedEye, reflectedTarget, reflectedUp);
+
+    var clipRefraction = nil;
+    var clipReflection = nil;
+    if (useClipPlanes)
+    {
+        clipRefraction = [0.0, -1.0, 0.0, waterLevel + 0.05];
+        clipReflection = [0.0, 1.0, 0.0, -waterLevel + 0.05];
+    }
+
+    renderSceneToTarget(rtRefraction, eye, sky, view, proj, clipRefraction, terrain, waterLevel);
+    renderSceneToTarget(rtReflection, reflectedEye, sky, reflectionView, proj, clipReflection, terrain, waterLevel);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+    drawSky(sky, eye);
+    drawWorld(terrain, timeSec, waterLevel);
+
+    glPushMatrix();
+    glTranslatef(0.0, waterLevel, 0.0);
+    drawWaterPlane(waterShader, bumpTex, rtRefraction.tex, rtReflection.tex, eye, view, proj, reflectionView, waveLength, waveHeight, windForce, windDirX, windDirY, waterColorR, waterColorG, waterColorB, waterColorA, colorBlend, timeSec);
+    glPopMatrix();
+
+    var panel = ImGui.Begin("Legacy Water Arrays");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(GetFPS()));
+        ImGui.Text("terrain: indexed client arrays");
+        ImGui.Text("grid: 48 x 48");
+        ImGui.Text("tris: " + int(terrain.indexCount / 3));
+        ImGui.Text("fbo: " + rtRefraction.width + " x " + rtRefraction.height);
+
+        ImGui.Separator();
+
+        var (changedClip, nextClip) = ImGui.Checkbox("Use clip planes", useClipPlanes);
+        if (changedClip) useClipPlanes = nextClip;
+
+        var (changedWaveLength, nextWaveLength) = ImGui.SliderFloat("WaveLength", waveLength, 0.03, 0.50, "%.3f");
+        if (changedWaveLength) waveLength = nextWaveLength;
+
+        var (changedWaveHeight, nextWaveHeight) = ImGui.SliderFloat("WaveHeight", waveHeight, 0.01, 0.35, "%.3f");
+        if (changedWaveHeight) waveHeight = nextWaveHeight;
+
+        var (changedWindForce, nextWindForce) = ImGui.SliderFloat("WindForce", windForce, 0.0, 1.5, "%.3f");
+        if (changedWindForce) windForce = nextWindForce;
+
+        var (changedDirX, nextDirX) = ImGui.SliderFloat("WindDir X", windDirX, -1.0, 1.0, "%.2f");
+        if (changedDirX) windDirX = nextDirX;
+
+        var (changedDirY, nextDirY) = ImGui.SliderFloat("WindDir Y", windDirY, -1.0, 1.0, "%.2f");
+        if (changedDirY) windDirY = nextDirY;
+
+        var (changedBlend, nextBlend) = ImGui.SliderFloat("ColorBlend", colorBlend, 0.0, 1.0, "%.2f");
+        if (changedBlend) colorBlend = nextBlend;
+
+        var (changedColor, nextR, nextG, nextB, nextA) = ImGui.ColorEdit4("Water Color", waterColorR, waterColorG, waterColorB, waterColorA);
+        if (changedColor)
+        {
+            waterColorR = nextR;
+            waterColorG = nextG;
+            waterColorB = nextB;
+            waterColorA = nextA;
+        }
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+destroyRenderTarget(rtRefraction);
+destroyRenderTarget(rtReflection);
+glDeleteTextures(bumpTex);
+glDeleteProgram(waterShader.program);
+destroySkyBox(sky);
+SetMouseRelative(false);
+Close();

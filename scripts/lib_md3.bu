@@ -1,0 +1,984 @@
+// ================================================================
+// lib_md3.bu — MD3 loader + legacy renderer in BuLang
+//
+// Focus:
+//   - Manual binary parsing in script
+//   - Multiple surfaces per model
+//   - Normal decompression from spherical encoding
+//   - Frame interpolation on CPU
+//   - animation.cfg parser for Quake 3 player models
+// ================================================================
+
+import file;
+import fs;
+using math;
+import STB;
+using STB;
+import path;
+import regex;
+
+var MD3_IDENT   = 860898377;  // "IDP3"
+var MD3_VERSION = 15;
+
+// ============================================================
+// Header
+// ============================================================
+
+class MD3Header
+{
+    var ident, version, name, flags;
+    var numFrames, numTags, numSurfaces, numSkins;
+    var ofsFrames, ofsTags, ofsSurfaces, ofsEnd;
+
+    def init()
+    {
+        self.ident       = 0; self.version = 0;
+        self.name        = ""; self.flags  = 0;
+        self.numFrames   = 0; self.numTags     = 0;
+        self.numSurfaces = 0; self.numSkins    = 0;
+        self.ofsFrames   = 0; self.ofsTags     = 0;
+        self.ofsSurfaces = 0; self.ofsEnd      = 0;
+    }
+
+    def valid()
+    {
+        return self.ident == MD3_IDENT &&
+               self.version == MD3_VERSION &&
+               self.numFrames > 0 &&
+               self.numSurfaces > 0 &&
+               self.ofsEnd > 108;
+    }
+}
+
+// ============================================================
+// Surface (one mesh within the file)
+// ============================================================
+
+class MD3Surface
+{
+    var name;
+    var numFrames, numShaders, numVerts, numTris;
+    var framePositions;  // Float32Array: numFrames * numVerts * 3
+    var normals;         // Float32Array: numFrames * numVerts * 3
+    var texcoords;       // Float32Array: numVerts * 2  (float, not short like MD2)
+    var indices;         // Uint32Array:  numTris * 3
+    var texture;
+    var shaderName;
+    var ready;
+
+    def init()
+    {
+        self.name           = "";
+        self.numFrames      = 0;
+        self.numShaders     = 0;
+        self.numVerts       = 0;
+        self.numTris        = 0;
+        self.framePositions = Float32Array(0);
+        self.normals        = Float32Array(0);
+        self.texcoords      = Float32Array(0);
+        self.indices        = Uint32Array(0);
+        self.texture        = 0;
+        self.shaderName     = "";
+        self.ready          = false;
+    }
+
+    def destroy()
+    {
+        if (self.texture > 0) glDeleteTextures(self.texture);
+        self.texture = 0;
+        self.ready   = false;
+    }
+}
+
+// ============================================================
+// Tag (attachment point, per frame)
+// ============================================================
+
+class MD3Tag
+{
+    var name;
+    var origins;   // Float32Array: numFrames * 3
+    var axes;      // Float32Array: numFrames * 9 (3×3 rotation)
+    var mat;
+
+    def init(name, numFrames)
+    {
+        self.name    = name;
+        self.origins = Float32Array(@(numFrames * 3, TYPE_FLOAT));
+        self.axes    = Float32Array(@(numFrames * 9, TYPE_FLOAT));
+        self.mat     = Float32Array(@(16, TYPE_FLOAT));
+    }
+}
+
+// ============================================================
+// Animation clip descriptor
+// ============================================================
+
+class MD3Animation
+{
+    var name, first, numFrames, looping, fps;
+
+    def init(name, first, numFrames, looping, fps)
+    {
+        self.name      = name;
+        self.first     = first;
+        self.numFrames = numFrames;
+        self.looping   = looping;
+        self.fps       = fps;
+      //  print("Anim ", name, " frames ", first, " ", self.last(), " looping ", looping, " fps ", fps);
+    }
+
+    def last()
+    {
+        if (self.numFrames <= 0) return self.first;
+        return self.first + self.numFrames - 1;
+    }
+}
+
+// ============================================================
+// Animation state  
+// ============================================================
+
+class MD3AnimState
+{
+    var first, last, fps;
+    var current, next, interp, accum;
+    var _loop, playing;
+
+    def init()
+    {
+        self.first   = 0; self.last    = 0;
+        self.fps     = 10.0;
+        self.current = 0; self.next    = 0;
+        self.interp  = 0.0; self.accum = 0.0;
+        self._loop    = true; self.playing = true;
+    }
+
+    def setRange(first, last, fps, frameCount, shouldLoop)
+    {
+        if (frameCount <= 0) frameCount = 1;
+        if (first < 0) first = 0;
+        if (last < first) last = first;
+        if (last >= frameCount) last = frameCount - 1;
+        if (fps < 0.01) fps = 0.01;
+
+        self.first   = first; self.last  = last; self.fps = fps;
+        self.current = first;
+        self.next    = first + 1;
+        if (self.next > last) self.next = first;
+        self.interp  = 0.0; self.accum  = 0.0;
+        self._loop    = shouldLoop; self.playing = true;
+    }
+
+    def update(dt)
+    {
+        if (!self.playing) return;
+        var frameTime = 1.0 / self.fps;
+        self.accum = self.accum + dt;
+
+        while (self.accum >= frameTime)
+        {
+            self.accum   = self.accum - frameTime;
+            self.current = self.next;
+            self.next    = self.current + 1;
+
+            if (self.next > self.last)
+            {
+                if (self._loop)
+                {
+                    self.current = self.first;
+                    self.next    = self.first + 1;
+                    if (self.next > self.last) self.next = self.first;
+                }
+                else
+                {
+                    self.current = self.last; self.next = self.last;
+                    self.playing = false; self.accum = 0.0;
+                    break;
+                }
+            }
+        }
+
+        self.interp = self.accum / frameTime;
+        if (self.interp < 0.0) self.interp = 0.0;
+        if (self.interp > 1.0) self.interp = 1.0;
+        if (!self.playing) self.interp = 0.0;
+    }
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+def md3LoadFileBuffer(filePath)
+{
+    var handle = file.open(filePath, "r");
+    if (handle == nil || handle <= 0)
+    {
+        print("MD3: failed to open: " + filePath);
+        return nil;
+    }
+    var size = file.size(handle);
+    if (size == nil || size <= 0)
+    {
+        file.close(handle);
+        print("MD3: invalid file size: " + filePath);
+        return nil;
+    }
+    var bytes = file.read_all(handle);
+    file.close(handle);
+    return bytes;
+}
+
+def md3StripExt(filename)
+{
+    return regex.replace("\\.[^.]+$", "", filename);
+}
+
+def md3LoadTexture2D(texPath)
+{
+    stbi_set_flip_vertically_on_load(0);
+    var (w, h, channels, pixels) = stbi_load(texPath, 4);
+    if (pixels == nil || w == nil || h == nil)
+    {
+        print("MD3: texture not found: " + texPath);
+        return 0;
+    }
+    var tex = glGenTextures();
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+def md3ResolveTexture(modelPath, shaderName)
+{
+    var dir  = path.dirname(modelPath);
+    var exts = [".png", ".jpg", ".jpeg", ".bmp", ".tga"];
+
+    // Try shader name directly or relative to model dir
+    if (shaderName != "")
+    {
+        if (path.exists(shaderName)) return md3LoadTexture2D(shaderName);
+
+        var rel = path.join(dir, path.basename(shaderName));
+        if (path.exists(rel)) return md3LoadTexture2D(rel);
+
+        var noExt = md3StripExt(path.basename(shaderName));
+        for (var i = 0; i < len(exts); i = i + 1)
+        {
+            var c = path.join(dir, noExt + exts[i]);
+            if (path.exists(c)) return md3LoadTexture2D(c);
+        }
+    }
+
+    // Auto-discover by model name
+    var base = md3StripExt(path.basename(modelPath));
+    for (var i = 0; i < len(exts); i = i + 1)
+    {
+        var c = path.join(dir, base + exts[i]);
+        if (path.exists(c)) return md3LoadTexture2D(c);
+    }
+    return 0;
+}
+
+// Decompress MD3 spherical-encoded normal → unit vector
+// lat, lng are uint8 angles (0–255 = 0–2π)
+def md3DecodeNormal(lat, lng)
+{
+    var latR = lat * 6.28318 / 255.0;
+    var lngR = lng * 6.28318 / 255.0;
+    return Vector3(
+        cos(latR) * sin(lngR),
+        sin(latR) * sin(lngR),
+        cos(lngR)
+    );
+}
+
+// ============================================================
+// animation.cfg parser (Quake 3 player model format)
+// Format per line: firstFrame numFrames loopingFrames fps // NAME
+// ============================================================
+
+def md3ParseAnimCfg(text)
+{
+    var names = [
+        "BOTH_DEATH1",    "BOTH_DEAD1",      "BOTH_DEATH2",       "BOTH_DEAD2",
+        "BOTH_DEATH3",    "BOTH_DEAD3",
+        "TORSO_GESTURE",  "TORSO_ATTACK",    "TORSO_ATTACK2",     "TORSO_DROP",
+        "TORSO_RAISE",    "TORSO_STAND",     "TORSO_STAND2",
+        "LEGS_WALKCR",    "LEGS_WALK",       "LEGS_RUN",          "LEGS_BACK",
+        "LEGS_SWIM",      "LEGS_JUMP",       "LEGS_LAND",         "LEGS_JUMPB",
+        "LEGS_LANDB",     "LEGS_IDLE",       "LEGS_IDLECR",       "LEGS_TURN"
+    ];
+
+    var anims   = [];
+    var lines   = text.split("\n");
+    var animIdx = 0;
+
+    for (var i = 0; i < len(lines); i = i + 1)
+    {
+        var line = lines[i].trim();
+        if (line == "" || line.startswith("//") ||
+            line.startswith("sex") || line.startswith("headoffset") ||
+            line.startswith("footsteps")) continue;
+
+        // Tokenize, stop at comment
+        var parts = line.split("\t");
+        if (len(parts) < 2) parts = line.split(" ");
+
+        var nums = [];
+        for (var p = 0; p < len(parts); p = p + 1)
+        {
+            var tok = parts[p].trim();
+            if (tok == "" || tok.startswith("//")) break;
+            nums.push(int(tok));
+        }
+
+        if (len(nums) >= 4 && animIdx < len(names))
+        {
+            var fps = nums[3];
+            if (fps < 1) fps = 1;
+            anims.push(MD3Animation(names[animIdx], nums[0], nums[1], nums[2] > 0, fps));
+            animIdx = animIdx + 1;
+        }
+    }
+    return anims;
+}
+
+def md3LoadAnimCfg(modelPath)
+{
+    var dir  = path.dirname(modelPath);
+    var cfg1 = path.join(dir, "animation.cfg");
+    var cfg2 = path.join(path.dirname(dir), "animation.cfg");
+
+    var text = nil;
+    if (path.exists(cfg1))      text = fs.read(cfg1);
+    elif (path.exists(cfg2))    text = fs.read(cfg2);
+    if (text == nil) return [];
+    return md3ParseAnimCfg(text);
+}
+
+// ============================================================
+// MD3 Model
+// ============================================================
+
+class MD3Model
+{
+    var header;
+    var surfaces;    // array of MD3Surface
+    var tags;        // array of MD3Tag
+    var frameNames;  // array of string (from Frame structs)
+    var animations;  // array of MD3Animation
+    var animIndex;
+    var anim;
+    var ready;
+    var sourcePath;
+    var scale;
+    var positionX, positionY, positionZ;
+    var rotationX, rotationY, rotationZ;
+
+    def init()
+    {
+        self.header     = MD3Header();
+        self.surfaces   = [];
+        self.tags       = [];
+        self.frameNames = [];
+        self.animations = [];
+        self.animIndex  = 0;
+        self.anim       = MD3AnimState();
+        self.ready      = false;
+        self.sourcePath = "";
+        self.scale      = 1.0;
+        self.positionX  = 0.0; self.positionY = 0.0; self.positionZ = 0.0;
+        self.rotationX  = 0.0; self.rotationY = 0.0; self.rotationZ = 0.0;
+    }
+
+    def destroy()
+    {
+        for (var i = 0; i < len(self.surfaces); i = i + 1)
+            self.surfaces[i].destroy();
+        self.surfaces   = [];
+        self.tags       = [];
+        self.frameNames = [];
+        self.ready      = false;
+    }
+
+ def buildTagMatrix(tag_index, frameA, frameB, t)
+{
+    var tag = self.tags[tag_index];
+
+    var a = frameA * 9;
+    var b = frameB * 9;
+    var oa = frameA * 3;
+    var ob = frameB * 3;
+
+    var ox = tag.origins.get(oa + 0) + (tag.origins.get(ob + 0) - tag.origins.get(oa + 0)) * t;
+    var oy = tag.origins.get(oa + 1) + (tag.origins.get(ob + 1) - tag.origins.get(oa + 1)) * t;
+    var oz = tag.origins.get(oa + 2) + (tag.origins.get(ob + 2) - tag.origins.get(oa + 2)) * t;
+ 
+    tag.mat.set(0,  tag.axes.get(a+0) + (tag.axes.get(b+0) - tag.axes.get(a+0)) * t);
+    tag.mat.set(1,  tag.axes.get(a+1) + (tag.axes.get(b+1) - tag.axes.get(a+1)) * t);
+    tag.mat.set(2,  tag.axes.get(a+2) + (tag.axes.get(b+2) - tag.axes.get(a+2)) * t);
+    tag.mat.set(3,  0.0);
+    tag.mat.set(4,  tag.axes.get(a+3) + (tag.axes.get(b+3) - tag.axes.get(a+3)) * t);
+    tag.mat.set(5,  tag.axes.get(a+4) + (tag.axes.get(b+4) - tag.axes.get(a+4)) * t);
+    tag.mat.set(6,  tag.axes.get(a+5) + (tag.axes.get(b+5) - tag.axes.get(a+5)) * t);
+    tag.mat.set(7,  0.0);
+    tag.mat.set(8,  tag.axes.get(a+6) + (tag.axes.get(b+6) - tag.axes.get(a+6)) * t);
+    tag.mat.set(9,  tag.axes.get(a+7) + (tag.axes.get(b+7) - tag.axes.get(a+7)) * t);
+    tag.mat.set(10, tag.axes.get(a+8) + (tag.axes.get(b+8) - tag.axes.get(a+8)) * t);
+    tag.mat.set(11, 0.0);
+    tag.mat.set(12, ox);
+    tag.mat.set(13, oy);
+    tag.mat.set(14, oz);
+    tag.mat.set(15, 1.0);
+    return tag.mat;
+}
+    // ----------------------------------------------------------
+    // load
+    // ----------------------------------------------------------
+
+    def load(modelPath)
+    {
+        self.destroy();
+        self.sourcePath = modelPath;
+
+        var buf = md3LoadFileBuffer(modelPath);
+        if (buf == nil) return false;
+        if (buf.length() < 108) { print("MD3: file too small: " + modelPath); return false; }
+
+        self.readHeader(buf);
+        if (!self.header.valid()) { print("MD3: invalid header: " + modelPath); return false; }
+        if (self.header.ofsEnd > buf.length()) { print("MD3: truncated: " + modelPath); return false; }
+
+        self.readFrameNames(buf);
+        self.readTags(buf);
+        self.readSurfaces(buf, modelPath);
+
+        self.animations = md3LoadAnimCfg(modelPath);
+        self.animIndex  = 0;
+
+        print("MD3 total frames: ", self.header.numFrames, " tags: ", self.header.numTags, " surfaces: ", self.header.numSurfaces);
+
+        if (len(self.animations) > 0)
+            self.applyAnimationIndex(0);
+        else
+            self.anim.setRange(0, self.header.numFrames - 1, 10.0, self.header.numFrames, true);
+
+        self.ready = len(self.surfaces) > 0 && self.header.numFrames > 0;
+        return self.ready;
+    }
+
+    // ----------------------------------------------------------
+    // Binary readers
+    // ----------------------------------------------------------
+
+    def readHeader(buf)
+    {
+        buf.seek(0);
+        self.header.ident       = buf.readInt();
+        self.header.version     = buf.readInt();
+        self.header.name        = buf.readString(64);
+        self.header.flags       = buf.readInt();
+        self.header.numFrames   = buf.readInt();
+        self.header.numTags     = buf.readInt();
+        self.header.numSurfaces = buf.readInt();
+        self.header.numSkins    = buf.readInt();
+        self.header.ofsFrames   = buf.readInt();
+        self.header.ofsTags     = buf.readInt();
+        self.header.ofsSurfaces = buf.readInt();
+        self.header.ofsEnd      = buf.readInt();
+    }
+
+    def readFrameNames(buf)
+    {
+        // MD3 Frame struct: minBounds[3] + maxBounds[3] + localOrigin[3] + radius = 40 bytes, then name[16]
+        // Total frame stride = 56 bytes
+        self.frameNames = [];
+        var frameStride = 56;
+        for (var f = 0; f < self.header.numFrames; f = f + 1)
+        {
+            buf.seek(self.header.ofsFrames + f * frameStride + 40);
+            self.frameNames.push(buf.readString(16));
+        }
+    }
+
+    def readTags(buf)
+    {
+        self.tags = [];
+        if (self.header.numTags <= 0) return;
+
+        // Tag struct: name[64] + origin[3] + axis[3][3] = 64 + 12 + 36 = 112 bytes
+        // Layout: [frame0_tag0, frame0_tag1, ..., frame1_tag0, ...]
+        var tagStride = 112;
+
+        // Read names from frame 0
+        var tagNames = [];
+        for (var t = 0; t < self.header.numTags; t = t + 1)
+        {
+            buf.seek(self.header.ofsTags + t * tagStride);
+            tagNames.push(buf.readString(64));
+        }
+
+        for (var t = 0; t < self.header.numTags; t = t + 1)
+        {
+            var tag = MD3Tag(tagNames[t], self.header.numFrames);
+            print("Tag ", t, ": ", tag.name);
+
+            for (var f = 0; f < self.header.numFrames; f = f + 1)
+            {
+                buf.seek(self.header.ofsTags + (f * self.header.numTags + t) * tagStride + 64);
+
+                var ox = buf.readFloat();
+                var oy = buf.readFloat();
+                var oz = buf.readFloat();
+                tag.origins.set(f * 3 + 0, ox);
+                tag.origins.set(f * 3 + 1, oy);   
+                tag.origins.set(f * 3 + 2, oz);
+
+                for (var a = 0; a < 9; a = a + 1)
+                    tag.axes.set(f * 9 + a, buf.readFloat());
+            }
+            self.tags.push(tag);
+        }
+    }
+
+    def readSurfaces(buf, modelPath)
+    {
+        self.surfaces = [];
+        var surfOfs = self.header.ofsSurfaces;
+
+        for (var s = 0; s < self.header.numSurfaces; s = s + 1)
+        {
+            // ofsEnd (relative to surface start) lives at byte offset 104 within surface header
+            buf.seek(surfOfs + 104);
+            var surfSize = buf.readInt();
+
+            var surf = MD3Surface();
+            self.readOneSurface(buf, surf, surfOfs, modelPath);
+            self.surfaces.push(surf);
+
+            surfOfs = surfOfs + surfSize;
+        }
+    }
+
+    def readOneSurface(buf, surf, surfOfs, modelPath)
+    {
+        // Surface header: ident(4) + name(64) + flags(4) + numFrames(4) + numShaders(4) +
+        //   numVerts(4) + numTris(4) + ofsTris(4) + ofsShaders(4) + ofsST(4) +
+        //   ofsXYZNormal(4) + ofsEnd(4)  = 108 bytes total
+        buf.seek(surfOfs);
+        buf.readInt();                      // ident (always IDP3)
+        surf.name        = buf.readString(64);
+        buf.readInt();                      // flags
+        surf.numFrames   = buf.readInt();
+        surf.numShaders  = buf.readInt();
+        surf.numVerts    = buf.readInt();
+        surf.numTris     = buf.readInt();
+        var ofsTris      = buf.readInt();   // relative to surface start
+        var ofsShaders   = buf.readInt();
+        var ofsST        = buf.readInt();
+        var ofsXYZNormal = buf.readInt();
+        // ofsEnd already read in readSurfaces, skip
+
+        // Shader name → texture
+        if (surf.numShaders > 0)
+        {
+            buf.seek(surfOfs + ofsShaders);
+            surf.shaderName = buf.readString(64);
+        }
+        surf.texture = md3ResolveTexture(modelPath, surf.shaderName);
+
+        // Triangles: numTris × 3 × int32
+        surf.indices = Uint32Array(@(surf.numTris * 3, TYPE_UINT32));
+        buf.seek(surfOfs + ofsTris);
+        for (var i = 0; i < surf.numTris * 3; i = i + 1)
+            surf.indices.set(i, buf.readInt());
+
+        // Texture coords: numVerts × 2 × float32  (UV per vertex, no separate UV index)
+        surf.texcoords = Float32Array(@(surf.numVerts * 2, TYPE_FLOAT));
+        buf.seek(surfOfs + ofsST);
+        for (var i = 0; i < surf.numVerts; i = i + 1)
+        {
+            surf.texcoords.set(i * 2 + 0, buf.readFloat());
+            surf.texcoords.set(i * 2 + 1, buf.readFloat());
+        }
+
+        // Vertices: numFrames × numVerts × (3 int16 pos + 2 uint8 normal) = 8 bytes/vert
+        var floatsPerFrame = surf.numVerts * 3;
+        surf.framePositions = Float32Array(@(surf.numFrames * floatsPerFrame, TYPE_FLOAT));
+        surf.normals        = Float32Array(@(surf.numFrames * floatsPerFrame, TYPE_FLOAT));
+
+        buf.seek(surfOfs + ofsXYZNormal);
+        for (var f = 0; f < surf.numFrames; f = f + 1)
+        {
+            var frameBase = f * floatsPerFrame;
+            for (var v = 0; v < surf.numVerts; v = v + 1)
+            {
+                // Position: 3 × int16, scale = 1/64
+                var rx = buf.readShort() / 64.0;
+                var ry = buf.readShort() / 64.0;
+                var rz = buf.readShort() / 64.0;
+
+                // Normal: 2 × uint8 spherical angles
+                var lat = buf.readByte();
+                var lng = buf.readByte();
+
+                var dst = frameBase + v * 3;
+
+    
+                surf.framePositions.set(dst + 0, rx);
+                surf.framePositions.set(dst + 1, ry);
+                surf.framePositions.set(dst + 2, rz);
+
+                var n = md3DecodeNormal(lat, lng);
+                surf.normals.set(dst + 0, n.x);
+                surf.normals.set(dst + 1, n.y);
+                surf.normals.set(dst + 2, n.z);
+            }
+        }
+
+        surf.ready = surf.numTris > 0 && surf.numVerts > 0 && surf.numFrames > 0;
+    }
+
+    // ----------------------------------------------------------
+    // Animation API
+    // ----------------------------------------------------------
+
+    def addAnimation(name, first, numFrames, looping, fps)
+    {
+        self.animations.push(MD3Animation(name, first, numFrames, looping, fps));
+        return len(self.animations) - 1;  // devolve o index
+    }
+    def applyAnimationIndex(index)
+    {
+        if (len(self.animations) <= 0) return false;
+        if (index < 0) index = len(self.animations) - 1;
+        if (index >= len(self.animations)) index = 0;
+        self.animIndex = index;
+        var a = self.animations[index];
+        self.anim.setRange(a.first, a.last(), a.fps, self.header.numFrames, a.looping);
+        return true;
+    }
+
+    def setAnimationByIndex(index) { return self.applyAnimationIndex(index); }
+    def nextAnimation()            { return self.applyAnimationIndex(self.animIndex + 1); }
+    def prevAnimation()            { return self.applyAnimationIndex(self.animIndex - 1); }
+
+    def setSurfaceTexture(surfIndex, texPath)
+    {
+        if (surfIndex < 0 || surfIndex >= len(self.surfaces)) return false;
+        var tex = md3LoadTexture2D(texPath);
+        if (tex <= 0) return false;
+        if (self.surfaces[surfIndex].texture > 0)
+            glDeleteTextures(self.surfaces[surfIndex].texture);
+        self.surfaces[surfIndex].texture = tex;
+        return true;
+    }
+
+    def findAnimationByName(name)
+    {
+        for (var i = 0; i < len(self.animations); i = i + 1)
+            if (self.animations[i].name == name) return i;
+        return -1;
+    }
+
+    def setAnimationByName(name)
+    {
+        var i = self.findAnimationByName(name);
+        if (i < 0) return false;
+        return self.applyAnimationIndex(i);
+    }
+
+    def animationName()
+    {
+        if (len(self.animations) <= 0 || self.animIndex < 0 || self.animIndex >= len(self.animations))
+            return "";
+        return self.animations[self.animIndex].name;
+    }
+
+    def currentFrame() { return self.anim.current; }
+
+    def update(dt) { self.anim.update(dt); }
+
+    // ----------------------------------------------------------
+    // Tag helpers
+    // ----------------------------------------------------------
+
+    def findTag(name)
+    {
+        for (var i = 0; i < len(self.tags); i = i + 1)
+            if (self.tags[i].name == name) return self.tags[i];
+        return nil;
+    }
+
+    def getTag(index)
+    {
+        if (index < 0 || index >= len(self.tags)) return nil;
+        return self.tags[index];
+    }
+
+    def getTagOrigin(name)
+    {
+        var tag = self.findTag(name);
+        if (tag == nil) return Vector3(0.0, 0.0, 0.0);
+        var f   = self.anim.current;
+        return Vector3(tag.origins.get(f * 3 + 0),
+                       tag.origins.get(f * 3 + 1),
+                       tag.origins.get(f * 3 + 2));
+    }
+
+    // ----------------------------------------------------------
+    // Stats
+    // ----------------------------------------------------------
+
+    def frameCount()    { return self.header.numFrames; }
+    def surfaceCount()  { return len(self.surfaces); }
+    def tagCount()      { return len(self.tags); }
+    def triangleCount()
+    {
+        var total = 0;
+        for (var i = 0; i < len(self.surfaces); i = i + 1)
+            total = total + self.surfaces[i].numTris;
+        return total;
+    }
+
+    // ----------------------------------------------------------
+    // Draw
+    // ----------------------------------------------------------
+
+    def draw()
+    {
+        if (!self.ready) return;
+
+        glPushMatrix();
+        glTranslatef(self.positionX, self.positionY, self.positionZ);
+        glRotatef(-90.0, 1.0, 0.0, 0.0);  
+        glRotatef(self.rotationX, 1.0, 0.0, 0.0);
+        glRotatef(self.rotationY, 0.0, 1.0, 0.0);
+        glRotatef(self.rotationZ, 0.0, 0.0, 1.0);
+        glScalef(self.scale, self.scale, self.scale);
+
+        for (var s = 0; s < len(self.surfaces); s = s + 1)
+            self.drawSurface(self.surfaces[s]);
+
+        glPopMatrix();
+    }
+
+    def drawSurfaces()
+    {
+        for (var s = 0; s < len(self.surfaces); s = s + 1)
+            self.drawSurface(self.surfaces[s]);
+    }
+
+    def drawTagsLocal()
+{
+    if (!self.ready) return;
+
+    var fc = self.header.numFrames;
+    var frameA = self.anim.current;
+    var frameB = self.anim.next;
+    if (frameA < 0) frameA = 0;
+    if (frameA >= fc) frameA = fc - 1;
+    if (frameB < 0) frameB = frameA;
+    if (frameB >= fc) frameB = frameA;
+    var t = self.anim.interp;
+
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_DEPTH_TEST);
+
+    for (var i = 0; i < len(self.tags); i = i + 1)
+    {
+        var tag = self.tags[i];
+        var oa = frameA * 3; var ob = frameB * 3;
+        var aa = frameA * 9; var ab = frameB * 9;
+
+        var ox = tag.origins.get(oa+0) + (tag.origins.get(ob+0) - tag.origins.get(oa+0)) * t;
+        var oy = tag.origins.get(oa+1) + (tag.origins.get(ob+1) - tag.origins.get(oa+1)) * t;
+        var oz = tag.origins.get(oa+2) + (tag.origins.get(ob+2) - tag.origins.get(oa+2)) * t;
+
+        var ax = tag.axes.get(aa+0) + (tag.axes.get(ab+0) - tag.axes.get(aa+0)) * t;
+        var ay = tag.axes.get(aa+1) + (tag.axes.get(ab+1) - tag.axes.get(aa+1)) * t;
+        var az = tag.axes.get(aa+2) + (tag.axes.get(ab+2) - tag.axes.get(aa+2)) * t;
+        var bx = tag.axes.get(aa+3) + (tag.axes.get(ab+3) - tag.axes.get(aa+3)) * t;
+        var by = tag.axes.get(aa+4) + (tag.axes.get(ab+4) - tag.axes.get(aa+4)) * t;
+        var bz = tag.axes.get(aa+5) + (tag.axes.get(ab+5) - tag.axes.get(aa+5)) * t;
+        var cx = tag.axes.get(aa+6) + (tag.axes.get(ab+6) - tag.axes.get(aa+6)) * t;
+        var cy = tag.axes.get(aa+7) + (tag.axes.get(ab+7) - tag.axes.get(aa+7)) * t;
+        var cz = tag.axes.get(aa+8) + (tag.axes.get(ab+8) - tag.axes.get(aa+8)) * t;
+
+        var s = 8.0;
+        glLineWidth(2.0);
+        glBegin(GL_LINES);
+        glColor3f(1.0, 0.2, 0.2); glVertex3f(ox, oy, oz); glVertex3f(ox+ax*s, oy+ay*s, oz+az*s);
+        glColor3f(0.2, 1.0, 0.2); glVertex3f(ox, oy, oz); glVertex3f(ox+bx*s, oy+by*s, oz+bz*s);
+        glColor3f(0.2, 0.5, 1.0); glVertex3f(ox, oy, oz); glVertex3f(ox+cx*s, oy+cy*s, oz+cz*s);
+        glEnd();
+        glLineWidth(1.0);
+        glPointSize(7.0);
+        glBegin(GL_POINTS);
+        glColor3f(1.0, 0.9, 0.1);
+        glVertex3f(ox, oy, oz);
+        glEnd();
+        glPointSize(1.0);
+    }
+
+    glEnable(GL_DEPTH_TEST);
+}
+def drawTags()
+{
+    glPushMatrix();
+    glTranslatef(self.positionX, self.positionY, self.positionZ);
+    glRotatef(-90.0, 1.0, 0.0, 0.0);
+    glRotatef(self.rotationX, 1.0, 0.0, 0.0);
+    glRotatef(self.rotationY, 0.0, 1.0, 0.0);
+    glRotatef(self.rotationZ, 0.0, 0.0, 1.0);
+    glScalef(self.scale, self.scale, self.scale);
+    self.drawTagsLocal();
+    glPopMatrix();
+}
+def drawChild(tagIndex, child, showTags)
+{
+   
+    if (tagIndex < 0 || tagIndex >= len(self.tags)) return;
+
+    var fc = self.header.numFrames;
+    var frameA = self.anim.current;
+    var frameB = self.anim.next;
+    if (frameA < 0) frameA = 0;
+    if (frameA >= fc) frameA = fc - 1;
+    if (frameB < 0) frameB = frameA;
+    if (frameB >= fc) frameB = frameA;
+
+    glPushMatrix();
+    glTranslatef(self.positionX, self.positionY, self.positionZ);
+    glRotatef(-90.0, 1.0, 0.0, 0.0);
+    glRotatef(self.rotationX, 1.0, 0.0, 0.0);
+    glRotatef(self.rotationY, 0.0, 1.0, 0.0);
+    glRotatef(self.rotationZ, 0.0, 0.0, 1.0);
+    glScalef(self.scale, self.scale, self.scale);
+    glMultMatrixf(self.buildTagMatrix(tagIndex, frameA, frameB, self.anim.interp));
+    child.drawSurfaces();
+    if (showTags) child.drawTagsLocal();   
+    glPopMatrix();
+}
+
+// Para usar a partir do espaço mundo — aplica tudo
+def pushTagSpace(tagIndex)
+{
+    var fc = self.header.numFrames;
+    var frameA = self.anim.current;
+    var frameB = self.anim.next;
+    if (frameA < 0) frameA = 0;
+    if (frameA >= fc) frameA = fc - 1;
+    if (frameB < 0) frameB = frameA;
+    if (frameB >= fc) frameB = frameA;
+
+    glPushMatrix();
+    glTranslatef(self.positionX, self.positionY, self.positionZ);
+    glRotatef(-90.0, 1.0, 0.0, 0.0);
+    glRotatef(self.rotationX, 1.0, 0.0, 0.0);
+    glRotatef(self.rotationY, 0.0, 1.0, 0.0);
+    glRotatef(self.rotationZ, 0.0, 0.0, 1.0);
+    glScalef(self.scale, self.scale, self.scale);
+    glMultMatrixf(self.buildTagMatrix(tagIndex, frameA, frameB, self.anim.interp));
+}
+
+// Para usar quando já estás dentro do espaço do modelo pai — só a tag
+def pushTagSpaceLocal(tagIndex)
+{
+    var fc = self.header.numFrames;
+    var frameA = self.anim.current;
+    var frameB = self.anim.next;
+    if (frameA < 0) frameA = 0;
+    if (frameA >= fc) frameA = fc - 1;
+    if (frameB < 0) frameB = frameA;
+    if (frameB >= fc) frameB = frameA;
+
+    glPushMatrix();
+    glMultMatrixf(self.buildTagMatrix(tagIndex, frameA, frameB, self.anim.interp));
+}
+
+ 
+
+def popTagSpace()
+{
+    glPopMatrix();
+}
+
+    def drawSurface(surf)
+    {
+        if (!surf.ready) return;
+
+        var fc    = surf.numFrames;
+        var frameA = self.anim.current;
+        var frameB = self.anim.next;
+        if (frameA < 0) frameA = 0;
+        if (frameA >= fc) frameA = fc - 1;
+        if (frameB < 0) frameB = frameA;
+        if (frameB >= fc) frameB = frameA;
+
+        var frameSize = surf.numVerts * 3;
+        var baseA     = frameA * frameSize;
+        var baseB     = frameB * frameSize;
+        var t         = self.anim.interp;
+
+        var vi = 0; var pa = 0; var pb = 0;
+        var x0 = 0.0; var y0 = 0.0; var z0 = 0.0;
+        var x1 = 0.0; var y1 = 0.0; var z1 = 0.0;
+        var nx0 = 0.0; var ny0 = 0.0; var nz0 = 0.0;
+        var nx1 = 0.0; var ny1 = 0.0; var nz1 = 0.0;
+        var u = 0.0; var v = 0.0;
+
+        glEnable(GL_TEXTURE_2D);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+        if (surf.texture > 0) glBindTexture(GL_TEXTURE_2D, surf.texture);
+
+        glBegin(GL_TRIANGLES);
+        for (var tri = 0; tri < surf.numTris; tri = tri + 1)
+        {
+            var triBase = tri * 3;
+            for (var k = 0; k < 3; k = k + 1)
+            {
+                vi  = surf.indices.get(triBase + k);
+                pa  = baseA + vi * 3;
+                pb  = baseB + vi * 3;
+
+                x0  = surf.framePositions.get(pa + 0);
+                y0  = surf.framePositions.get(pa + 1);
+                z0  = surf.framePositions.get(pa + 2);
+                x1  = surf.framePositions.get(pb + 0);
+                y1  = surf.framePositions.get(pb + 1);
+                z1  = surf.framePositions.get(pb + 2);
+                nx0 = surf.normals.get(pa + 0);
+                ny0 = surf.normals.get(pa + 1);
+                nz0 = surf.normals.get(pa + 2);
+                nx1 = surf.normals.get(pb + 0);
+                ny1 = surf.normals.get(pb + 1);
+                nz1 = surf.normals.get(pb + 2);
+
+                var uvBase = vi * 2;
+                u = surf.texcoords.get(uvBase + 0);
+                v = surf.texcoords.get(uvBase + 1);
+
+                glNormal3f(nx0 + (nx1 - nx0) * t,
+                           ny0 + (ny1 - ny0) * t,
+                           nz0 + (nz1 - nz0) * t);
+                glTexCoord2f(u, v);
+                glVertex3f(x0 + (x1 - x0) * t,
+                           y0 + (y1 - y0) * t,
+                           z0 + (z1 - z0) * t);
+            }
+        }
+        glEnd();
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+    }
+}

@@ -737,19 +737,23 @@ void Compiler::declareVariable()
 
     Token &name = previous;
 
-    for (int i = localCount_ - 1; i >= 0; i--)
+    // Permite re-declarar a variável de descarte '_' múltiplas vezes no mesmo scope
+    if (name.lexeme != "_")
     {
-        Local &local = locals_[i];
-
-        if (local.depth != -1 && local.depth < scopeDepth)
+        for (int i = localCount_ - 1; i >= 0; i--)
         {
-            break;
-        }
+            Local &local = locals_[i];
 
-        if (local.name == name.lexeme)
-        {
-            fail("Variable '%s' already declared in this scope", name.lexeme.c_str());
-            return;
+            if (local.depth != -1 && local.depth < scopeDepth)
+            {
+                break;
+            }
+
+            if (local.name == name.lexeme)
+            {
+                fail("Variable '%s' already declared in this scope", name.lexeme.c_str());
+                return;
+            }
         }
     }
 

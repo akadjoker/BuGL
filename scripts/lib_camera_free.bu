@@ -2,16 +2,20 @@
 // lib_camera_free.bu — Reusable Free Camera (fly-through, 6DOF)
 //
 // Usage:
-//   import "lib_camera_free.bu";
+//   include "lib_camera_free.bu";
 //   var cam = CameraFree(0.0, 3.0, 10.0);
 //   cam.speed = 6.0;
-//   SDL_SetRelativeMouseMode(true);
+//   SetMouseRelative(true);
+//   cam.setAngles(-90.0, 0.0, 0.0);
 //   // in your loop:
 //   cam.update(dt);
 //   var view = cam.getViewMatrix();
 //
-// Like FPS but: no ground constraint, full 6-axis fly-through.
-// Keys: WASD move, Q/E roll, Space up, C down, mouse look.
+// Keys:
+//   WASD move
+//   Space/C up/down
+//   Q/E roll
+//   Left mouse or alwaysCapture for look
 // ================================================================
 
 import math;
@@ -19,7 +23,7 @@ using math;
 import GLM;
 using GLM;
 
-struct CameraFree
+class CameraFree
 {
     var x;
     var y;
@@ -31,42 +35,44 @@ struct CameraFree
     var sensitivity;
     var firstMouse;
     var alwaysCapture;
+    var mouseButton;
 
     def init(px, py, pz)
     {
-        this.x = px;
-        this.y = py;
-        this.z = pz;
-        this.yaw = -90.0;
-        this.pitch = 0.0;
-        this.roll = 0.0;
-        this.speed = 5.0;
-        this.sensitivity = 0.1;
-        this.firstMouse = true;
-        this.alwaysCapture = false;
+        self.x = px;
+        self.y = py;
+        self.z = pz;
+        self.yaw = -90.0;
+        self.pitch = 0.0;
+        self.roll = 0.0;
+        self.speed = 5.0;
+        self.sensitivity = 0.1;
+        self.firstMouse = true;
+        self.alwaysCapture = false;
+        self.mouseButton = 0;
     }
 
     def setPosition(px, py, pz)
     {
-        this.x = px;
-        this.y = py;
-        this.z = pz;
+        self.x = px;
+        self.y = py;
+        self.z = pz;
     }
 
     def setAngles(yawDeg, pitchDeg, rollDeg)
     {
-        this.yaw = yawDeg;
-        this.pitch = pitchDeg;
-        this.roll = rollDeg;
-        if (this.pitch > 89.0) this.pitch = 89.0;
-        if (this.pitch < -89.0) this.pitch = -89.0;
+        self.yaw = yawDeg;
+        self.pitch = pitchDeg;
+        self.roll = rollDeg;
+        if (self.pitch > 89.0) self.pitch = 89.0;
+        if (self.pitch < -89.0) self.pitch = -89.0;
     }
 
     def getForward()
     {
         var deg2rad = 0.017453292519943295;
-        var yr = this.yaw * deg2rad;
-        var pr = this.pitch * deg2rad;
+        var yr = self.yaw * deg2rad;
+        var pr = self.pitch * deg2rad;
         var fx = cos(yr) * cos(pr);
         var fy = sin(pr);
         var fz = sin(yr) * cos(pr);
@@ -75,22 +81,20 @@ struct CameraFree
 
     def getRight()
     {
-        var fwd = this.getForward();
+        var fwd = self.getForward();
         var up = Vector3(0.0, 1.0, 0.0);
-        // right = cross(fwd, up), normalized
         var rx = fwd.y * up.z - fwd.z * up.y;
         var ry = fwd.z * up.x - fwd.x * up.z;
         var rz = fwd.x * up.y - fwd.y * up.x;
-        var len = sqrt(rx*rx + ry*ry + rz*rz);
-        if (len < 0.0001) return Vector3(1.0, 0.0, 0.0);
-        return Vector3(rx/len, ry/len, rz/len);
+        var vlen = sqrt(rx * rx + ry * ry + rz * rz);
+        if (vlen < 0.0001) return Vector3(1.0, 0.0, 0.0);
+        return Vector3(rx / vlen, ry / vlen, rz / vlen);
     }
 
     def getUp()
     {
-        var fwd = this.getForward();
-        var right = this.getRight();
-        // up = cross(right, fwd)
+        var fwd = self.getForward();
+        var right = self.getRight();
         var ux = right.y * fwd.z - right.z * fwd.y;
         var uy = right.z * fwd.x - right.x * fwd.z;
         var uz = right.x * fwd.y - right.y * fwd.x;
@@ -99,56 +103,50 @@ struct CameraFree
 
     def update(dt)
     {
-        // Mouse look
-        var doLook = this.alwaysCapture || IsMouseDown(0);
+        var doLook = self.alwaysCapture || IsMouseDown(self.mouseButton);
         if (doLook)
         {
             var (dx, dy) = GetMouseDelta();
-            if (this.firstMouse)
+            if (self.firstMouse)
             {
-                this.firstMouse = false;
+                self.firstMouse = false;
             }
             else
             {
-                this.yaw = this.yaw - dx * this.sensitivity;
-                this.pitch = this.pitch - dy * this.sensitivity;
-                if (this.pitch > 89.0) this.pitch = 89.0;
-                if (this.pitch < -89.0) this.pitch = -89.0;
+                self.yaw = self.yaw + dx * self.sensitivity;
+                self.pitch = self.pitch - dy * self.sensitivity;
+                if (self.pitch > 89.0) self.pitch = 89.0;
+                if (self.pitch < -89.0) self.pitch = -89.0;
             }
         }
         else
         {
-            this.firstMouse = true;
+            self.firstMouse = true;
         }
 
-        // Forward/right/up vectors
-        var fwd   = this.getForward();
-        var right = this.getRight();
-        var up    = this.getUp();
+        var fwd = self.getForward();
+        var right = self.getRight();
+        var mv = self.speed * dt;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) mv = mv * 2.5;
 
-        var mv = this.speed * dt;
-        if (IsKeyDown(KEY_LSHIFT)) mv = mv * 2.5;
+        if (IsKeyDown(KEY_W)) { self.x = self.x + fwd.x * mv; self.y = self.y + fwd.y * mv; self.z = self.z + fwd.z * mv; }
+        if (IsKeyDown(KEY_S)) { self.x = self.x - fwd.x * mv; self.y = self.y - fwd.y * mv; self.z = self.z - fwd.z * mv; }
+        if (IsKeyDown(KEY_A)) { self.x = self.x - right.x * mv; self.y = self.y - right.y * mv; self.z = self.z - right.z * mv; }
+        if (IsKeyDown(KEY_D)) { self.x = self.x + right.x * mv; self.y = self.y + right.y * mv; self.z = self.z + right.z * mv; }
+        if (IsKeyDown(KEY_SPACE)) self.y = self.y + mv;
+        if (IsKeyDown(KEY_C)) self.y = self.y - mv;
 
-        // WASD + Space/C
-        if (IsKeyDown(KEY_W)) { this.x = this.x + fwd.x*mv; this.y = this.y + fwd.y*mv; this.z = this.z + fwd.z*mv; }
-        if (IsKeyDown(KEY_S)) { this.x = this.x - fwd.x*mv; this.y = this.y - fwd.y*mv; this.z = this.z - fwd.z*mv; }
-        if (IsKeyDown(KEY_A)) { this.x = this.x - right.x*mv; this.y = this.y - right.y*mv; this.z = this.z - right.z*mv; }
-        if (IsKeyDown(KEY_D)) { this.x = this.x + right.x*mv; this.y = this.y + right.y*mv; this.z = this.z + right.z*mv; }
-        if (IsKeyDown(KEY_SPACE)) { this.y = this.y + mv; }
-        if (IsKeyDown(KEY_C))     { this.y = this.y - mv; }
-
-        // Q/E roll
         var rollSpeed = 60.0;
-        if (IsKeyDown(KEY_Q)) this.roll = this.roll - rollSpeed * dt;
-        if (IsKeyDown(KEY_E)) this.roll = this.roll + rollSpeed * dt;
+        if (IsKeyDown(KEY_Q)) self.roll = self.roll - rollSpeed * dt;
+        if (IsKeyDown(KEY_E)) self.roll = self.roll + rollSpeed * dt;
     }
 
     def getViewMatrix()
     {
-        var fwd = this.getForward();
-        var eye = Vector3(this.x, this.y, this.z);
-        var tgt = Vector3(this.x + fwd.x, this.y + fwd.y, this.z + fwd.z);
-        var up  = this.getUp();
+        var fwd = self.getForward();
+        var eye = Vector3(self.x, self.y, self.z);
+        var tgt = Vector3(self.x + fwd.x, self.y + fwd.y, self.z + fwd.z);
+        var up = self.getUp();
         return MatrixLookAt(eye, tgt, up);
     }
 
@@ -159,6 +157,6 @@ struct CameraFree
 
     def getEye()
     {
-        return Vector3(this.x, this.y, this.z);
+        return Vector3(self.x, self.y, self.z);
     }
 }

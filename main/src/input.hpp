@@ -213,6 +213,8 @@ public:
     static int GetMouseX();
     static int GetMouseY();
     static void SetMousePosition(int x, int y);
+    static bool SetMouseRelative(bool enabled);
+    static bool GetMouseRelative();
     static void SetMouseOffset(int offsetX, int offsetY);
     static void SetMouseScale(float scaleX, float scaleY);
 

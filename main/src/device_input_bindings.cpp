@@ -463,6 +463,29 @@ namespace SDLBindings
         return 0;
     }
 
+    static int native_Input_SetMouseRelative(Interpreter *vm, int argc, Value *args)
+    {
+        if (argc != 1 || !args[0].isBool())
+        {
+            Error("Input_SetMouseRelative expects 1 boolean");
+            return 0;
+        }
+        vm->pushBool(Input::SetMouseRelative(args[0].asBool()));
+        return 1;
+    }
+
+    static int native_Input_GetMouseRelative(Interpreter *vm, int argc, Value *args)
+    {
+        (void)args;
+        if (argc != 0)
+        {
+            Error("Input_GetMouseRelative expects 0 arguments");
+            return 0;
+        }
+        vm->pushBool(Input::GetMouseRelative());
+        return 1;
+    }
+
     static int native_Input_SetMouseOffset(Interpreter *vm, int argc, Value *args)
     {
         (void)vm;
@@ -734,6 +757,8 @@ namespace SDLBindings
             .addFunction("GetMouseX", native_Input_GetMouseX, 0)
             .addFunction("GetMouseY", native_Input_GetMouseY, 0)
             .addFunction("SetMousePosition", native_Input_SetMousePosition, 2)
+            .addFunction("SetMouseRelative", native_Input_SetMouseRelative, 1)
+            .addFunction("GetMouseRelative", native_Input_GetMouseRelative, 0)
             .addFunction("SetMouseOffset", native_Input_SetMouseOffset, 2)
             .addFunction("SetMouseScale", native_Input_SetMouseScale, 2)
             .addFunction("GetMouseWheelMove", native_Input_GetMouseWheelMove, 0)

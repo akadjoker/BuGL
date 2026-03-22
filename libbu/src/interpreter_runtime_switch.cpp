@@ -627,7 +627,22 @@ ProcessResult Interpreter::run_process(Process *process)
                     THROW_DIV_ZERO();
                 PUSH(makeDouble(a.asDouble() / db));
                 break;
-            }
+            } else if(a.isByte() && b.isNumber()) {
+                double da = (double)a.asByte();
+                double db = b.isInt() ? (double)b.asInt() : b.asDouble();
+                if (db == 0.0)
+                    THROW_DIV_ZERO();
+                PUSH(makeDouble(da / db));
+                break;
+            } else if(a.isNumber() && b.isByte()) {
+                double da = a.isInt() ? (double)a.asInt() : a.asDouble();
+                double db = (double)b.asByte();
+                if (db == 0.0)
+                    THROW_DIV_ZERO();
+                PUSH(makeDouble(da / db));
+                break;
+            }   
+            
 
             THROW_RUNTIME_ERROR("Cannot apply '/' to %s and %s", getValueTypeName(a), getValueTypeName(b));
 
@@ -717,6 +732,10 @@ ProcessResult Interpreter::run_process(Process *process)
                 PUSH(makeDouble(-a.asDouble()));
             else if (a.isBool())
                 PUSH(makeBool(!a.asBool()));
+            else if (a.isByte())
+                PUSH(makeByte(-a.asByte()));
+            else if (a.isFloat())
+                PUSH(makeFloat(-a.asFloat()));
             else
             {
                 THROW_RUNTIME_ERROR("Operand 'NEGATE' must be a number");
@@ -2130,6 +2149,64 @@ ProcessResult Interpreter::run_process(Process *process)
                     ARGS_CLEANUP();
                     PUSH(makeInt(len));
                 }
+        else if (nameString == staticNames[(int)StaticNames::FIND])
+         {
+             if (argCount != 1)
+             {
+                 runtimeError("find() expects 1 argument");
+                 return {ProcessResult::PROCESS_DONE, 0};
+             }
+
+             Value substr = PEEK();
+             if (!substr.isString())
+             {
+                 runtimeError("find() expects string argument");
+                 return {ProcessResult::PROCESS_DONE, 0};
+             }
+
+             int index = stringPool.find(str, substr.asString());
+             ARGS_CLEANUP();
+             PUSH(makeInt(index));
+            }
+            else if (nameString == staticNames[(int)StaticNames::RFIND])
+            {
+                if (argCount < 1 || argCount > 2)
+                {
+                    runtimeError("rfind() expects 1 or 2 arguments");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+
+                Value substr;
+                int startIndex = -1;  // -1 = começa do fim
+
+                if (argCount == 1)
+                {
+                    substr = PEEK();
+                }
+                else
+                {
+                    Value startVal = PEEK();
+                    substr = PEEK2();
+
+                    if (!startVal.isNumber())
+                    {
+                        runtimeError("rfind() startIndex must be number");
+                        return {ProcessResult::PROCESS_DONE, 0};
+                    }
+
+                    startIndex = (int)startVal.asNumber();
+                }
+
+                if (!substr.isString())
+                {
+                    runtimeError("rfind() expects string argument");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+
+                int result = stringPool.rfind(str, substr.asString(), startIndex);
+                ARGS_CLEANUP();
+                PUSH(makeInt(result));
+            }
                 else if (nameString == staticNames[(int)StaticNames::UPPER])
                 {
                     ARGS_CLEANUP();
@@ -2183,6 +2260,55 @@ ProcessResult Interpreter::run_process(Process *process)
                     ARGS_CLEANUP();
                     PUSH(makeString(result));
                 }
+                else if (nameString == staticNames[(int)StaticNames::SUBSTR])
+        {
+            if (argCount < 1 || argCount > 2)
+            {
+                runtimeError("substr() expects (start) or (start, length)");
+                return {ProcessResult::PROCESS_DONE, 0};
+            }
+
+            int strLen = str->length();
+            int start  = 0;
+            int length = strLen;
+
+            if (argCount == 1)
+            {
+                Value startVal = PEEK();
+                if (!startVal.isNumber())
+                {
+                    runtimeError("substr() start must be number");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+                start = (int)startVal.asNumber();
+            }
+            else
+            {
+                Value startVal = PEEK2();
+                Value lenVal   = PEEK();
+                if (!startVal.isNumber() || !lenVal.isNumber())
+                {
+                    runtimeError("substr() expects number arguments");
+                    return {ProcessResult::PROCESS_DONE, 0};
+                }
+                start  = (int)startVal.asNumber();
+                length = (int)lenVal.asNumber();
+            }
+
+            // suporte a índices negativos estilo Python
+            if (start < 0) start = strLen + start;
+            if (start < 0) start = 0;
+            if (start > strLen) start = strLen;
+
+            int end = start + length;
+            if (end > strLen) end = strLen;
+            if (end < start)  end = start;
+
+            String *result = stringPool.substring(str, (uint32_t)start, (uint32_t)end);
+            ARGS_CLEANUP();
+            PUSH(makeString(result));
+        
+        }
                 else if (nameString == staticNames[(int)StaticNames::REPLACE])
                 {
                     if (argCount != 2)
@@ -3735,8 +3861,14 @@ ProcessResult Interpreter::run_process(Process *process)
                             return {ProcessResult::PROCESS_DONE, 0};
                         }
 
-                        String *str = createString((const char *)(buf->data + buf->cursor),
-                                                   (uint32)length);
+                        const char *data_ptr = (const char *)(buf->data + buf->cursor);
+                        size_t actual_length = 0;
+                        while (actual_length < (size_t)length && data_ptr[actual_length] != '\0')
+                        {
+                            actual_length++;
+                        }
+
+                        String *str = createString(data_ptr, (uint32)actual_length);
 
                         buf->cursor += length;
 

@@ -18,49 +18,57 @@ file(GLOB SOURCES "src/*.cpp")
 # ============================================
 # Targets
 # ============================================
-add_library(libbu SHARED ${SOURCES})
+option(BU_BUILD_SHARED_LIBS "Build libbu as a shared library" OFF)
 
-set(BUGL_VERSION_STRING "${CMAKE_PROJECT_VERSION}")
-if(NOT BUGL_VERSION_STRING)
-    set(BUGL_VERSION_STRING "${PROJECT_VERSION}")
-endif()
-if(NOT BUGL_VERSION_STRING)
-    set(BUGL_VERSION_STRING "0.0.0")
+set(BU_LIBRARY_TYPE STATIC)
+if(BU_BUILD_SHARED_LIBS)
+    set(BU_LIBRARY_TYPE SHARED)
 endif()
 
-set(BUGL_VERSION_GIT "unknown")
+add_library(libbu ${BU_LIBRARY_TYPE} ${SOURCES})
+
+set(BU_VERSION_STRING "${CMAKE_PROJECT_VERSION}")
+if(NOT BU_VERSION_STRING)
+    set(BU_VERSION_STRING "${PROJECT_VERSION}")
+endif()
+if(NOT BU_VERSION_STRING)
+    set(BU_VERSION_STRING "0.0.0")
+endif()
+
+set(BU_VERSION_GIT "unknown")
 find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} rev-parse --short HEAD
-        OUTPUT_VARIABLE BUGL_VERSION_GIT
+        OUTPUT_VARIABLE BU_VERSION_GIT
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
-    if(NOT BUGL_VERSION_GIT)
-        set(BUGL_VERSION_GIT "unknown")
+    if(NOT BU_VERSION_GIT)
+        set(BU_VERSION_GIT "unknown")
     endif()
 endif()
 
 target_compile_definitions(libbu PUBLIC
-    BUGL_VERSION_STRING=\"${BUGL_VERSION_STRING}\"
-    BUGL_VERSION_GIT=\"${BUGL_VERSION_GIT}\"
+    BU_VERSION_STRING=\"${BU_VERSION_STRING}\"
+    BU_VERSION_GIT=\"${BU_VERSION_GIT}\"
 )
 
-# Build libbu as the shared runtime used by the host and plugins.
+# Build libbu as a static library by default, with an opt-in shared build.
 set_target_properties(libbu PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     DEBUG_POSTFIX ""
     PREFIX ""
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
 )
 
-if(WIN32)
+if(WIN32 AND BU_BUILD_SHARED_LIBS)
     set_target_properties(libbu PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
-if(MINGW)
+if(MINGW AND BU_BUILD_SHARED_LIBS)
     target_link_options(libbu PRIVATE -shared-libgcc)
 endif()
 
@@ -181,6 +189,7 @@ endif()
 # ============================================
 message(STATUS "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "libbu type: ${BU_LIBRARY_TYPE}")
 message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "Output: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

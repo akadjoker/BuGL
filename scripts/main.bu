@@ -3,18 +3,18 @@
 // using Box2D;
 
 
-import SDL;
-using SDL;
+// import SDL;
+// using SDL;
 
 
-import OpenGl;
-using OpenGl;
+// import OpenGl;
+// using OpenGl;
 
-import GLM;
-using GLM;
+// import GLM;
+// using GLM;
 
-import STB;
-using STB;
+// import STB;
+// using STB;
 
  
 
@@ -107,4 +107,32 @@ using STB;
 //include "demo_micropather.bu";
 //include "demo_recast_tilecache.bu";
 
-include "demo_jolt_tank_csm_particles.bu";
+//include "demo_jolt_tank_csm_particles.bu";
+
+//include "demo_water_legacy.bu";
+
+//include "demo_water_legacy_arrays.bu";
+
+
+//include "demo_md2_legacy.bu";
+
+//include "demo_md3_legacy.bu";
+
+//include "demo_md3_legacy_model.bu";
+
+//include "demo_bsp_lagacy.bu";
+
+//include "demo_b3d_legacy.bu";
+
+//include "demo_iqm_legacy.bu";
+
+include "demo_b3d_collide.bu";
+
+// var file_exts = [".png", ".jpg", ".jpeg", ".bmp", ".tga", ".png"];
+// var baseDir = "../assets/textures/";  // pasta base onde procurar texturas
+// var name = "kontena";  // nome da textura a procurar (sem extensão)
+// for (var i = 0; i < len(file_exts); i =i + 1)
+// {
+//     var p = baseDir + name + file_exts[i];
+//     print(p);
+// }

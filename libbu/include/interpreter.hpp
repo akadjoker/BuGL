@@ -68,10 +68,12 @@ enum class StaticNames : uint8 {
     VALUES,
 
     // === STRING ===
+    RFIND,
     UPPER,
     LOWER,
     CONCAT,       // Já existia (agora serve para String e Array)
     SUB,
+    SUBSTR,        // Novo (alias para sub)
     REPLACE,
     AT,
     CONTAINS,     //  String e Array)

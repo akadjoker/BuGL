@@ -1,0 +1,373 @@
+// ================================================================
+// Demo: Quake 3 BSP renderer in BuLang
+//
+// Controls:
+//   - Mouse: look around
+//   - W/A/S/D: move
+//   - F: toggle brute force / BSP traversal
+//   - ESC: quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+
+include "lib_camera_fps.bu";
+include "lib_q3bsp.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.22, 0.26, 0.30, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+def drawAxes(size)
+{
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(2.0);
+    glBegin(GL_LINES);
+    glColor3f(1.0, 0.2, 0.2); glVertex3f(0,0,0); glVertex3f(size,0,0);
+    glColor3f(0.2, 1.0, 0.2); glVertex3f(0,0,0); glVertex3f(0,size,0);
+    glColor3f(0.2, 0.6, 1.0); glVertex3f(0,0,0); glVertex3f(0,0,size);
+    glEnd();
+    glLineWidth(1.0);
+}
+
+// ============================================================
+// Setup
+// ============================================================
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+SetGLAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+if (!SDL.Init("BuGL - Q3 BSP", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.07, 0.10, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+// ============================================================
+// Load BSP
+// ============================================================
+
+var bsp = Q3BSP();
+
+// tenta vários caminhos comuns
+var bspPath = nil;
+var candidates = [
+    "../assets/maps/level.bsp",
+    "assets/maps/level.bsp"
+];
+
+for (var i = 0; i < len(candidates); i += 1)
+{
+    if (path.exists(candidates[i]))
+    {
+        bspPath = candidates[i];
+        break;
+    }
+}
+
+var bspLoaded = false;
+if (bspPath != nil)
+{
+    bspLoaded = bsp.load(bspPath,"../assets/"); // tenta carregar texturas na pasta assets/textures/
+    if (!bspLoaded) print("Failed to load BSP: " + bspPath);
+}
+else
+{
+    print("No BSP found. Place a .bsp in assets/maps/");
+}
+
+// ============================================================
+// Camera
+// ============================================================
+
+var cam = CameraFPS(50.0, 0.2, -10.0); // Posição inicial (X, Y, Z)
+cam.lookOnly = true;          // só mouse look, movimento pelo slide
+//cam.alwaysCapture = true;
+cam.sensitivity = 0.12;
+cam.speed = 8.0;
+
+var velY = 0.0;
+var onGround = false;
+var GRAVITY = -20.0;
+var PLAYER_RADIUS = 0.35;
+var PLAYER_HALF_HEIGHT = 0.45;   // total height = halfHeight*2 + radius*2 ≈ 1.7 + 0.7 = 2.4m... 
+
+
+var player = Q3Player();
+player.spawn(50.0, 0.2, -10.0);
+
+//SetMouseRelative(true);
+
+// ============================================================
+// State
+// ============================================================
+
+var useBSPTraversal = true;
+var showGrid        = true;
+var showAxes        = true;
+var fpsSmooth       = 60.0;
+var bspScale        = 0.03;
+var wireframe       = false;
+
+print("Q3 BSP demo ready");
+print("F: toggle BSP traversal  G: grid  W: wireframe  ESC: quit");
+
+// ============================================================
+// Main loop
+// ============================================================
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05)   dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+
+    if (IsKeyPressed(KEY_F))
+    {
+        useBSPTraversal = !useBSPTraversal;
+        print("BSP traversal: " + useBSPTraversal);
+    }
+    if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
+    if (IsKeyPressed(KEY_P))
+    {
+        wireframe = !wireframe;
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+ 
+
+    // // 1 — só mouse look (sem mover)
+    cam.update(dt);  // mantém o yaw/pitch mas vamos ignorar o movimento
+
+    // // 2 — recalcula o forward/right a partir do yaw da câmera
+    // var fwd = cam.getForward();
+    // var right = cam.getRight();
+
+    // // 3 — input de movimento
+    // var moveX = 0.0; var moveY = 0.0; var moveZ = 0.0;
+    // var mv = cam.speed * dt;
+    // if (IsKeyDown(KEY_LEFT_SHIFT)) mv = mv * 2.0;
+
+    // if (IsKeyDown(KEY_W)) { moveX += fwd.x * mv; moveZ += fwd.z * mv; }
+    // if (IsKeyDown(KEY_S)) { moveX -= fwd.x * mv; moveZ -= fwd.z * mv; }
+    // if (IsKeyDown(KEY_A)) { moveX += right.x * mv; moveZ += right.z * mv; }
+    // if (IsKeyDown(KEY_D)) { moveX -= right.x * mv; moveZ -= right.z * mv; }
+
+    // // gravidade
+    //  velY += GRAVITY * dt;
+    //  moveY = velY * dt;
+
+    // // 4 — slide move (máx 3 iterações)
+    // var dx = moveX; 
+    // var dy = moveY; 
+    // var dz = moveZ;
+
+    // for (var iter = 0; iter < 3; iter += 1)
+    // {
+    //     var (frac,nx,ny,nz,hit) = bsp.traceCapsule(cam.x, cam.y, cam.z, dx, dy, dz, PLAYER_RADIUS, PLAYER_HALF_HEIGHT);
+
+    //     cam.x += dx * frac;
+    //     cam.y += dy * frac;
+    //     cam.z += dz * frac;
+
+    //     print("trace: frac=" , frac, " normal=(", nx, ny, nz, ") hit=", hit);
+
+    //     if (!hit) break;
+
+    //     // slide — remove componente normal
+    //     var dot = dx * nx + dy * ny + dz * nz;
+    //     dx -= nx * dot;
+    //     dy -= ny * dot;
+    //     dz -= nz * dot;
+
+    //     // chão
+    //     if (ny > 0.7)
+    //     {
+    //         velY = 0.0;
+    //         onGround = true;
+    //     }
+    // }
+
+    // // 5 — jump
+    // if (onGround && IsKeyPressed(KEY_SPACE))
+    // {
+    //     velY = 6.0;
+    //     onGround = false;
+    // }
+
+    player.update(dt, bsp, cam);
+
+
+
+    if (IsResized())
+        glViewport(0, 0, GetWidth(), GetHeight());
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 70.0 * deg2rad, 0.05, 2000.0);
+    var eye  = cam.getEye();
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+    // Lighting simples
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glLightfv(GL_LIGHT0, GL_POSITION, [0.5, 1.0, 0.8, 0.0]);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,  [1.0, 0.95, 0.9, 1.0]);
+    glLightfv(GL_LIGHT0, GL_AMBIENT,  [0.3, 0.3,  0.3, 1.0]);
+
+    if (showGrid) drawGrid(-0.02, 50, 2.0);
+    if (showAxes) drawAxes(3.0);
+
+    // Render BSP
+    if (bspLoaded)
+    {
+        bsp.scale = bspScale;
+
+        if (useBSPTraversal)
+            bsp.drawFromCamera(eye.x, eye.y, eye.z);
+        else
+            bsp.draw();
+    }
+    else
+    {
+        // Placeholder se não há BSP
+        glDisable(GL_LIGHTING);
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.4, 0.5, 0.6);
+        glBegin(GL_QUADS);
+        glVertex3f(-5, 0, -5); glVertex3f(5, 0, -5);
+        glVertex3f( 5, 0,  5); glVertex3f(-5, 0,  5);
+        glEnd();
+        glColor3f(0.3, 0.6, 0.4);
+        glBegin(GL_QUADS);
+        glVertex3f(-5, 0, -5); glVertex3f(-5, 8, -5);
+        glVertex3f( 5, 8, -5); glVertex3f( 5, 0, -5);
+        glEnd();
+    }
+
+    glDisable(GL_LIGHTING);
+
+    // ============================================================
+    // ImGui panel
+    // ============================================================
+
+    var panel = ImGui.Begin("Q3 BSP Viewer");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Separator();
+
+        if (bspLoaded)
+        {
+            ImGui.Text("map: " + bspPath);
+            ImGui.Text("faces:     " + bsp.faceCount());
+            ImGui.Text("vertices:  " + bsp.vertexCount());
+            ImGui.Text("textures:  " + bsp.textureCount());
+            ImGui.Text("lightmaps: " + bsp.lightmapCount());
+            ImGui.Separator();
+
+            var (chBSP, nextBSP) = ImGui.Checkbox("BSP traversal (F)", useBSPTraversal);
+            if (chBSP) useBSPTraversal = nextBSP;
+
+            var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
+            if (chGrid) showGrid = nextGrid;
+
+            var (chWire, nextWire) = ImGui.Checkbox("Wireframe (W)", wireframe);
+            if (chWire)
+            {
+                wireframe = nextWire;
+                if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            }
+
+            var (chScale, nextScale) = ImGui.SliderFloat("Scale", bspScale, 0.005, 0.1, "%.4f");
+            if (chScale) bspScale = nextScale;
+
+            ImGui.Separator();
+            ImGui.Text("Camera:");
+            ImGui.Text("  eye: " + int(eye.x*100)/100.0 + ", " +
+                                   int(eye.y*100)/100.0 + ", " +
+                                   int(eye.z*100)/100.0);
+
+          
+        }
+        else
+        {
+            ImGui.Text("No BSP loaded!");
+            ImGui.Text("Place a .bsp in:");
+            ImGui.Text("  assets/maps/");
+            ImGui.Text("  ../assets/maps/");
+            ImGui.Separator();
+            ImGui.Text("Supported maps:");
+            ImGui.Text("  q3dm1.bsp");
+            ImGui.Text("  q3dm7.bsp");
+            ImGui.Text("  q3tourney2.bsp");
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Controls:");
+        ImGui.Text("  Mouse: look");
+        ImGui.Text("  W/A/S/D: move");
+        ImGui.Text("  F: BSP traversal");
+        ImGui.Text("  G: grid");
+        ImGui.Text("  W: wireframe");
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+// ============================================================
+// Cleanup
+// ============================================================
+
+if (bspLoaded) bsp.destroy();
+Close();

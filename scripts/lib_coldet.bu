@@ -1,0 +1,497 @@
+// ================================================================
+// lib_coldet.bu — Ellipsoid vs Triangle collision + sliding
+// Ported from Haxe/Java Coldet by Luis Santos AKA DJOKER
+//
+// Usage:
+//   include "lib_coldet.bu";
+//
+//   var col = collideEllipsoidAndSlide(
+//       triangles,   // array of floats: [x0,y0,z0, x1,y1,z1, x2,y2,z2, ...]
+//       position,    // Vector3 world position
+//       radius,      // Vector3 ellipsoid radius
+//       velocity,    // Vector3 movement this frame
+//       gravity,     // Vector3 gravity (e.g. 0,-9.8,0)
+//       0.005        // sliding speed / skin width
+//   );
+//   position = col.finalPosition;
+//   var onGround = !col.falling;
+// ================================================================
+
+using math;
+
+// ============================================================
+// CollisionData — passed through recursion
+// ============================================================
+
+class CollisionData
+{
+    var eRadius;            // Vector3 — ellipsoid radius
+    var velocity;           // Vector3 — current velocity in eSpace
+    var normalizedVelocity; // Vector3
+    var basePoint;          // Vector3 — current position in eSpace
+
+    var foundCollision;
+    var nearestDistance;
+    var intersectionPoint;  // Vector3
+
+    var triangleHits;
+    var slidingSpeed;
+
+    // world-space inputs/outputs
+    var R3Position;         // Vector3
+    var R3Velocity;         // Vector3
+    var finalPosition;      // Vector3
+    var hitPosition;        // Vector3
+    var falling;
+
+    // reused plane data (avoid alloc per triangle)
+    var planeNormal;        // Vector3
+    var planeD;             // float
+
+    def init()
+    {
+        self.eRadius            = Vector3(1.0, 1.0, 1.0);
+        self.velocity           = Vector3(0.0, 0.0, 0.0);
+        self.normalizedVelocity = Vector3(0.0, 0.0, 0.0);
+        self.basePoint          = Vector3(0.0, 0.0, 0.0);
+        self.foundCollision     = false;
+        self.nearestDistance    = 1e30;
+        self.intersectionPoint  = Vector3(0.0, 0.0, 0.0);
+        self.triangleHits       = 0;
+        self.slidingSpeed       = 0.005;
+        self.R3Position         = Vector3(0.0, 0.0, 0.0);
+        self.R3Velocity         = Vector3(0.0, 0.0, 0.0);
+        self.finalPosition      = Vector3(0.0, 0.0, 0.0);
+        self.hitPosition        = Vector3(0.0, 0.0, 0.0);
+        self.falling            = true;
+        self.planeNormal        = Vector3(0.0, 1.0, 0.0);
+        self.planeD             = 0.0;
+    }
+}
+
+// ============================================================
+// Math helpers
+// ============================================================
+
+// Returns (root, found)
+def getLowestRoot(a, b, c, maxR)
+{
+    var det = b * b - 4.0 * a * c;
+    if (det < 0.0) return (0.0, false);
+
+    var sqrtD = sqrt(det);
+    var r1    = (-b - sqrtD) / (2.0 * a);
+    var r2    = (-b + sqrtD) / (2.0 * a);
+
+    if (r1 > r2) { var tmp = r1; r1 = r2; r2 = tmp; }
+
+    if (r1 > 0.0 && r1 < maxR) return (r1, true);
+    if (r2 > 0.0 && r2 < maxR) return (r2, true);
+
+    return (0.0, false);
+}
+
+def vec3Dot(ax, ay, az, bx, by, bz)
+{
+    return ax*bx + ay*by + az*bz;
+}
+
+def vec3LenSq(x, y, z)
+{
+    return x*x + y*y + z*z;
+}
+
+// Returns (nx, ny, nz, d) — plane from 3 points
+def planeFromPoints(ax, ay, az,  bx, by, bz,  cx, cy, cz)
+{
+    var ex = bx-ax; var ey = by-ay; var ez = bz-az;
+    var fx = cx-ax; var fy = cy-ay; var fz = cz-az;
+    var nx = ey*fz - ez*fy;
+    var ny = ez*fx - ex*fz;
+    var nz = ex*fy - ey*fx;
+    var len = sqrt(nx*nx + ny*ny + nz*nz);
+    if (len > 0.000001) { nx=nx/len; ny=ny/len; nz=nz/len; }
+    var d = -(nx*ax + ny*ay + nz*az);
+    return (nx, ny, nz, d);
+}
+
+def signedDist(nx, ny, nz, d, px, py, pz)
+{
+    return nx*px + ny*py + nz*pz + d;
+}
+
+// Barycentric point-in-triangle
+def checkPointInTriangle(px, py, pz,
+                          ax, ay, az,
+                          bx, by, bz,
+                          cx, cy, cz)
+{
+    var v0x=cx-ax; var v0y=cy-ay; var v0z=cz-az;
+    var v1x=bx-ax; var v1y=by-ay; var v1z=bz-az;
+    var v2x=px-ax; var v2y=py-ay; var v2z=pz-az;
+
+    var d00 = vec3Dot(v0x,v0y,v0z, v0x,v0y,v0z);
+    var d01 = vec3Dot(v0x,v0y,v0z, v1x,v1y,v1z);
+    var d02 = vec3Dot(v0x,v0y,v0z, v2x,v2y,v2z);
+    var d11 = vec3Dot(v1x,v1y,v1z, v1x,v1y,v1z);
+    var d12 = vec3Dot(v1x,v1y,v1z, v2x,v2y,v2z);
+
+    var denom = d00*d11 - d01*d01;
+    if (abs(denom) < 0.000001) return false;
+    var inv = 1.0 / denom;
+    var u   = (d11*d02 - d01*d12) * inv;
+    var v   = (d00*d12 - d01*d02) * inv;
+
+    return (u > 0.0) && (v > 0.0) && (u + v < 1.0);
+}
+
+// ============================================================
+// Core triangle test — modifies colData in place
+// ============================================================
+
+def testTriangle(col,
+                 p1x, p1y, p1z,
+                 p2x, p2y, p2z,
+                 p3x, p3y, p3z)
+{
+    // build plane
+    var (nx, ny, nz, pd) = planeFromPoints(p1x,p1y,p1z, p2x,p2y,p2z, p3x,p3y,p3z);
+
+    // back-face cull (only collide front faces)
+    var ndotv = vec3Dot(nx,ny,nz,
+                        col.normalizedVelocity.x,
+                        col.normalizedVelocity.y,
+                        col.normalizedVelocity.z);
+    if (ndotv > 0.0) return false;
+
+    var bx = col.basePoint.x;
+    var by = col.basePoint.y;
+    var bz = col.basePoint.z;
+    var vx = col.velocity.x;
+    var vy = col.velocity.y;
+    var vz = col.velocity.z;
+
+    var signedDist0 = signedDist(nx,ny,nz,pd, bx,by,bz);
+    var normalDotVel = vec3Dot(nx,ny,nz, vx,vy,vz);
+
+    var t0 = 0.0;
+    var embeddedInPlane = false;
+
+    if (normalDotVel == 0.0)
+    {
+        if (abs(signedDist0) >= 1.0) return false;
+        embeddedInPlane = true;
+        t0 = 0.0;
+    }
+    else
+    {
+        t0 = (-1.0 - signedDist0) / normalDotVel;
+        var t1 = ( 1.0 - signedDist0) / normalDotVel;
+        if (t0 > t1) { var tmp=t0; t0=t1; t1=tmp; }
+        if (t0 > 1.0 || t1 < 0.0) return false;
+        t0 = clamp(t0, 0.0, 1.0);
+    }
+
+    var cpx = 0.0; var cpy = 0.0; var cpz = 0.0;
+    var found = false;
+    var t     = 1.0;
+
+    if (!embeddedInPlane)
+    {
+        // plane intersection point
+        var pix = (bx - nx) + vx * t0;
+        var piy = (by - ny) + vy * t0;
+        var piz = (bz - nz) + vz * t0;
+
+        if (checkPointInTriangle(pix,piy,piz,
+                                  p1x,p1y,p1z,
+                                  p2x,p2y,p2z,
+                                  p3x,p3y,p3z))
+        {
+            found = true;
+            t     = t0;
+            cpx   = pix; cpy = piy; cpz = piz;
+        }
+    }
+
+    if (!found)
+    {
+        var velLenSq = vec3LenSq(vx,vy,vz);
+        var a = velLenSq;
+        var b = 0.0; var c = 0.0;
+
+        // vertex p1
+        b = 2.0 * vec3Dot(vx,vy,vz, bx-p1x, by-p1y, bz-p1z);
+        c = vec3LenSq(p1x-bx, p1y-by, p1z-bz) - 1.0;
+        var (r, ok) = getLowestRoot(a, b, c, t);
+        if (ok) { t=r; found=true; cpx=p1x; cpy=p1y; cpz=p1z; }
+
+        // vertex p2
+        b = 2.0 * vec3Dot(vx,vy,vz, bx-p2x, by-p2y, bz-p2z);
+        c = vec3LenSq(p2x-bx, p2y-by, p2z-bz) - 1.0;
+        var (r, ok) = getLowestRoot(a, b, c, t);
+        if (ok) { t=r; found=true; cpx=p2x; cpy=p2y; cpz=p2z; }
+
+        // vertex p3
+        b = 2.0 * vec3Dot(vx,vy,vz, bx-p3x, by-p3y, bz-p3z);
+        c = vec3LenSq(p3x-bx, p3y-by, p3z-bz) - 1.0;
+        var (r, ok) = getLowestRoot(a, b, c, t);
+        if (ok) { t=r; found=true; cpx=p3x; cpy=p3y; cpz=p3z; }
+
+        // edge p1-p2
+        var (t, found, cpx, cpy, cpz) = testEdge(a, t, found, cpx, cpy, cpz,
+            vx,vy,vz, bx,by,bz, velLenSq,
+            p1x,p1y,p1z, p2x,p2y,p2z);
+
+        // edge p2-p3
+        var (t, found, cpx, cpy, cpz) = testEdge(a, t, found, cpx, cpy, cpz,
+            vx,vy,vz, bx,by,bz, velLenSq,
+            p2x,p2y,p2z, p3x,p3y,p3z);
+
+        // edge p3-p1
+        var (t, found, cpx, cpy, cpz) = testEdge(a, t, found, cpx, cpy, cpz,
+            vx,vy,vz, bx,by,bz, velLenSq,
+            p3x,p3y,p3z, p1x,p1y,p1z);
+    }
+
+    if (found)
+    {
+        var velLen  = sqrt(vec3LenSq(vx,vy,vz));
+        var distCol = t * velLen;
+
+        if (!col.foundCollision || distCol < col.nearestDistance)
+        {
+            col.intersectionPoint.x = cpx;
+            col.intersectionPoint.y = cpy;
+            col.intersectionPoint.z = cpz;
+            col.nearestDistance     = distCol;
+            col.foundCollision      = true;
+            col.triangleHits       += 1;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Edge test helper — returns (t, found, cpx, cpy, cpz)
+def testEdge(a, t, found, cpx, cpy, cpz,
+             vx,vy,vz, bx,by,bz, velLenSq,
+             eax,eay,eaz, ebx,eby,ebz)
+{
+    var edx=ebx-eax; var edy=eby-eay; var edz=ebz-eaz;
+    var btx=eax-bx;  var bty=eay-by;  var btz=eaz-bz;
+
+    var edLenSq    = vec3LenSq(edx,edy,edz);
+    var edDotVel   = vec3Dot(edx,edy,edz, vx,vy,vz);
+    var edDotBase  = vec3Dot(edx,edy,edz, btx,bty,btz);
+
+    var ea = edLenSq * (-velLenSq) + edDotVel * edDotVel;
+    var eb = edLenSq * (2.0 * vec3Dot(vx,vy,vz, btx,bty,btz)) - 2.0 * edDotVel * edDotBase;
+    var ec = edLenSq * (1.0 - vec3LenSq(btx,bty,btz)) + edDotBase * edDotBase;
+
+    var (r, ok) = getLowestRoot(ea, eb, ec, t);
+    if (ok)
+    {
+        var f = (edDotVel * r - edDotBase) / edLenSq;
+        if (f >= 0.0 && f <= 1.0)
+        {
+            t    = r;
+            found = true;
+            cpx  = eax + edx * f;
+            cpy  = eay + edy * f;
+            cpz  = eaz + edz * f;
+        }
+    }
+    return (t, found, cpx, cpy, cpz);
+}
+
+// ============================================================
+// Recursive sliding collide — returns new position in eSpace
+// ============================================================
+
+def collideRecurse(depth, col, tris, px, py, pz, vx, vy, vz)
+{
+    if (depth > 3) return (px, py, pz);
+
+    var vcd = col.slidingSpeed;
+
+    col.velocity.x           = vx; col.velocity.y = vy; col.velocity.z = vz;
+    var vlen                  = sqrt(vx*vx+vy*vy+vz*vz);
+    if (vlen > 0.000001) {
+        col.normalizedVelocity.x = vx/vlen;
+        col.normalizedVelocity.y = vy/vlen;
+        col.normalizedVelocity.z = vz/vlen;
+    }
+    col.basePoint.x           = px; col.basePoint.y = py; col.basePoint.z = pz;
+    col.foundCollision        = false;
+    col.nearestDistance       = 1e30;
+
+    // test all triangles
+    var numTris = len(tris) / 9;
+    for (var i = 0; i < numTris; i += 1)
+    {
+        var base = i * 9;
+        testTriangle(col,
+            tris[base+0], tris[base+1], tris[base+2],
+            tris[base+3], tris[base+4], tris[base+5],
+            tris[base+6], tris[base+7], tris[base+8]);
+    }
+
+    if (!col.foundCollision)
+        return (px+vx, py+vy, pz+vz);
+
+    // destination
+    var dx = px + vx;
+    var dy = py + vy;
+    var dz = pz + vz;
+
+    var nbx = px; var nby = py; var nbz = pz;
+
+    if (col.nearestDistance >= vcd)
+    {
+        // move close to hit
+        var vl = sqrt(vx*vx+vy*vy+vz*vz);
+        var sc = col.nearestDistance - vcd;
+        if (vl > 0.000001)
+        {
+            nbx = px + (vx/vl) * sc;
+            nby = py + (vy/vl) * sc;
+            nbz = pz + (vz/vl) * sc;
+        }
+
+        // adjust intersection point
+        var nx2 = vx/vl; var ny2 = vy/vl; var nz2 = vz/vl;
+        col.intersectionPoint.x -= vcd * nx2;
+        col.intersectionPoint.y -= vcd * ny2;
+        col.intersectionPoint.z -= vcd * nz2;
+    }
+
+    // sliding plane
+    var spnx = nbx - col.intersectionPoint.x;
+    var spny = nby - col.intersectionPoint.y;
+    var spnz = nbz - col.intersectionPoint.z;
+    var spnl = sqrt(spnx*spnx+spny*spny+spnz*spnz);
+    if (spnl > 0.000001) { spnx=spnx/spnl; spny=spny/spnl; spnz=spnz/spnl; }
+
+    // signed dist of destination to sliding plane
+    var spd = -(spnx*col.intersectionPoint.x +
+                spny*col.intersectionPoint.y +
+                spnz*col.intersectionPoint.z);
+    var d   = spnx*dx + spny*dy + spnz*dz + spd;
+
+    // project destination onto sliding plane
+    var ndx = dx - spnx*d;
+    var ndy = dy - spny*d;
+    var ndz = dz - spnz*d;
+
+    // new velocity = projected dest - intersection point
+    var nvx = ndx - col.intersectionPoint.x;
+    var nvy = ndy - col.intersectionPoint.y;
+    var nvz = ndz - col.intersectionPoint.z;
+
+    var nvl = sqrt(nvx*nvx+nvy*nvy+nvz*nvz);
+    if (nvl < vcd) return (nbx, nby, nbz);
+
+    return collideRecurse(depth+1, col, tris, nbx, nby, nbz, nvx, nvy, nvz);
+}
+
+// ============================================================
+// Public API
+// ============================================================
+
+// tris = flat float array [x0,y0,z0, x1,y1,z1, x2,y2,z2,  x0,y0,z0, ...]
+// returns CollisionData with finalPosition, hitPosition, falling
+
+def collideEllipsoidAndSlide(col,tris, position, radius, velocity, gravity, slidingSpeed)
+{
+    //var col = CollisionData();
+    col.eRadius.x    = radius.x;
+    col.eRadius.y    = radius.y;
+    col.eRadius.z    = radius.z;
+    col.R3Position.x = position.x;
+    col.R3Position.y = position.y;
+    col.R3Position.z = position.z;
+    col.R3Velocity.x = velocity.x;
+    col.R3Velocity.y = velocity.y;
+    col.R3Velocity.z = velocity.z;
+    col.slidingSpeed = slidingSpeed;
+    col.triangleHits = 0;
+
+    // to eSpace
+    var epx = position.x / radius.x;
+    var epy = position.y / radius.y;
+    var epz = position.z / radius.z;
+    var evx = velocity.x / radius.x;
+    var evy = velocity.y / radius.y;
+    var evz = velocity.z / radius.z;
+
+    // scale tris to eSpace
+    var eTris = [];
+    var numTris = len(tris) / 9;
+    for (var i = 0; i < numTris; i += 1)
+    {
+        var base = i * 9;
+        eTris.push(tris[base+0] / radius.x);
+        eTris.push(tris[base+1] / radius.y);
+        eTris.push(tris[base+2] / radius.z);
+        eTris.push(tris[base+3] / radius.x);
+        eTris.push(tris[base+4] / radius.y);
+        eTris.push(tris[base+5] / radius.z);
+        eTris.push(tris[base+6] / radius.x);
+        eTris.push(tris[base+7] / radius.y);
+        eTris.push(tris[base+8] / radius.z);
+    }
+
+    // velocity pass
+    var (fx, fy, fz) = collideRecurse(0, col, eTris, epx, epy, epz, evx, evy, evz);
+
+    col.falling = true;
+
+    // gravity pass
+    if (gravity.x != 0.0 || gravity.y != 0.0 || gravity.z != 0.0)
+    {
+        col.triangleHits = 0;
+        var gex = gravity.x / radius.x;
+        var gey = gravity.y / radius.y;
+        var gez = gravity.z / radius.z;
+        var (fx, fy, fz) = collideRecurse(0, col, eTris, fx, fy, fz, gex, gey, gez);
+        col.falling = (col.triangleHits == 0);
+    }
+
+    // back to world space
+    col.finalPosition.x = fx * radius.x;
+    col.finalPosition.y = fy * radius.y;
+    col.finalPosition.z = fz * radius.z;
+    col.hitPosition.x   = col.intersectionPoint.x * radius.x;
+    col.hitPosition.y   = col.intersectionPoint.y * radius.y;
+    col.hitPosition.z   = col.intersectionPoint.z * radius.z;
+
+    return col;
+}
+
+// Convenience — no gravity
+def collideEllipsoid(col,tris, position, radius, velocity, slidingSpeed)
+{
+    return collideEllipsoidAndSlide(col,tris, position, radius, velocity,Vector3(0.0, 0.0, 0.0), slidingSpeed);
+}
+
+
+// var tris = [
+//     // triângulo chão
+//     -100.0, 0.0, -100.0,
+//      100.0, 0.0, -100.0,
+//        0.0, 0.0,  100.0,
+// ];
+
+// var col = collideEllipsoidAndSlide(
+//     tris,
+//     Vector3(0.0, 5.0, 0.0),   // posição
+//     Vector3(1.0, 2.0, 1.0),   // raio elipsóide
+//     Vector3(0.0, 0.0, 1.0),   // velocidade
+//     Vector3(0.0, -0.5, 0.0),  // gravidade por frame
+//     0.005                      // skin width
+// );
+
+// position = col.finalPosition;
+// var onGround = !col.falling;

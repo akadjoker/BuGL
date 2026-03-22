@@ -1,0 +1,631 @@
+// ================================================================
+// lib_trimesh.bu — Triangle mesh collision (sphere + capsule trace)
+// Mesmo estilo do BSP mas sem árvore — força bruta com AABB broadphase
+//
+// Usage:
+//   include "lib_trimesh.bu";
+//
+//   var mesh = TriMesh();
+//   mesh.addTriangle(x0,y0,z0, x1,y1,z1, x2,y2,z2);
+//   mesh.build();  // constrói planos e AABB
+//
+//   // trace esfera
+//   var (frac, nx, ny, nz, hit) = mesh.traceSphere(px,py,pz, dx,dy,dz, radius);
+//   if (hit) position += velocity * frac;
+//
+//   // trace cápsula
+//   var (frac, nx, ny, nz, hit) = mesh.traceCapsule(px,py,pz, dx,dy,dz, radius, halfHeight);
+// ================================================================
+
+using math;
+
+// ============================================================
+// Triangle — pré-calculado em build()
+// ============================================================
+
+class TriPlane
+{
+    var ax, ay, az;   // vértice A
+    var bx, by, bz;   // vértice B
+    var cx, cy, cz;   // vértice C
+    var nx, ny, nz;   // normal
+    var dist;         // plane distance (dot(n, A))
+
+    // AABB para broadphase
+    var minX, minY, minZ;
+    var maxX, maxY, maxZ;
+
+    def init()
+    {
+        self.ax=0.0; self.ay=0.0; self.az=0.0;
+        self.bx=0.0; self.by=0.0; self.bz=0.0;
+        self.cx=0.0; self.cy=0.0; self.cz=0.0;
+        self.nx=0.0; self.ny=1.0; self.nz=0.0;
+        self.dist=0.0;
+        self.minX=0.0; self.minY=0.0; self.minZ=0.0;
+        self.maxX=0.0; self.maxY=0.0; self.maxZ=0.0;
+    }
+}
+
+// ============================================================
+// TriMesh
+// ============================================================
+
+class TriMesh
+{
+    var tris;       // array of TriPlane
+    var _raw;       // array of float [x0,y0,z0, x1,y1,z1, x2,y2,z2, ...]
+    var scale;
+    var built;
+    var _lastHitTri; 
+
+    def init()
+    {
+        self.tris  = [];
+        self._raw  = [];
+        self.scale = 1.0;
+        self.built = false;
+        self._lastHitTri = -1;
+    }
+
+    // ----------------------------------------------------------
+    // Adicionar triângulos
+    // ----------------------------------------------------------
+
+    def addTriangle(ax,ay,az, bx,by,bz, cx,cy,cz)
+    {
+        self._raw.push(ax); self._raw.push(ay); self._raw.push(az);
+        self._raw.push(bx); self._raw.push(by); self._raw.push(bz);
+        self._raw.push(cx); self._raw.push(cy); self._raw.push(cz);
+        self.built = false;
+    }
+
+    // Adiciona uma surface do B3D/IQM directamente
+    def addSurface(vertices, indices)
+    {
+        var i = 0;
+        while (i < len(indices))
+        {
+            var v0 = vertices[indices[i]];
+            var v1 = vertices[indices[i+1]];
+            var v2 = vertices[indices[i+2]];
+            self.addTriangle(
+                v0.x, v0.y, v0.z,
+                v1.x, v1.y, v1.z,
+                v2.x, v2.y, v2.z
+            );
+            i += 3;
+        }
+        self.built = false;
+    }
+
+    def addSurfaceScaled(vertices, indices, s)
+    {
+        var i = 0;
+        while (i < len(indices))
+        {
+            var v0 = vertices[indices[i]];
+            var v1 = vertices[indices[i+1]];
+            var v2 = vertices[indices[i+2]];
+            self.addTriangle(
+                v0.x*s, v0.y*s, v0.z*s,
+                v1.x*s, v1.y*s, v1.z*s,
+                v2.x*s, v2.y*s, v2.z*s
+            );
+            i += 3;
+        }
+        self.built = false;
+    }
+
+    def clear()
+    {
+        self.tris  = [];
+        self._raw  = [];
+        self.built = false;
+    }
+
+    // ----------------------------------------------------------
+    // Build — calcula planos e AABBs
+    // ----------------------------------------------------------
+
+    def build()
+    {
+        self.tris = [];
+        var numTris = len(self._raw) / 9;
+
+        for (var i = 0; i < numTris; i += 1)
+        {
+            var base = i * 9;
+            var ax = self._raw[base+0]; var ay = self._raw[base+1]; var az = self._raw[base+2];
+            var bx = self._raw[base+3]; var by = self._raw[base+4]; var bz = self._raw[base+5];
+            var cx = self._raw[base+6]; var cy = self._raw[base+7]; var cz = self._raw[base+8];
+
+            // normal via cross product
+            var ex = bx-ax; var ey = by-ay; var ez = bz-az;
+            var fx = cx-ax; var fy = cy-ay; var fz = cz-az;
+            var nx = ey*fz - ez*fy;
+            var ny = ez*fx - ex*fz;
+            var nz = ex*fy - ey*fx;
+            var nl = sqrt(nx*nx + ny*ny + nz*nz);
+            if (nl < 0.000001) continue;  // triângulo degenerado
+            nx = nx/nl; ny = ny/nl; nz = nz/nl;
+
+            var tp = TriPlane();
+            tp.ax=ax; tp.ay=ay; tp.az=az;
+            tp.bx=bx; tp.by=by; tp.bz=bz;
+            tp.cx=cx; tp.cy=cy; tp.cz=cz;
+            tp.nx=nx; tp.ny=ny; tp.nz=nz;
+            tp.dist = nx*ax + ny*ay + nz*az;
+
+            // AABB
+            tp.minX = min(ax, min(bx, cx));
+            tp.minY = min(ay, min(by, cy));
+            tp.minZ = min(az, min(bz, cz));
+            tp.maxX = max(ax, max(bx, cx));
+            tp.maxY = max(ay, max(by, cy));
+            tp.maxZ = max(az, max(bz, cz));
+
+            self.tris.push(tp);
+        }
+        self.built = true;
+    }
+
+    // ----------------------------------------------------------
+    // Broadphase AABB — esfera contra AABB do triângulo
+    // ----------------------------------------------------------
+
+    def aabbOverlapSphere(tp, px, py, pz, dx, dy, dz, radius)
+    {
+        var x0 = min(px, px+dx) - radius;
+        var y0 = min(py, py+dy) - radius;
+        var z0 = min(pz, pz+dz) - radius;
+        var x1 = max(px, px+dx) + radius;
+        var y1 = max(py, py+dy) + radius;
+        var z1 = max(pz, pz+dz) + radius;
+
+        if (x0 > tp.maxX || x1 < tp.minX) return false;
+        if (y0 > tp.maxY || y1 < tp.minY) return false;
+        if (z0 > tp.maxZ || z1 < tp.minZ) return false;
+        return true;
+    }
+
+    // ----------------------------------------------------------
+    // Trace esfera contra UM triângulo
+    // Mesmo algoritmo do BSP traceBoxBrush mas com 4 "lados":
+    //   - plano do triângulo (frente e trás)
+    //   - 3 planos das arestas (edge planes)
+    // Retorna (frac, nx, ny, nz)
+    // ----------------------------------------------------------
+
+    def traceSphereTri(px, py, pz, dx, dy, dz, radius, tp)
+    {
+        var enterFrac = -1.0;
+        var leaveFrac =  1.0;
+        var rnx = 0.0; var rny = 1.0; var rnz = 0.0;
+        var startsOut = false;
+
+        // ---- plano frontal (normal do triângulo) ----
+        var d1 = tp.nx*px + tp.ny*py + tp.nz*pz - tp.dist - radius;
+        var d2 = tp.nx*(px+dx) + tp.ny*(py+dy) + tp.nz*(pz+dz) - tp.dist - radius;
+
+        if (d1 > 0) startsOut = true;
+        if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+        if (d1 <= 0 && d2 <= 0)
+        {
+            // pode estar dentro — testa plano traseiro
+        }
+        else
+        {
+            var f = d1 / (d1 - d2);
+            if (d1 > d2) { if (f > enterFrac) { enterFrac=f; rnx=tp.nx; rny=tp.ny; rnz=tp.nz; } }
+            else         { if (f < leaveFrac)    leaveFrac = f; }
+        }
+
+        // ---- plano traseiro ----
+        d1 = -(tp.nx*px + tp.ny*py + tp.nz*pz - tp.dist) - radius;
+        d2 = -(tp.nx*(px+dx) + tp.ny*(py+dy) + tp.nz*(pz+dz) - tp.dist) - radius;
+
+        if (d1 > 0) startsOut = true;
+        if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+        if (d1 > d2 && !(d1 <= 0 && d2 <= 0))
+        {
+            var f = d1 / (d1 - d2);
+            if (f > enterFrac) { enterFrac=f; rnx=-tp.nx; rny=-tp.ny; rnz=-tp.nz; }
+        }
+        elif (d1 < d2 && !(d1 <= 0 && d2 <= 0))
+        {
+            var f = d1 / (d1 - d2);
+            if (f < leaveFrac) leaveFrac = f;
+        }
+
+        // ---- 3 edge planes ----
+        // cada edge plane: normal = cross(edge, triNormal), normalizada
+        var edges = [
+            [tp.ax,tp.ay,tp.az, tp.bx,tp.by,tp.bz],
+            [tp.bx,tp.by,tp.bz, tp.cx,tp.cy,tp.cz],
+            [tp.cx,tp.cy,tp.cz, tp.ax,tp.ay,tp.az]
+        ];
+
+        for (var ei = 0; ei < 3; ei += 1)
+        {
+            var eax = edges[ei][0]; var eay = edges[ei][1]; var eaz = edges[ei][2];
+            var ebx = edges[ei][3]; var eby = edges[ei][4]; var ebz = edges[ei][5];
+
+            var edx = ebx-eax; var edy = eby-eay; var edz = ebz-eaz;
+
+            // cross(edge, normal)
+            var enx = edy*tp.nz - edz*tp.ny;
+            var eny = edz*tp.nx - edx*tp.nz;
+            var enz = edx*tp.ny - edy*tp.nx;
+            var enl = sqrt(enx*enx + eny*eny + enz*enz);
+            if (enl < 0.000001) continue;
+            enx=enx/enl; eny=eny/enl; enz=enz/enl;
+
+            var edist = enx*eax + eny*eay + enz*eaz;
+
+            d1 = enx*px + eny*py + enz*pz - edist - radius;
+            d2 = enx*(px+dx) + eny*(py+dy) + enz*(pz+dz) - edist - radius;
+
+            if (d1 > 0) startsOut = true;
+            if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+            if (d1 <= 0 && d2 <= 0) continue;
+
+            var f = d1 / (d1 - d2);
+            if (d1 > d2) { if (f > enterFrac) { enterFrac=f; rnx=enx; rny=eny; rnz=enz; } }
+            else         { if (f < leaveFrac)    leaveFrac = f; }
+        }
+
+        if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+        if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+            return (max(0.0, enterFrac - 0.001), rnx, rny, rnz);
+
+        return (1.0, 0.0, 1.0, 0.0);
+    }
+
+    // ----------------------------------------------------------
+    // Trace cápsula contra UM triângulo
+    // Usa o Y do plano para escolher o ponto da cápsula mais próximo
+    // ----------------------------------------------------------
+
+    def traceCapsuleTri(px, py, pz, dx, dy, dz, radius, halfHeight, tp)
+{
+    var enterFrac = -1.0;
+    var leaveFrac =  1.0;
+    var rnx = 0.0; var rny = 1.0; var rnz = 0.0;
+    var startsOut = false;
+
+    // helper inline — testa um plano com os dois extremos da cápsula
+    // escolhe o extremo que está mais "para fora" do plano
+    // se ny > 0 o topo está mais longe, usa base; se ny < 0 usa topo
+    
+    // ---- plano frontal ----
+    // offset = qual extremo da cápsula está mais exposto a este plano
+    var capY0 = 0.0;  // offset para posição actual
+    var capY1 = 0.0;  // offset para posição destino
+    if (tp.ny >= 0.0)
+    {
+        capY0 = -halfHeight;  // usa base da cápsula
+        capY1 = -halfHeight;
+    }
+    else
+    {
+        capY0 =  halfHeight;  // usa topo da cápsula
+        capY1 =  halfHeight;
+    }
+
+    var d1 = tp.nx*px + tp.ny*(py+capY0) + tp.nz*pz - tp.dist - radius;
+    var d2 = tp.nx*(px+dx) + tp.ny*(py+dy+capY1) + tp.nz*(pz+dz) - tp.dist - radius;
+
+    if (d1 > 0) startsOut = true;
+    if (d1 > 0 && d2 > 0)
+    {
+        // tenta pelo lado de trás
+        d1 = -(tp.nx*px + tp.ny*(py+capY0) + tp.nz*pz - tp.dist) - radius;
+        d2 = -(tp.nx*(px+dx) + tp.ny*(py+dy+capY1) + tp.nz*(pz+dz) - tp.dist) - radius;
+        if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+        if (d1 > 0) startsOut = true;
+        if (!(d1 <= 0 && d2 <= 0))
+        {
+            var f = d1 / (d1 - d2);
+            if (d1 > d2) { if (f > enterFrac) { enterFrac=f; rnx=-tp.nx; rny=-tp.ny; rnz=-tp.nz; } }
+            else         { if (f < leaveFrac)   leaveFrac = f; }
+        }
+    }
+    elif (!(d1 <= 0 && d2 <= 0))
+    {
+        var f = d1 / (d1 - d2);
+        if (d1 > d2) { if (f > enterFrac) { enterFrac=f; rnx=tp.nx; rny=tp.ny; rnz=tp.nz; } }
+        else         { if (f < leaveFrac)   leaveFrac = f; }
+    }
+
+    // ---- 3 edge planes ----
+    var edges = [
+        [tp.ax,tp.ay,tp.az, tp.bx,tp.by,tp.bz],
+        [tp.bx,tp.by,tp.bz, tp.cx,tp.cy,tp.cz],
+        [tp.cx,tp.cy,tp.cz, tp.ax,tp.ay,tp.az]
+    ];
+
+    for (var ei = 0; ei < 3; ei += 1)
+    {
+        var eax=edges[ei][0]; var eay=edges[ei][1]; var eaz=edges[ei][2];
+        var ebx=edges[ei][3]; var eby=edges[ei][4]; var ebz=edges[ei][5];
+        var edx2=ebx-eax; var edy2=eby-eay; var edz2=ebz-eaz;
+
+        var enx = edy2*tp.nz - edz2*tp.ny;
+        var eny = edz2*tp.nx - edx2*tp.nz;
+        var enz = edx2*tp.ny - edy2*tp.nx;
+        var enl = sqrt(enx*enx + eny*eny + enz*enz);
+        if (enl < 0.000001) continue;
+        enx=enx/enl; eny=eny/enl; enz=enz/enl;
+
+        // offset da cápsula para este edge plane
+        var ecapY = 0.0;
+        if (eny >= 0.0) ecapY = -halfHeight;
+        else            ecapY =  halfHeight;
+
+        var edist = enx*eax + eny*eay + enz*eaz;
+        d1 = enx*px + eny*(py+ecapY) + enz*pz - edist - radius;
+        d2 = enx*(px+dx) + eny*(py+dy+ecapY) + enz*(pz+dz) - edist - radius;
+
+        if (d1 > 0) startsOut = true;
+        if (d1 > 0 && d2 > 0) return (1.0, 0.0, 1.0, 0.0);
+        if (d1 <= 0 && d2 <= 0) continue;
+
+        var f = d1 / (d1 - d2);
+        if (d1 > d2) { if (f > enterFrac) { enterFrac=f; rnx=enx; rny=eny; rnz=enz; } }
+        else         { if (f < leaveFrac)   leaveFrac = f; }
+    }
+
+    if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+    if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+        return (max(0.0, enterFrac - 0.001), rnx, rny, rnz);
+
+    return (1.0, 0.0, 1.0, 0.0);
+}
+
+    // ----------------------------------------------------------
+    // traceSphere — testa todos os triângulos
+    // Retorna (frac, nx, ny, nz, hit)
+    // ----------------------------------------------------------
+
+    def traceSphere(px, py, pz, dx, dy, dz, radius)
+    {
+        if (!self.built) self.build();
+
+        var s   = self.scale;
+        var qpx = px/s; var qpy = py/s; var qpz = pz/s;
+        var qdx = dx/s; var qdy = dy/s; var qdz = dz/s;
+        var qr  = radius/s;
+
+        var bestFrac = 1.0;
+        var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+        var hit = false;
+
+        for (var i = 0; i < len(self.tris); i += 1)
+        {
+            var tp = self.tris[i];
+            if (!self.aabbOverlapSphere(tp, qpx,qpy,qpz, qdx,qdy,qdz, qr)) continue;
+
+            var (frac, nx, ny, nz) = self.traceSphereTri(qpx,qpy,qpz, qdx,qdy,qdz, qr, tp);
+            if (frac < bestFrac)
+            {
+                bestFrac = frac;
+                bestNX = nx; bestNY = ny; bestNZ = nz;
+                self._lastHitTri = i;
+                hit = true;
+            }
+        }
+
+        return (bestFrac, bestNX, bestNY, bestNZ, hit);
+    }
+
+    // ----------------------------------------------------------
+    // traceCapsule — testa todos os triângulos
+    // Retorna (frac, nx, ny, nz, hit)
+    // ----------------------------------------------------------
+
+    def traceCapsule(px, py, pz, dx, dy, dz, radius, halfHeight)
+{
+    if (!self.built) self.build();
+
+    var s   = self.scale;
+    var qpx = px/s; var qpy = py/s; var qpz = pz/s;
+    var qdx = dx/s; var qdy = dy/s; var qdz = dz/s;
+    var qr  = radius/s;
+    var qhh = halfHeight/s;
+
+    var bestFrac = 1.0;
+    var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+    var hit = false;
+
+    for (var i = 0; i < len(self.tris); i += 1)
+    {
+        var tp = self.tris[i];
+
+        // AABB expandida correctamente — cápsula ocupa de (py-hh) a (py+hh)
+        var capMinY = min(qpy - qhh, qpy + qdy - qhh);
+        var capMaxY = max(qpy + qhh, qpy + qdy + qhh);
+
+        // broadphase manual mais correcto
+        var x0 = min(qpx, qpx+qdx) - qr;
+        var z0 = min(qpz, qpz+qdz) - qr;
+        var x1 = max(qpx, qpx+qdx) + qr;
+        var z1 = max(qpz, qpz+qdz) + qr;
+
+        if (x0 > tp.maxX || x1 < tp.minX) continue;
+        if (capMinY - qr > tp.maxY || capMaxY + qr < tp.minY) continue;
+        if (z0 > tp.maxZ || z1 < tp.minZ) continue;
+
+        var (frac, nx, ny, nz) = self.traceCapsuleTri(
+            qpx, qpy, qpz, qdx, qdy, qdz, qr, qhh, tp);
+
+        if (frac < bestFrac)
+        {
+            bestFrac = frac;
+            bestNX = nx; bestNY = ny; bestNZ = nz;
+            hit = true;
+            self._lastHitTri = i;
+        }
+    }
+
+    return (bestFrac, bestNX, bestNY, bestNZ, hit);
+}
+
+    // ----------------------------------------------------------
+    // moveAndSlide — move + slide em 3 iterações (como o BSP)
+    // Retorna (newPx, newPy, newPz, onGround)
+    // ----------------------------------------------------------
+
+    def moveAndSlide(px, py, pz, dx, dy, dz, radius, maxIter)
+    {
+        var onGround = false;
+        for (var iter = 0; iter < maxIter; iter += 1)
+        {
+            var (frac, nx, ny, nz, hit) = self.traceSphere(px,py,pz, dx,dy,dz, radius);
+            if (!hit)
+            {
+                px += dx; py += dy; pz += dz;
+                break;
+            }
+
+            // move até ao ponto de colisão
+            px += dx * frac;
+            py += dy * frac;
+            pz += dz * frac;
+
+            if (ny > 0.7) onGround = true;
+
+            // velocidade restante
+            var remX = dx * (1.0 - frac);
+            var remY = dy * (1.0 - frac);
+            var remZ = dz * (1.0 - frac);
+
+            // projecto na sliding plane
+            var dot = remX*nx + remY*ny + remZ*nz;
+            dx = remX - nx*dot;
+            dy = remY - ny*dot;
+            dz = remZ - nz*dot;
+
+            var vl = sqrt(dx*dx + dy*dy + dz*dz);
+            if (vl < 0.001) break;
+        }
+        return (px, py, pz, onGround);
+    }
+
+    def moveAndSlideCapsule(px, py, pz, dx, dy, dz, radius, halfHeight, maxIter)
+    {
+        var onGround = false;
+        for (var iter = 0; iter < maxIter; iter += 1)
+        {
+            var (frac, nx, ny, nz, hit) = self.traceCapsule(px,py,pz, dx,dy,dz, radius, halfHeight);
+            if (!hit)
+            {
+                px += dx; py += dy; pz += dz;
+                break;
+            }
+
+            px += dx * frac;
+            py += dy * frac;
+            pz += dz * frac;
+
+            if (ny > 0.7) onGround = true;
+
+            var remX = dx * (1.0 - frac);
+            var remY = dy * (1.0 - frac);
+            var remZ = dz * (1.0 - frac);
+
+            var dot = remX*nx + remY*ny + remZ*nz;
+            dx = remX - nx*dot;
+            dy = remY - ny*dot;
+            dz = remZ - nz*dot;
+
+            var vl = sqrt(dx*dx + dy*dy + dz*dz);
+            if (vl < 0.001) break;
+        }
+        return (px, py, pz, onGround);
+    }
+
+    def draw()
+    {
+        glDisable(GL_TEXTURE_2D);
+   
+        //glDisable(GL_DEPTH_TEST);
+        glLineWidth(1.0);
+
+        glBegin(GL_LINES);
+        for (var i = 0; i < len(self.tris); i += 1)
+        {
+            var tp = self.tris[i];
+            glColor3f(0.0, 1.0, 0.0);
+            // aresta AB
+            glVertex3f(tp.ax, tp.ay, tp.az); glVertex3f(tp.bx, tp.by, tp.bz);
+            // aresta BC
+            glVertex3f(tp.bx, tp.by, tp.bz); glVertex3f(tp.cx, tp.cy, tp.cz);
+            // aresta CA
+            glVertex3f(tp.cx, tp.cy, tp.cz); glVertex3f(tp.ax, tp.ay, tp.az);
+        }
+        glEnd();
+
+      //  glEnable(GL_DEPTH_TEST);
+      glEnable(GL_TEXTURE_2D);
+ 
+    }
+
+def drawLastHit()
+{
+    if (self._lastHitTri < 0 || self._lastHitTri >= len(self.tris)) return;
+
+    glDisable(GL_TEXTURE_2D);
+
+    glDisable(GL_DEPTH_TEST);
+
+    var tp = self.tris[self._lastHitTri];
+
+    // triângulo a vermelho
+    glColor4f(1.0, 0.0, 0.0, 0.8);
+    glBegin(GL_TRIANGLES);
+    glVertex3f(tp.ax, tp.ay, tp.az);
+    glVertex3f(tp.bx, tp.by, tp.bz);
+    glVertex3f(tp.cx, tp.cy, tp.cz);
+    glEnd();
+
+    // normal a amarelo
+    var cx = (tp.ax + tp.bx + tp.cx) / 3.0;
+    var cy = (tp.ay + tp.by + tp.cy) / 3.0;
+    var cz = (tp.az + tp.bz + tp.cz) / 3.0;
+    glLineWidth(3.0);
+    glColor3f(1.0, 1.0, 0.0);
+    glBegin(GL_LINES);
+    glVertex3f(cx, cy, cz);
+    glVertex3f(cx + tp.nx * 0.5, cy + tp.ny * 0.5, cz + tp.nz * 0.5);
+    glEnd();
+    glLineWidth(1.0);
+
+    glEnable(GL_DEPTH_TEST);
+    
+    glEnable(GL_TEXTURE_2D);
+}
+
+
+    // ----------------------------------------------------------
+    // Stats
+    // ----------------------------------------------------------
+
+    def triCount() { return len(self.tris); }
+}
+
+
+// var mesh = TriMesh();
+
+// // adicionar surface do modelo
+// mesh.addSurface(model.surfaces[0].vertices, model.surfaces[0].indices);
+// mesh.build();
+
+// // no loop — mover personagem com sliding
+// var (nx, ny, nz, onGround) = mesh.moveAndSlideCapsule(
+//     px, py, pz,      // posição actual
+//     vx*dt, vy*dt, vz*dt,  // velocidade * delta
+//     0.4,             // raio
+//     0.9,             // halfHeight
+//     3                // max iterações slide
+// );

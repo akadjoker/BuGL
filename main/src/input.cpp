@@ -281,6 +281,16 @@ void Input::SetMousePosition(int x, int y)
     mousePosition = {(float)x, (float)y};
 }
 
+bool Input::SetMouseRelative(bool enabled)
+{
+    return SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE) == 0;
+}
+
+bool Input::GetMouseRelative()
+{
+    return SDL_GetRelativeMouseMode() == SDL_TRUE;
+}
+
 void Input::SetMouseOffset(int offsetX, int offsetY)
 {
     mouseOffset = {(float)offsetX, (float)offsetY};

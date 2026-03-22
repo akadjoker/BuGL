@@ -29,10 +29,22 @@ namespace ImGuiBindings
         return 1;
     }
 
+     int push_false(Interpreter *vm)
+    {
+        vm->push(vm->makeBool(false));
+        return 1;
+    }
     int push_nils(Interpreter *vm, int count)
     {
         for (int i = 0; i < count; ++i)
             vm->push(vm->makeNil());
+        return count;
+    }
+
+    int push_falses(Interpreter *vm, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            vm->push(vm->makeBool(false));
         return count;
     }
 

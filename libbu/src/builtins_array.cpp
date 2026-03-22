@@ -446,7 +446,7 @@ static int typed_get(Interpreter *vm, void *instance, int argCount, Value *args)
   int idx = (int)args[0].asNumber();
   if (idx < 0 || idx >= ta->count)
   {
-    vm->runtimeError("get() index out of bounds");
+    vm->runtimeError("get() index [%d] out of bounds [%d)", idx, ta->count);
     return 0;
   }
 
@@ -466,7 +466,7 @@ static int typed_set(Interpreter *vm, void *instance, int argCount, Value *args)
   int idx = (int)args[0].asNumber();
   if (idx < 0 || idx >= ta->count)
   {
-    vm->runtimeError("set() index out of bounds");
+    vm->runtimeError("set() index [%d] out of bounds [%d])", idx, ta->count);
     return 0;
   }
 

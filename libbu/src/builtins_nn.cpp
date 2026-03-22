@@ -283,7 +283,7 @@ static int native_nn_step(Interpreter *vm, int argCount, Value *args)
 
 #ifdef BU_ENABLE_MINIDNN
 
-#include <MiniDNN.h>
+#include "MiniDNN.h"
 #include <vector>
 #include <string>
 

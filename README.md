@@ -306,43 +306,59 @@ bugl.exe scripts/demo_jolt_tank_csm_particles.bu
 
 |             Ray Tracer             |           Bloom + HDR           |            Particles            |
 | :--------------------------------: | :-----------------------------: | :-----------------------------: |
-|   ![ray tracer](gif/raytrace.gif)  | ![bloom hdr](gif/bloom_hdr.gif) | ![particles](gif/particles.gif) |
+| <video src="gif/raytrace.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/bloom_hdr.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/particles.mp4" autoplay loop muted playsinline width="100%"></video> |
 | Reflections · refraction · Fresnel |      Multi-pass HDR + bloom     |  High-count particle rendering  |
 
 |             Ray Marching            |           Terrain           |                      Box2D                      |
 | :---------------------------------: | :-------------------------: | :---------------------------------------------: |
-| ![raymarching](gif/raymarching.gif) | ![terrain](gif/terrain.gif) | ![box2d mouse joint](gif/box2d_mouse_joint.gif) |
+| <video src="gif/raymarching.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/terrain.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/box2d_mouse_joint.mp4" autoplay loop muted playsinline width="100%"></video> |
 |            SDF + lighting           |      Procedural terrain     |              2D physics interaction             |
 
 |           ODE Car           |             ODE Fall 3D            |             Box2D Stack             |
 | :-------------------------: | :--------------------------------: | :---------------------------------: |
-| ![ode car](gif/ode_car.gif) | ![ode fall 3d](gif/ode_fall3d.gif) | ![box2d stack](gif/box2d_stack.gif) |
+| <video src="gif/ode_car.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/ode_fall3d.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/box2d_stack.mp4" autoplay loop muted playsinline width="100%"></video> |
 |         Car physics         |      3D rigid body collisions      |           Stack stability           |
 
 |              Jolt Vehicle             |               Jolt Motorcycle               |            Jolt Tank            |
 | :-----------------------------------: | :-----------------------------------------: | :-----------------------------: |
-| ![jolt vehicle](gif/jolt_vehicle.gif) | ![jolt motorcycle](gif/jolt_motorcycle.gif) | ![jolt tank](gif/jolt_tank.gif) |
+| <video src="gif/jolt_vehicle.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/jolt_motorcycle.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/jolt_tank.mp4" autoplay loop muted playsinline width="100%"></video> |
 |       Wheeled vehicle controller      |               Bike controller               |      Tracked tank + turret      |
 
 |               Portal Showcase               |               ImGui Components               |             Batch Lines             |
 | :-----------------------------------------: | :------------------------------------------: | :---------------------------------: |
-| ![showcase portal](gif/showcase_portal.gif) | ![imgui components](gif/imgui_componnts.gif) | ![batch lines](gif/batch_lines.gif) |
+| <video src="gif/showcase_portal.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/imgui_componnts.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/batch_lines.mp4" autoplay loop muted playsinline width="100%"></video> |
 |           Render-to-texture portal          |            ImGui widgets/bindings            |         2D Batch primitives         |
 
 |                 Batch 3D Primitives                 |          Tank CSM + Sparks          |              Tutor 5 Capture              |
 | :-------------------------------------------------: | :---------------------------------: | :---------------------------------------: |
-| ![batch 3d primitives](gif/batch_3d_primitives.gif) | ![tank jolt csm](gif/tank_jolt.gif) | ![tutor5 capture](gif/capture_tutor5.gif) |
+| <video src="gif/batch_3d_primitives.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/tank_jolt.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/capture_tutor5.mp4" autoplay loop muted playsinline width="100%"></video> |
 |               3D primitives with Batch              | Jolt + cascaded shadows + particles |            FPS camera tutorial            |
 
 |               OpenSteer Boids               |               OpenSteer Path              |          Steering Test          |
 | :-----------------------------------------: | :---------------------------------------: | :-----------------------------: |
-| ![opensteer boids](gif/opensteer_boids.gif) | ![opensteer path](gif/opensteer_path.gif) | ![steertest](gif/steertest.gif) |
+| <video src="gif/opensteer_boids.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/opensteer_path.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/steertest.mp4" autoplay loop muted playsinline width="100%"></video> |
 |              Flocking behaviors             |               Path following              |         Steering sandbox        |
 
 |            MicroPather Pathfinding           |        OpenSteer Showcase       |       Assimp Import       |
 | :------------------------------------------: | :-----------------------------: | :-----------------------: |
-| ![micropather pathfinding](gif/pathfind.gif) | ![opensteer](gif/opensteer.gif) | ![assimp](gif/assimp.gif) |
+| <video src="gif/pathfind.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/opensteer.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/assimp.mp4" autoplay loop muted playsinline width="100%"></video> |
 |               Grid pathfinding               |        Steering behaviors       |   Model import pipeline   |
+
+|             B3D Collision             |           IQM Animation           |             Q3 BSP Map             |
+| :-----------------------------------: | :-------------------------------: | :--------------------------------: |
+| <video src="gif/b3d_collide.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/iqm_anim.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/q3bsp.mp4" autoplay loop muted playsinline width="100%"></video> |
+|  Blitz3D models with ellipsoid slide  | CPU skinning and skeletal scaling | Quake 3 levels with collision trace|
+
+|             MD3 Animation             |           MD2 Animation           |            Water Shader            |
+| :-----------------------------------: | :-------------------------------: | :--------------------------------: |
+| <video src="gif/md3.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/md2.mp4" autoplay loop muted playsinline width="100%"></video> | <video src="gif/water.mp4" autoplay loop muted playsinline width="100%"></video> |
+|      Quake 3 character animation      |      Quake 2 character animation  |   Interactive water rendering      |
+
+|             B2D Animation             |                                   |                                    |
+| :-----------------------------------: | :-------------------------------: | :--------------------------------: |
+| <video src="gif/b2d_anim.mp4" autoplay loop muted playsinline width="100%"></video> |                                   |                                    |
+|        2D animation system            |                                   |                                    ||                                   |                                    |
+
 
 ---
 
@@ -387,4 +403,3 @@ Start here:
 * API reference: [API.md](API.md)
 * Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * License: MIT
-
