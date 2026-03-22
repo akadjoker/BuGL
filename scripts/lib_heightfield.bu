@@ -1,0 +1,558 @@
+// ================================================================
+// lib_heightfield.bu — Heightfield terrain com LOD + water level
+//
+// Baseado no GLHeightField de Leonardo Boselli (GPL)
+// Portado para BuLang
+//
+// Usage:
+//   include "lib_heightfield.bu";
+//   var terrain = HeightField();
+//   terrain.load("heightmap.png", "texture.png", 512.0, 512.0, 64.0, 0.0);
+//   // loop:
+//   terrain.render(camX, camY, camZ);
+//   var h = terrain.getHeightAt(worldX, worldZ);
+// ================================================================
+
+import OpenGl;
+using OpenGl;
+import STB;
+using STB;
+import math;
+using math;
+
+// LOD levels
+var HF_LOD_NEAR    = 0;
+var HF_LOD_NORMAL  = 1;
+var HF_LOD_FAR     = 2;
+var HF_LOD_FARTHEST = 3;
+var HF_LODS_COUNT  = 4;
+
+var HF_NEAR_DIST_FACTOR   = 0.04;
+var HF_NORMAL_DIST_FACTOR = 0.16;
+var HF_FAR_DIST_FACTOR    = 0.64;
+
+class HeightField
+{
+    // config
+    var width, depth, height;   // dimensões world
+    var waterLevel;             // -1 = sem água, > 0 = altura da água
+    var detailedTiles;          // repetição da detail texture
+
+    // heightmap
+    var hmData;                 // array de int (0-255)
+    var hmWidth, hmHeight;
+
+    // texturas
+    var texBase;                // textura principal
+    var texDetail;              // detail texture (opcional)
+    var texWater;               // textura da água (opcional)
+
+    // display lists por LOD
+    var _lodLists;              // array de GL display list IDs
+    var _waterLists;            // array de GL display list IDs (water borders)
+    var _built;
+
+    // posição
+    var posX, posY, posZ;
+    var maxRadius;
+
+    // última normal calculada (para física)
+    var _lastNX, _lastNY, _lastNZ;
+
+    // water animation
+    var waterOffset;
+    var waterSpeed;
+
+    def init()
+    {
+        self.width        = 512.0;
+        self.depth        = 512.0;
+        self.height       = 64.0;
+        self.waterLevel   = -1.0;
+        self.detailedTiles = 8;
+
+        self.hmData   = [];
+        self.hmWidth  = 0;
+        self.hmHeight = 0;
+
+        self.texBase   = 0;
+        self.texDetail = 0;
+        self.texWater  = 0;
+
+        self._lodLists   = [-1, -1, -1, -1];
+        self._waterLists = [-1, -1, -1, -1];
+        self._built      = false;
+
+        self.posX = 0.0; self.posY = 0.0; self.posZ = 0.0;
+        self.maxRadius = 0.0;
+
+        self._lastNX = 0.0; self._lastNY = 1.0; self._lastNZ = 0.0;
+
+        self.waterOffset = 0.0;
+        self.waterSpeed  = 0.02;
+    }
+
+    // ----------------------------------------------------------
+    // Load
+    // ----------------------------------------------------------
+
+    def load(hmPath, texPath, w, d, h, wl)
+    {
+        self.width      = w;
+        self.depth      = d;
+        self.height     = h;
+        self.waterLevel = wl;
+
+        if (!self._loadHeightmap(hmPath)) return false;
+        self.texBase = self._loadTexture(texPath, true);
+
+        self.maxRadius = sqrt(w*w + d*d + h*h) * 0.5;
+
+        self._build();
+
+        print("HeightField: " + self.hmWidth + "x" + self.hmHeight +
+              " world=" + w + "x" + d + " height=" + h +
+              " water=" + wl);
+        return true;
+    }
+
+    def loadDetail(detailPath, tiles)
+    {
+        self.texDetail    = self._loadTexture(detailPath, true);
+        self.detailedTiles = tiles;
+        if (self._built) self._build();  // rebuild com detail
+    }
+
+    def loadWater(waterPath)
+    {
+        self.texWater = self._loadTexture(waterPath, true);
+    }
+
+    // ----------------------------------------------------------
+    // Cria heightmap procedural
+    // ----------------------------------------------------------
+
+    def createFlat(w, d, h, mapW, mapH)
+    {
+        self.width    = w;
+        self.depth    = d;
+        self.height   = h;
+        self.hmWidth  = mapW;
+        self.hmHeight = mapH;
+        self.hmData   = [];
+        for (var i = 0; i < mapW * mapH; i += 1)
+            self.hmData.push(0);
+        self.maxRadius = sqrt(w*w + d*d + h*h) * 0.5;
+    }
+
+    def setHeightRaw(x, y, value)
+    {
+        if (x < 0 || x >= self.hmWidth)  return;
+        if (y < 0 || y >= self.hmHeight) return;
+        self.hmData[y * self.hmWidth + x] = int(clamp(value, 0.0, 255.0));
+    }
+
+    def getHeightRaw(x, y)
+    {
+        if (x < 0 || x >= self.hmWidth)  return 0;
+        if (y < 0 || y >= self.hmHeight) return 0;
+        return self.hmData[y * self.hmWidth + x];
+    }
+
+    // ----------------------------------------------------------
+    // Textura
+    // ----------------------------------------------------------
+
+    def _loadTexture(path, mipmap)
+    {
+        stbi_set_flip_vertically_on_load(0);
+        var (w, h, ch, pixels) = stbi_load(path, 4);
+        if (pixels == nil) { print("HeightField: texture not found: " + path); return 0; }
+
+        var tex = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        if (mipmap)
+        {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
+        else
+        {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        }
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return tex;
+    }
+
+    // ----------------------------------------------------------
+    // Heightmap
+    // ----------------------------------------------------------
+
+    def _loadHeightmap(path)
+    {
+        stbi_set_flip_vertically_on_load(0);
+        var (w, h, ch, pixels) = stbi_load(path, 1);
+        if (pixels == nil) return false;
+
+        self.hmWidth  = w;
+        self.hmHeight = h;
+        self.hmData   = [];
+        for (var i = 0; i < w * h; i += 1)
+            self.hmData.push(pixels[i]);
+        return true;
+    }
+
+    // ----------------------------------------------------------
+    // Build display lists (um por LOD)
+    // ----------------------------------------------------------
+
+    def _build()
+    {
+        if (self.hmWidth <= 0 || self.hmHeight <= 0) return;
+
+        // liberta listas antigas
+        for (var l = 0; l < HF_LODS_COUNT; l += 1)
+        {
+            if (self._lodLists[l] >= 0)   glDeleteLists(self._lodLists[l], 1);
+            if (self._waterLists[l] >= 0) glDeleteLists(self._waterLists[l], 1);
+            self._lodLists[l]   = -1;
+            self._waterLists[l] = -1;
+        }
+
+        var hScale    = self.height / 255.0;
+        var halfW     = self.width  * 0.5;
+        var halfD     = self.depth  * 0.5;
+        var stepUV    = 1.0 / self.hmHeight;
+
+        for (var lod = 0; lod < HF_LODS_COUNT; lod += 1)
+        {
+            var lodPow   = 1 << lod;  // 1, 2, 4, 8
+            var stepX    = self.width  * stepUV;
+            var stepZ    = self.depth  * stepUV;
+            var stepXpow = stepX * lodPow;
+            var stepZpow = stepZ * lodPow;
+
+            // ---- terrain ----
+            var listId = glGenLists(1);
+            self._lodLists[lod] = listId;
+            glNewList(listId, GL_COMPILE);
+
+            for (var y = 0; y < self.hmHeight - lodPow; y += lodPow)
+            {
+                var zz     = y * stepZ - halfD;
+                var v      = y * stepUV;
+                var baseX  = y * self.hmWidth;
+                var baseX2 = baseX + lodPow * self.hmWidth;
+                var inStrip = false;
+
+                for (var x = 0; x < self.hmWidth - lodPow; x += lodPow)
+                {
+                    var xx  = x * stepX - halfW;
+                    var u   = x * stepUV;
+                    var idx = baseX + x;
+
+                    var h0 = self.hmData[idx] * hScale;
+                    var h2 = self.hmData[baseX2 + x] * hScale;
+
+                    // skip se abaixo da água
+                    var skip = false;
+                    if (self.waterLevel >= 0.0)
+                        skip = (h0 <= self.waterLevel && h2 <= self.waterLevel);
+
+                    if (skip)
+                    {
+                        if (inStrip) { glEnd(); inStrip = false; }
+                        continue;
+                    }
+
+                    if (!inStrip) { glBegin(GL_QUAD_STRIP); inStrip = true; }
+
+                    // normal via cross product
+                    var h1  = self.hmData[idx + lodPow] * hScale;
+                    var v1x = 0.0;     var v1y = h2-h0; var v1z = stepZpow;
+                    var v2x = stepXpow; var v2y = h1-h0; var v2z = 0.0;
+                    var nx  = v1y*v2z - v1z*v2y;
+                    var ny  = v1z*v2x - v1x*v2z;
+                    var nz  = v1x*v2y - v1y*v2x;
+                    var nl  = sqrt(nx*nx + ny*ny + nz*nz);
+                    if (nl > 0.000001) { nx=nx/nl; ny=ny/nl; nz=nz/nl; }
+                    glNormal3f(nx, ny, nz);
+
+                    glTexCoord2f(u, v);
+                    glVertex3f(xx, h0, zz);
+
+                    glTexCoord2f(u, v + stepUV * lodPow);
+                    glVertex3f(xx, h2, zz + stepZpow);
+                }
+                if (inStrip) { glEnd(); inStrip = false; }
+            }
+
+            glEndList();
+
+            // ---- water border quads ----
+            if (self.waterLevel >= 0.0)
+            {
+                var wListId = glGenLists(1);
+                self._waterLists[lod] = wListId;
+                glNewList(wListId, GL_COMPILE);
+                glBegin(GL_QUADS);
+
+                for (var y = 0; y < self.hmHeight - lodPow; y += lodPow)
+                {
+                    var zz    = y * stepZ - halfD;
+                    var v     = y * stepUV;
+                    var baseX = y * self.hmWidth;
+                    var baseX2 = baseX + lodPow * self.hmWidth;
+
+                    for (var x = 0; x < self.hmWidth - lodPow; x += lodPow)
+                    {
+                        var xx  = x * stepX - halfW;
+                        var u   = x * stepUV;
+                        var idx = baseX + x;
+
+                        var h0 = self.hmData[idx] * hScale;
+                        var h1 = self.hmData[idx + lodPow] * hScale;
+                        var h2 = self.hmData[baseX2 + x] * hScale;
+                        var h3 = self.hmData[baseX2 + x + lodPow] * hScale;
+
+                        var wl = self.waterLevel;
+                        var anyAbove = (h0>wl || h1>wl || h2>wl || h3>wl);
+                        var anyBelow = (h0<wl || h1<wl || h2<wl || h3<wl);
+
+                        // só renderiza quads na transição terra/água
+                        if (!(anyAbove && anyBelow)) continue;
+
+                        var v1x=0.0; var v1y=h2-h0; var v1z=stepZpow;
+                        var v2x=stepXpow; var v2y=h1-h0; var v2z=0.0;
+                        var nx=v1y*v2z-v1z*v2y;
+                        var ny=v1z*v2x-v1x*v2z;
+                        var nz=v1x*v2y-v1y*v2x;
+                        var nl=sqrt(nx*nx+ny*ny+nz*nz);
+                        if (nl>0.000001){nx=nx/nl;ny=ny/nl;nz=nz/nl;}
+                        glNormal3f(nx, ny, nz);
+
+                        glTexCoord2f(u,           v);           glVertex3f(xx,          h0, zz);
+                        glTexCoord2f(u,              v+stepUV*lodPow); glVertex3f(xx,          h2, zz+stepZpow);
+                        glTexCoord2f(u+stepUV*lodPow, v+stepUV*lodPow); glVertex3f(xx+stepXpow, h3, zz+stepZpow);
+                        glTexCoord2f(u+stepUV*lodPow, v);               glVertex3f(xx+stepXpow, h1, zz);
+                    }
+                }
+                glEnd();
+                glEndList();
+            }
+        }
+
+        self._built = true;
+    }
+
+    // ----------------------------------------------------------
+    // Render
+    // ----------------------------------------------------------
+
+    def render(camX, camY, camZ)
+    {
+        if (!self._built) return;
+
+        // escolhe LOD por distância
+        var dx = self.posX - camX;
+        var dy = self.posY - camY;
+        var dz = self.posZ - camZ;
+        var dist2 = dx*dx + dy*dy + dz*dz;
+        var comp2 = self.maxRadius * self.maxRadius;
+
+        var lod = HF_LOD_FARTHEST;
+        if (dist2 < HF_NEAR_DIST_FACTOR   * comp2) lod = HF_LOD_NEAR;
+        elif (dist2 < HF_NORMAL_DIST_FACTOR * comp2) lod = HF_LOD_NORMAL;
+        elif (dist2 < HF_FAR_DIST_FACTOR    * comp2) lod = HF_LOD_FAR;
+
+        glPushMatrix();
+        glTranslatef(self.posX, self.posY, self.posZ);
+
+        glDisable(GL_LIGHTING);
+        glEnable(GL_TEXTURE_2D);
+        glColor3f(1.0, 1.0, 1.0);
+
+        // terrain
+        if (self.texBase > 0) glBindTexture(GL_TEXTURE_2D, self.texBase);
+        if (self._lodLists[lod] >= 0) glCallList(self._lodLists[lod]);
+
+        // water surface (plano plano na altura waterLevel)
+        if (self.waterLevel >= 0.0)
+        {
+            self.waterOffset += self.waterSpeed;
+            if (self.waterOffset > 1.0) self.waterOffset -= 1.0;
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glColor4f(0.3, 0.6, 1.0, 0.65);
+
+            if (self.texWater > 0)
+                glBindTexture(GL_TEXTURE_2D, self.texWater);
+
+            self._renderWaterPlane(lod);
+            glDisable(GL_BLEND);
+
+            // water border (transição terra/água)
+            glColor4f(0.4, 0.7, 0.5, 0.8);
+            if (self._waterLists[lod] >= 0) glCallList(self._waterLists[lod]);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glEnable(GL_LIGHTING);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+        glPopMatrix();
+    }
+
+    def _renderWaterPlane(lod)
+    {
+        var lodPow = 1 << lod;
+        var hScale = self.height / 255.0;
+        var halfW  = self.width  * 0.5;
+        var halfD  = self.depth  * 0.5;
+        var stepUV = 1.0 / self.hmHeight;
+        var stepX  = self.width  * stepUV * lodPow;
+        var stepZ  = self.depth  * stepUV * lodPow;
+        var wl     = self.waterLevel;
+        var wo     = self.waterOffset;
+
+        glNormal3f(0.0, 1.0, 0.0);
+        glBegin(GL_QUADS);
+
+        for (var y = 0; y < self.hmHeight - lodPow; y += lodPow)
+        {
+            var zz     = y * (self.depth * stepUV) - halfD;
+            var baseX  = y * self.hmWidth;
+            var baseX2 = baseX + lodPow * self.hmWidth;
+
+            for (var x = 0; x < self.hmWidth - lodPow; x += lodPow)
+            {
+                var xx  = x * (self.width * stepUV) - halfW;
+                var idx = baseX + x;
+
+                var h0 = self.hmData[idx] * hScale;
+                var h1 = self.hmData[idx + lodPow] * hScale;
+                var h2 = self.hmData[baseX2 + x] * hScale;
+                var h3 = self.hmData[baseX2 + x + lodPow] * hScale;
+
+                // só renderiza onde há água (pelo menos 1 vértice abaixo)
+                if (h0 > wl && h1 > wl && h2 > wl && h3 > wl) continue;
+
+                var u0 = x * stepUV + wo;
+                var u1 = u0 + stepUV * lodPow;
+                var v0 = y * stepUV + wo * 0.7;
+                var v1 = v0 + stepUV * lodPow;
+
+                glTexCoord2f(u0, v0); glVertex3f(xx,          wl, zz);
+                glTexCoord2f(u0, v1); glVertex3f(xx,          wl, zz + stepZ);
+                glTexCoord2f(u1, v1); glVertex3f(xx + stepX,  wl, zz + stepZ);
+                glTexCoord2f(u1, v0); glVertex3f(xx + stepX,  wl, zz);
+            }
+        }
+        glEnd();
+    }
+
+    // ----------------------------------------------------------
+    // getHeightAt — interpolação bilinear
+    // ----------------------------------------------------------
+
+    def getHeightAt(worldX, worldZ)
+    {
+        if (self.hmWidth <= 0 || self.hmHeight <= 0) return 0.0;
+
+        var hScale = self.height / 255.0;
+
+        // normaliza para [0, 1]
+        var nx = (worldX - self.posX) / self.width + 0.5;
+        var nz = (worldZ - self.posZ) / self.depth + 0.5;
+
+        if (nx < 0.0 || nx >= 1.0 || nz < 0.0 || nz >= 1.0) return 0.0;
+
+        var fx = nx * self.hmWidth;
+        var fz = nz * self.hmHeight;
+        var ix = int(fx);
+        var iz = int(fz);
+
+        if (ix >= self.hmWidth  - 1) ix = self.hmWidth  - 2;
+        if (iz >= self.hmHeight - 1) iz = self.hmHeight - 2;
+
+        var tx = fx - ix;
+        var tz = fz - iz;
+
+        var idx = iz * self.hmWidth + ix;
+        var h00 = self.hmData[idx]                        * hScale;
+        var h10 = self.hmData[idx + 1]                    * hScale;
+        var h01 = self.hmData[idx + self.hmWidth]         * hScale;
+        var h11 = self.hmData[idx + self.hmWidth + 1]     * hScale;
+
+        // interpolação bilinear
+        var h = 0.0;
+        if (tx + tz < 1.0)
+        {
+            h = h00 + (h10 - h00) * tx + (h01 - h00) * tz;
+            self._lastNX = -(h10 - h00);
+            self._lastNY = 1.0;
+            self._lastNZ = -(h01 - h00);
+        }
+        else
+        {
+            h = h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz);
+            self._lastNX = -(h11 - h01);
+            self._lastNY = 1.0;
+            self._lastNZ = -(h11 - h10);
+        }
+
+        // normaliza normal
+        var nl = sqrt(self._lastNX*self._lastNX + 1.0 + self._lastNZ*self._lastNZ);
+        self._lastNX = self._lastNX / nl;
+        self._lastNY = 1.0 / nl;
+        self._lastNZ = self._lastNZ / nl;
+
+        return h + self.posY;
+    }
+
+    def getLastNormal()
+    {
+        return (self._lastNX, self._lastNY, self._lastNZ);
+    }
+
+    // ----------------------------------------------------------
+    // Rebuild — chama depois de modificar o heightmap
+    // ----------------------------------------------------------
+
+    def rebuild()
+    {
+        self._build();
+    }
+
+    // ----------------------------------------------------------
+    // Utilitários
+    // ----------------------------------------------------------
+
+    def setPosition(x, y, z)
+    {
+        self.posX = x; self.posY = y; self.posZ = z;
+    }
+
+    def setWaterLevel(wl)
+    {
+        self.waterLevel = wl;
+        if (self._built) self._build();
+    }
+
+    def setWaterSpeed(s)
+    {
+        self.waterSpeed = s;
+    }
+
+    def triCount()
+    {
+        if (self.hmWidth <= 0 || self.hmHeight <= 0) return 0;
+        var tris = (self.hmWidth - 1) * (self.hmHeight - 1) * 2;
+        return tris;
+    }
+}

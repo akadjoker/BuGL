@@ -1,0 +1,213 @@
+// ================================================================
+// Demo: HeightField Volcano
+//
+// Assets:
+//   - heightmap: volcano.png
+//   - base texture: volcano.jpg
+//
+// Controls:
+//   - Mouse: look
+//   - W/A/S/D: move
+//   - Q/E: up/down
+//   - P: wireframe
+//   - G: grid
+//   - ESC: quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+
+include "lib_camera_fps.bu";
+include "lib_heightfield.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+def resolveFirst(paths)
+{
+    for (var i = 0; i < len(paths); i += 1)
+        if (paths[i] != nil && path.exists(paths[i])) return paths[i];
+    return nil;
+}
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.24, 0.28, 0.33, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+if (!SDL.Init("BuGL - HeightField Volcano", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.07, 0.10, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+var hmPath = resolveFirst([
+    "assets/volcano.png", "../assets/volcano.png",
+    "assets/vulkano.png", "../assets/vulkano.png",
+    "assets/vulnano.png", "../assets/vulnano.png"
+]);
+var texPath = resolveFirst([
+    "assets/volcano.jpg", "../assets/volcano.jpg",
+    "assets/vulkano.jpg", "../assets/vulkano.jpg"
+]);
+
+if (hmPath == nil || texPath == nil)
+{
+    print("Missing volcano assets.");
+    print("Need heightmap (volcano.png) and texture (volcano.jpg).");
+    Close();
+    return;
+}
+
+var terrain = HeightField();
+var ok = terrain.load(hmPath, texPath, 512.0, 512.0, 96.0, -1.0);
+if (!ok)
+{
+    print("Failed to load HeightField.");
+    Close();
+    return;
+}
+terrain.setPosition(0.0, 0.0, 0.0);
+
+var cam = CameraFPS(0.0, 70.0, 170.0);
+cam.alwaysCapture = false;
+cam.sensitivity = 0.12;
+cam.speed = 48.0;
+
+var showGrid = true;
+var wireframe = false;
+var fpsSmooth = 60.0;
+var autoGround = true;
+var hover = 4.0;
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05)   dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
+    if (IsKeyPressed(KEY_P))
+    {
+        wireframe = !wireframe;
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+    cam.update(dt);
+
+    if (autoGround)
+    {
+        var ey = terrain.getHeightAt(cam.x, cam.z) + hover;
+        if (cam.y < ey) cam.y = ey;
+    }
+
+    if (IsResized())
+        glViewport(0, 0, GetWidth(), GetHeight());
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 70.0 * deg2rad, 0.05, 3000.0);
+    var eye  = cam.getEye();
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glLightfv(GL_LIGHT0, GL_POSITION, [0.4, 1.0, 0.3, 0.0]);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,  [1.0, 0.98, 0.95, 1.0]);
+    glLightfv(GL_LIGHT0, GL_AMBIENT,  [0.28, 0.28, 0.30, 1.0]);
+
+    if (showGrid) drawGrid(0.0, 400, 16.0);
+    terrain.render(eye.x, eye.y, eye.z);
+
+    glDisable(GL_LIGHTING);
+
+    var panel = ImGui.Begin("HeightField Volcano");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Separator();
+
+        var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
+        if (chGrid) showGrid = nextGrid;
+
+        var (chWire, nextWire) = ImGui.Checkbox("Wireframe (P)", wireframe);
+        if (chWire)
+        {
+            wireframe = nextWire;
+            if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        }
+
+        var (chGround, nextGround) = ImGui.Checkbox("Auto ground", autoGround);
+        if (chGround) autoGround = nextGround;
+
+        var (chHover, nextHover) = ImGui.SliderFloat("Hover", hover, 1.0, 20.0, "%.2f");
+        if (chHover) hover = nextHover;
+
+        ImGui.Separator();
+        ImGui.Text("Heightmap: " + path.basename(hmPath));
+        ImGui.Text("Texture: " + path.basename(texPath));
+        ImGui.Text("Triangles: " + terrain.triCount());
+        ImGui.Text("Camera: " +
+            int(eye.x*100)/100.0 + ", " +
+            int(eye.y*100)/100.0 + ", " +
+            int(eye.z*100)/100.0);
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+Close();

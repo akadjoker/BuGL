@@ -1,0 +1,638 @@
+ 
+using math;
+
+class TriangleData
+{
+    var ax, ay, az;
+    var bx, by, bz;
+    var cx, cy, cz;
+
+    var nx, ny, nz;
+    var dist;
+
+    var minX, minY, minZ;
+    var maxX, maxY, maxZ;
+
+    def init()
+    {
+        self.ax = 0.0; self.ay = 0.0; self.az = 0.0;
+        self.bx = 0.0; self.by = 0.0; self.bz = 0.0;
+        self.cx = 0.0; self.cy = 0.0; self.cz = 0.0;
+
+        self.nx = 0.0; self.ny = 1.0; self.nz = 0.0;
+        self.dist = 0.0;
+
+        self.minX = 0.0; self.minY = 0.0; self.minZ = 0.0;
+        self.maxX = 0.0; self.maxY = 0.0; self.maxZ = 0.0;
+    }
+}
+
+class TriMeshOctree
+{
+    var tris;
+    var built;
+    var scale;
+    var _lastHitTri;
+
+
+    var maxDepth;
+    var maxNodeTris;
+    var minNodeSize;
+
+    var _boundsMinX;
+    var _boundsMinY;
+    var _boundsMinZ;
+    var _boundsMaxX;
+    var _boundsMaxY;
+    var _boundsMaxZ;
+
+    var _lastNodesVisited;
+    var _lastTrisTested;
+    var _lastNodeHits;
+
+    def init()
+    {
+        self.tris = [];
+        self.built = false;
+        self.scale = 1.0;
+        self._lastHitTri = -1;
+
+        self.maxDepth = 8;
+        self.maxNodeTris = 32;
+        self.minNodeSize = 1.0;
+
+        self._boundsMinX = 0.0;
+        self._boundsMinY = 0.0;
+        self._boundsMinZ = 0.0;
+        self._boundsMaxX = 0.0;
+        self._boundsMaxY = 0.0;
+        self._boundsMaxZ = 0.0;
+
+        self._lastNodesVisited = 0;
+        self._lastTrisTested = 0;
+        self._lastNodeHits = 0;
+    }
+
+    def _recalcTriangle(tp)
+    {
+        var ex = tp.bx - tp.ax; var ey = tp.by - tp.ay; var ez = tp.bz - tp.az;
+        var fx = tp.cx - tp.ax; var fy = tp.cy - tp.ay; var fz = tp.cz - tp.az;
+
+        var nx = ey * fz - ez * fy;
+        var ny = ez * fx - ex * fz;
+        var nz = ex * fy - ey * fx;
+        var nl = sqrt(nx * nx + ny * ny + nz * nz);
+        if (nl < 0.000001)
+        {
+            tp.nx = 0.0; tp.ny = 1.0; tp.nz = 0.0;
+        }
+        else
+        {
+            tp.nx = nx / nl;
+            tp.ny = ny / nl;
+            tp.nz = nz / nl;
+        }
+
+        tp.dist = tp.nx * tp.ax + tp.ny * tp.ay + tp.nz * tp.az;
+
+        tp.minX = min(tp.ax, min(tp.bx, tp.cx));
+        tp.minY = min(tp.ay, min(tp.by, tp.cy));
+        tp.minZ = min(tp.az, min(tp.bz, tp.cz));
+        tp.maxX = max(tp.ax, max(tp.bx, tp.cx));
+        tp.maxY = max(tp.ay, max(tp.by, tp.cy));
+        tp.maxZ = max(tp.az, max(tp.bz, tp.cz));
+    }
+
+    def addTriangle(ax, ay, az, bx, by, bz, cx, cy, cz)
+    {
+        var tp = TriangleData();
+        tp.ax = ax; tp.ay = ay; tp.az = az;
+        tp.bx = bx; tp.by = by; tp.bz = bz;
+        tp.cx = cx; tp.cy = cy; tp.cz = cz;
+        self._recalcTriangle(tp);
+        self.tris.push(tp);
+        self.built = false;
+    }
+
+    def addSurface(vertices, indices)
+    {
+        var i = 0;
+        while (i < len(indices))
+        {
+            var v0 = vertices[indices[i]];
+            var v1 = vertices[indices[i + 1]];
+            var v2 = vertices[indices[i + 2]];
+            self.addTriangle(
+                v0.x, v0.y, v0.z,
+                v1.x, v1.y, v1.z,
+                v2.x, v2.y, v2.z
+            );
+            i += 3;
+        }
+    }
+
+    def addSurfaceScaled(vertices, indices, s)
+    {
+        var i = 0;
+        while (i < len(indices))
+        {
+            var v0 = vertices[indices[i]];
+            var v1 = vertices[indices[i + 1]];
+            var v2 = vertices[indices[i + 2]];
+            self.addTriangle(
+                v0.x * s, v0.y * s, v0.z * s,
+                v1.x * s, v1.y * s, v1.z * s,
+                v2.x * s, v2.y * s, v2.z * s
+            );
+            i += 3;
+        }
+    }
+
+    def clear()
+    {
+        self.tris.clear();
+        self.built = false;
+        self._lastHitTri = -1;
+        self._lastNodesVisited = 0;
+        self._lastTrisTested = 0;
+        self._lastNodeHits = 0;
+    }
+
+    def build()
+    {
+        self._lastHitTri = -1;
+        self._lastNodesVisited = 0;
+        self._lastTrisTested = 0;
+        self._lastNodeHits = 0;
+
+        if (len(self.tris) <= 0)
+        {
+            self._boundsMinX = 0.0; self._boundsMinY = 0.0; self._boundsMinZ = 0.0;
+            self._boundsMaxX = 0.0; self._boundsMaxY = 0.0; self._boundsMaxZ = 0.0;
+            self.built = true;
+            return;
+        }
+
+        for (var i = 0; i < len(self.tris); i += 1)
+        {
+            self._recalcTriangle(self.tris[i]);
+        }
+
+        var first = self.tris[0];
+        self._boundsMinX = first.minX; self._boundsMinY = first.minY; self._boundsMinZ = first.minZ;
+        self._boundsMaxX = first.maxX; self._boundsMaxY = first.maxY; self._boundsMaxZ = first.maxZ;
+
+        for (var j = 1; j < len(self.tris); j += 1)
+        {
+            var tp = self.tris[j];
+            if (tp.minX < self._boundsMinX) self._boundsMinX = tp.minX;
+            if (tp.minY < self._boundsMinY) self._boundsMinY = tp.minY;
+            if (tp.minZ < self._boundsMinZ) self._boundsMinZ = tp.minZ;
+            if (tp.maxX > self._boundsMaxX) self._boundsMaxX = tp.maxX;
+            if (tp.maxY > self._boundsMaxY) self._boundsMaxY = tp.maxY;
+            if (tp.maxZ > self._boundsMaxZ) self._boundsMaxZ = tp.maxZ;
+        }
+
+        self.built = true;
+    }
+
+    def _aabbOverlap(minX0, minY0, minZ0, maxX0, maxY0, maxZ0, minX1, minY1, minZ1, maxX1, maxY1, maxZ1)
+    {
+        if (minX0 > maxX1 || maxX0 < minX1) return false;
+        if (minY0 > maxY1 || maxY0 < minY1) return false;
+        if (minZ0 > maxZ1 || maxZ0 < minZ1) return false;
+        return true;
+    }
+
+    def _sweptSphereAABB(px, py, pz, dx, dy, dz, radius)
+    {
+        var minX = min(px, px + dx) - radius;
+        var minY = min(py, py + dy) - radius;
+        var minZ = min(pz, pz + dz) - radius;
+        var maxX = max(px, px + dx) + radius;
+        var maxY = max(py, py + dy) + radius;
+        var maxZ = max(pz, pz + dz) + radius;
+        return (minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    def _sweptCapsuleAABB(px, py, pz, dx, dy, dz, radius, halfHeight)
+    {
+        var minX = min(px, px + dx) - radius;
+        var minY = min(py - halfHeight, py + dy - halfHeight) - radius;
+        var minZ = min(pz, pz + dz) - radius;
+        var maxX = max(px, px + dx) + radius;
+        var maxY = max(py + halfHeight, py + dy + halfHeight) + radius;
+        var maxZ = max(pz, pz + dz) + radius;
+        return (minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    def _traceSphereTri(px, py, pz, dx, dy, dz, radius, tp)
+    {
+        var enterFrac = -1.0;
+        var leaveFrac = 1.0;
+        var rnx = 0.0; var rny = 1.0; var rnz = 0.0;
+        var startsOut = false;
+
+        var d1 = tp.nx * px + tp.ny * py + tp.nz * pz - tp.dist - radius;
+        var d2 = tp.nx * (px + dx) + tp.ny * (py + dy) + tp.nz * (pz + dz) - tp.dist - radius;
+
+        if (d1 > 0.0) startsOut = true;
+        if (d1 > 0.0 && d2 > 0.0) return (1.0, 0.0, 1.0, 0.0);
+        if (!(d1 <= 0.0 && d2 <= 0.0))
+        {
+            var f0 = d1 / (d1 - d2);
+            if (d1 > d2)
+            {
+                if (f0 > enterFrac)
+                {
+                    enterFrac = f0;
+                    rnx = tp.nx; rny = tp.ny; rnz = tp.nz;
+                }
+            }
+            else
+            {
+                if (f0 < leaveFrac) leaveFrac = f0;
+            }
+        }
+
+        d1 = -(tp.nx * px + tp.ny * py + tp.nz * pz - tp.dist) - radius;
+        d2 = -(tp.nx * (px + dx) + tp.ny * (py + dy) + tp.nz * (pz + dz) - tp.dist) - radius;
+
+        if (d1 > 0.0) startsOut = true;
+        if (d1 > 0.0 && d2 > 0.0) return (1.0, 0.0, 1.0, 0.0);
+        if (!(d1 <= 0.0 && d2 <= 0.0))
+        {
+            var f1 = d1 / (d1 - d2);
+            if (d1 > d2)
+            {
+                if (f1 > enterFrac)
+                {
+                    enterFrac = f1;
+                    rnx = -tp.nx; rny = -tp.ny; rnz = -tp.nz;
+                }
+            }
+            else
+            {
+                if (f1 < leaveFrac) leaveFrac = f1;
+            }
+        }
+
+        for (var ei = 0; ei < 3; ei += 1)
+        {
+            var x0 = tp.ax; var y0 = tp.ay; var z0 = tp.az;
+            var x1 = tp.bx; var y1 = tp.by; var z1 = tp.bz;
+            if (ei == 1)
+            {
+                x0 = tp.bx; y0 = tp.by; z0 = tp.bz;
+                x1 = tp.cx; y1 = tp.cy; z1 = tp.cz;
+            }
+            elif (ei == 2)
+            {
+                x0 = tp.cx; y0 = tp.cy; z0 = tp.cz;
+                x1 = tp.ax; y1 = tp.ay; z1 = tp.az;
+            }
+
+            var edx = x1 - x0; var edy = y1 - y0; var edz = z1 - z0;
+            var enx = edy * tp.nz - edz * tp.ny;
+            var eny = edz * tp.nx - edx * tp.nz;
+            var enz = edx * tp.ny - edy * tp.nx;
+            var enl = sqrt(enx * enx + eny * eny + enz * enz);
+            if (enl < 0.000001) continue;
+
+            enx = enx / enl; eny = eny / enl; enz = enz / enl;
+            var edist = enx * x0 + eny * y0 + enz * z0;
+
+            d1 = enx * px + eny * py + enz * pz - edist - radius;
+            d2 = enx * (px + dx) + eny * (py + dy) + enz * (pz + dz) - edist - radius;
+
+            if (d1 > 0.0) startsOut = true;
+            if (d1 > 0.0 && d2 > 0.0) return (1.0, 0.0, 1.0, 0.0);
+            if (d1 <= 0.0 && d2 <= 0.0) continue;
+
+            var f2 = d1 / (d1 - d2);
+            if (d1 > d2)
+            {
+                if (f2 > enterFrac)
+                {
+                    enterFrac = f2;
+                    rnx = enx; rny = eny; rnz = enz;
+                }
+            }
+            else
+            {
+                if (f2 < leaveFrac) leaveFrac = f2;
+            }
+        }
+
+        if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+        if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+            return (max(0.0, enterFrac - 0.001), rnx, rny, rnz);
+
+        return (1.0, 0.0, 1.0, 0.0);
+    }
+
+    def _traceCapsuleTri(px, py, pz, dx, dy, dz, radius, halfHeight, tp)
+    {
+        var enterFrac = -1.0;
+        var leaveFrac = 1.0;
+        var rnx = 0.0; var rny = 1.0; var rnz = 0.0;
+        var startsOut = false;
+
+        var capY0 = -halfHeight;
+        var capY1 = -halfHeight;
+        if (tp.ny < 0.0)
+        {
+            capY0 = halfHeight;
+            capY1 = halfHeight;
+        }
+
+        var d1 = tp.nx * px + tp.ny * (py + capY0) + tp.nz * pz - tp.dist - radius;
+        var d2 = tp.nx * (px + dx) + tp.ny * (py + dy + capY1) + tp.nz * (pz + dz) - tp.dist - radius;
+
+        if (d1 > 0.0) startsOut = true;
+        if (d1 > 0.0 && d2 > 0.0)
+        {
+            d1 = -(tp.nx * px + tp.ny * (py + capY0) + tp.nz * pz - tp.dist) - radius;
+            d2 = -(tp.nx * (px + dx) + tp.ny * (py + dy + capY1) + tp.nz * (pz + dz) - tp.dist) - radius;
+            if (d1 > 0.0 && d2 > 0.0) return (1.0, 0.0, 1.0, 0.0);
+            if (d1 > 0.0) startsOut = true;
+            if (!(d1 <= 0.0 && d2 <= 0.0))
+            {
+                var f0 = d1 / (d1 - d2);
+                if (d1 > d2)
+                {
+                    if (f0 > enterFrac)
+                    {
+                        enterFrac = f0;
+                        rnx = -tp.nx; rny = -tp.ny; rnz = -tp.nz;
+                    }
+                }
+                else
+                {
+                    if (f0 < leaveFrac) leaveFrac = f0;
+                }
+            }
+        }
+        elif (!(d1 <= 0.0 && d2 <= 0.0))
+        {
+            var f1 = d1 / (d1 - d2);
+            if (d1 > d2)
+            {
+                if (f1 > enterFrac)
+                {
+                    enterFrac = f1;
+                    rnx = tp.nx; rny = tp.ny; rnz = tp.nz;
+                }
+            }
+            else
+            {
+                if (f1 < leaveFrac) leaveFrac = f1;
+            }
+        }
+
+        for (var ei = 0; ei < 3; ei += 1)
+        {
+            var x0 = tp.ax; var y0 = tp.ay; var z0 = tp.az;
+            var x1 = tp.bx; var y1 = tp.by; var z1 = tp.bz;
+            if (ei == 1)
+            {
+                x0 = tp.bx; y0 = tp.by; z0 = tp.bz;
+                x1 = tp.cx; y1 = tp.cy; z1 = tp.cz;
+            }
+            elif (ei == 2)
+            {
+                x0 = tp.cx; y0 = tp.cy; z0 = tp.cz;
+                x1 = tp.ax; y1 = tp.ay; z1 = tp.az;
+            }
+
+            var edx2 = x1 - x0; var edy2 = y1 - y0; var edz2 = z1 - z0;
+            var enx = edy2 * tp.nz - edz2 * tp.ny;
+            var eny = edz2 * tp.nx - edx2 * tp.nz;
+            var enz = edx2 * tp.ny - edy2 * tp.nx;
+            var enl = sqrt(enx * enx + eny * eny + enz * enz);
+            if (enl < 0.000001) continue;
+
+            enx = enx / enl; eny = eny / enl; enz = enz / enl;
+            var ecapY = -halfHeight;
+            if (eny < 0.0) ecapY = halfHeight;
+
+            var edist = enx * x0 + eny * y0 + enz * z0;
+            d1 = enx * px + eny * (py + ecapY) + enz * pz - edist - radius;
+            d2 = enx * (px + dx) + eny * (py + dy + ecapY) + enz * (pz + dz) - edist - radius;
+
+            if (d1 > 0.0) startsOut = true;
+            if (d1 > 0.0 && d2 > 0.0) return (1.0, 0.0, 1.0, 0.0);
+            if (d1 <= 0.0 && d2 <= 0.0) continue;
+
+            var f2 = d1 / (d1 - d2);
+            if (d1 > d2)
+            {
+                if (f2 > enterFrac)
+                {
+                    enterFrac = f2;
+                    rnx = enx; rny = eny; rnz = enz;
+                }
+            }
+            else
+            {
+                if (f2 < leaveFrac) leaveFrac = f2;
+            }
+        }
+
+        if (!startsOut) return (1.0, 0.0, 1.0, 0.0);
+        if (enterFrac < leaveFrac && enterFrac >= -1.0 && enterFrac < 1.0)
+            return (max(0.0, enterFrac - 0.001), rnx, rny, rnz);
+
+        return (1.0, 0.0, 1.0, 0.0);
+    }
+
+    def traceSphere(px, py, pz, dx, dy, dz, radius)
+    {
+        if (!self.built) self.build();
+
+        self._lastHitTri = -1;
+        self._lastNodesVisited = 0;
+        self._lastTrisTested = 0;
+        self._lastNodeHits = 0;
+
+        if (len(self.tris) <= 0) return (1.0, 0.0, 1.0, 0.0, false);
+
+        self._lastNodesVisited = 1;
+
+        var bestFrac = 1.0;
+        var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+        var hit = false;
+
+        var (sminX, sminY, sminZ, smaxX, smaxY, smaxZ) = self._sweptSphereAABB(px, py, pz, dx, dy, dz, radius);
+
+        for (var i = 0; i < len(self.tris); i += 1)
+        {
+            var tp = self.tris[i];
+            self._lastTrisTested += 1;
+            if (!self._aabbOverlap(
+                sminX, sminY, sminZ, smaxX, smaxY, smaxZ,
+                tp.minX, tp.minY, tp.minZ, tp.maxX, tp.maxY, tp.maxZ
+            )) continue;
+
+            var (frac, nx, ny, nz) = self._traceSphereTri(px, py, pz, dx, dy, dz, radius, tp);
+            if (frac < bestFrac)
+            {
+                bestFrac = frac;
+                bestNX = nx; bestNY = ny; bestNZ = nz;
+                self._lastHitTri = i;
+                hit = true;
+            }
+        }
+
+        return (bestFrac, bestNX, bestNY, bestNZ, hit);
+    }
+
+    def traceCapsule(px, py, pz, dx, dy, dz, radius, halfHeight)
+    {
+        if (!self.built) self.build();
+
+        self._lastHitTri = -1;
+        self._lastNodesVisited = 0;
+        self._lastTrisTested = 0;
+        self._lastNodeHits = 0;
+
+        if (len(self.tris) <= 0) return (1.0, 0.0, 1.0, 0.0, false);
+
+        self._lastNodesVisited = 1;
+
+        var bestFrac = 1.0;
+        var bestNX = 0.0; var bestNY = 1.0; var bestNZ = 0.0;
+        var hit = false;
+
+        var (sminX, sminY, sminZ, smaxX, smaxY, smaxZ) = self._sweptCapsuleAABB(px, py, pz, dx, dy, dz, radius, halfHeight);
+
+        for (var i = 0; i < len(self.tris); i += 1)
+        {
+            var tp = self.tris[i];
+            self._lastTrisTested += 1;
+            if (!self._aabbOverlap(
+                sminX, sminY, sminZ, smaxX, smaxY, smaxZ,
+                tp.minX, tp.minY, tp.minZ, tp.maxX, tp.maxY, tp.maxZ
+            )) continue;
+
+            var (frac, nx, ny, nz) = self._traceCapsuleTri(px, py, pz, dx, dy, dz, radius, halfHeight, tp);
+            if (frac < bestFrac)
+            {
+                bestFrac = frac;
+                bestNX = nx; bestNY = ny; bestNZ = nz;
+                self._lastHitTri = i;
+                hit = true;
+            }
+        }
+
+        return (bestFrac, bestNX, bestNY, bestNZ, hit);
+    }
+
+    def draw()
+    {
+        glDisable(GL_TEXTURE_2D);
+        glLineWidth(1.0);
+
+        glBegin(GL_LINES);
+        for (var i = 0; i < len(self.tris); i += 1)
+        {
+            var tp = self.tris[i];
+            glColor3f(0.0, 1.0, 0.0);
+            glVertex3f(tp.ax, tp.ay, tp.az); glVertex3f(tp.bx, tp.by, tp.bz);
+            glVertex3f(tp.bx, tp.by, tp.bz); glVertex3f(tp.cx, tp.cy, tp.cz);
+            glVertex3f(tp.cx, tp.cy, tp.cz); glVertex3f(tp.ax, tp.ay, tp.az);
+        }
+        glEnd();
+
+        glEnable(GL_TEXTURE_2D);
+    }
+
+    def drawLastHit()
+    {
+        if (self._lastHitTri < 0 || self._lastHitTri >= len(self.tris)) return;
+
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_DEPTH_TEST);
+
+        var tp = self.tris[self._lastHitTri];
+
+        glColor4f(1.0, 0.0, 0.0, 0.8);
+        glBegin(GL_TRIANGLES);
+        glVertex3f(tp.ax, tp.ay, tp.az);
+        glVertex3f(tp.bx, tp.by, tp.bz);
+        glVertex3f(tp.cx, tp.cy, tp.cz);
+        glEnd();
+
+        var cx = (tp.ax + tp.bx + tp.cx) / 3.0;
+        var cy = (tp.ay + tp.by + tp.cy) / 3.0;
+        var cz = (tp.az + tp.bz + tp.cz) / 3.0;
+        glLineWidth(3.0);
+        glColor3f(1.0, 1.0, 0.0);
+        glBegin(GL_LINES);
+        glVertex3f(cx, cy, cz);
+        glVertex3f(cx + tp.nx * 0.5, cy + tp.ny * 0.5, cz + tp.nz * 0.5);
+        glEnd();
+        glLineWidth(1.0);
+
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_TEXTURE_2D);
+    }
+
+    def _drawBounds(minX, minY, minZ, maxX, maxY, maxZ, r, g, b)
+    {
+        glColor3f(r, g, b);
+        glBegin(GL_LINES);
+        glVertex3f(minX, minY, minZ); glVertex3f(maxX, minY, minZ);
+        glVertex3f(maxX, minY, minZ); glVertex3f(maxX, minY, maxZ);
+        glVertex3f(maxX, minY, maxZ); glVertex3f(minX, minY, maxZ);
+        glVertex3f(minX, minY, maxZ); glVertex3f(minX, minY, minZ);
+
+        glVertex3f(minX, maxY, minZ); glVertex3f(maxX, maxY, minZ);
+        glVertex3f(maxX, maxY, minZ); glVertex3f(maxX, maxY, maxZ);
+        glVertex3f(maxX, maxY, maxZ); glVertex3f(minX, maxY, maxZ);
+        glVertex3f(minX, maxY, maxZ); glVertex3f(minX, maxY, minZ);
+
+        glVertex3f(minX, minY, minZ); glVertex3f(minX, maxY, minZ);
+        glVertex3f(maxX, minY, minZ); glVertex3f(maxX, maxY, minZ);
+        glVertex3f(maxX, minY, maxZ); glVertex3f(maxX, maxY, maxZ);
+        glVertex3f(minX, minY, maxZ); glVertex3f(minX, maxY, maxZ);
+        glEnd();
+    }
+
+    def drawOctree(depthMax, visitedOnly)
+    {
+        if (!self.built) self.build();
+        if (len(self.tris) <= 0) return;
+
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(1.0);
+
+        // Placeholder until the real octree returns.
+        self._drawBounds(
+            self._boundsMinX, self._boundsMinY, self._boundsMinZ,
+            self._boundsMaxX, self._boundsMaxY, self._boundsMaxZ,
+            0.2, 0.9, 1.0
+        );
+
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_TEXTURE_2D);
+    }
+
+    def stats()
+    {
+        var nodes = 0;
+        var leafs = 0;
+        if (self.built && len(self.tris) > 0)
+        {
+            nodes = 1;
+            leafs = 1;
+        }
+        return (len(self.tris), nodes, leafs, self._lastNodesVisited, self._lastTrisTested);
+    }
+
+    def triCount()
+    {
+        return len(self.tris);
+    }
+}

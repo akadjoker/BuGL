@@ -1,0 +1,445 @@
+// ================================================================
+// lib_tiled_terrain.bu — Terrain tiled infinito
+//
+// Baseado no GLTiledTerrain de Leonardo Boselli (GPL)
+// Portado para BuLang por djoker
+//
+// Como funciona:
+//   - tilemap.png: imagem greyscale onde cada pixel = 1 tile/classificação
+//   - cada byte codifica: bits 0-2 = tile X, bits 3-5 = tile Y, bits 6-7 = rotação
+//   - circleTextures64.jpg (ou outra atlas): textura com NxN tiles
+//   - renderiza patches em volta da câmera dentro do far plane
+//
+// Usage:
+//   include "lib_tiled_terrain.bu";
+//   var terrain = TiledTerrain();
+//   terrain.load("assets/circleTextures64.jpg", "assets/tilemap.png", 8, 32.0, 8, -1);
+//   // loop:
+//   terrain.render(camX, camY, camZ, farPlane);
+// ================================================================
+
+import OpenGl;
+using OpenGl;
+import STB;
+using STB;
+using math;
+
+class TiledTerrain
+{
+    // config
+    var tilesInTextureSide;   // quantos tiles por lado na tileset (ex: 8 = 8x8 tiles)
+    var tilesInPatchSide;     // tiles por lado num patch (ex: 8 = 8x8 tiles por patch)
+    var patchSideLength;      // tamanho world de um patch (ex: 32.0)
+    var defaultTile;          // tile a usar fora do mapa (-1 = wrap)
+
+    // mapa de tiles
+    var tilesMap;             // buffer uint8 (igual a unsigned char[])
+    var tilesInMapWidth;
+    var tilesInMapHeight;
+
+    // textura da tileset
+    var texId;
+
+    // geometria do patch (pre-calculada, igual para todos os patches)
+    var vertexArray;          // Float32Array [x0,y0, x0,y1, x1,y1, x1,y0, ...]
+    var texCoordArray;        // Float32Array dinâmico por patch
+
+    // cor
+    var colorR, colorG, colorB;
+
+    // stats
+    var patchesRendered;
+    var patchesCulled;
+
+    def init()
+    {
+        self.tilesInTextureSide = 8;
+        self.tilesInPatchSide   = 8;
+        self.patchSideLength    = 32.0;
+        self.defaultTile        = -1;
+        self.tilesMap           = nil;
+        self.tilesInMapWidth    = 0;
+        self.tilesInMapHeight   = 0;
+        self.texId              = 0;
+        self.vertexArray        = nil;
+        self.texCoordArray      = nil;
+        self.colorR             = 1.0;
+        self.colorG             = 1.0;
+        self.colorB             = 1.0;
+        self.patchesRendered    = 0;
+        self.patchesCulled      = 0;
+    }
+
+    // ----------------------------------------------------------
+    // Load
+    // tilesInTexSide — lado da tileset em tiles (8 = 8x8 = 64 tiles)
+    // patchLength    — tamanho world de um patch
+    // patchSide      — tiles por lado num patch
+    // defTile        — tile fora do mapa (-1 = wrap, 0..N = tile fixo)
+    // ----------------------------------------------------------
+
+    def load(tilesetPath, tilemapPath, tilesInTexSide, patchLength, patchSide, defTile)
+    {
+        self.tilesInTextureSide = tilesInTexSide;
+        self.patchSideLength    = patchLength;
+        self.tilesInPatchSide   = patchSide;
+        self.defaultTile        = defTile;
+
+        // carrega tileset
+        self.texId = self._loadTexture(tilesetPath);
+        if (self.texId == 0)
+        {
+            print("TiledTerrain: failed to load tileset: " + tilesetPath);
+            return false;
+        }
+
+        // carrega tilemap como greyscale
+        if (!self._loadTilemap(tilemapPath))
+        {
+            print("TiledTerrain: failed to load tilemap: " + tilemapPath);
+            return false;
+        }
+
+        // pre-calcula geometria do patch
+        self._buildPatchGeometry();
+
+        print("TiledTerrain: " + self.tilesInMapWidth + "x" + self.tilesInMapHeight +
+              " tiles, patch=" + patchSide + "x" + patchSide +
+              " world=" + patchLength);
+        return true;
+    }
+
+    // ----------------------------------------------------------
+    // Carrega textura
+    // ----------------------------------------------------------
+
+    def _loadTexture(path)
+    {
+        stbi_set_flip_vertically_on_load(1);
+        var (w, h, ch, pixels) = stbi_load(path, 4);
+        if (pixels == nil) return 0;
+
+        var tex = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return tex;
+    }
+
+    // ----------------------------------------------------------
+    // Carrega tilemap — cada pixel = 1 tile
+    // formato do byte: bits 0-2 = tileX, bits 3-5 = tileY, bits 6-7 = rotação
+    // ----------------------------------------------------------
+
+    def _loadTilemap(path)
+    {
+        stbi_set_flip_vertically_on_load(1);
+        var (w, h, ch, pixels) = stbi_load(path, 1);  // greyscale
+        if (pixels == nil) return false;
+
+        self.tilesInMapWidth  = w;
+        self.tilesInMapHeight = h;
+        self.tilesMap = @(w * h, TYPE_UINT8);
+        for (var i = 0; i < w * h; i += 1)
+            self.tilesMap[i] = int(pixels[i]);
+
+        return true;
+    }
+
+    // ----------------------------------------------------------
+    // Cria tilemap procedural (sem imagem)
+    // ----------------------------------------------------------
+
+    def createProceduralMap(width, height, fillTile)
+    {
+        self.tilesInMapWidth  = width;
+        self.tilesInMapHeight = height;
+        self.tilesMap = @(width * height, TYPE_UINT8);
+        var fill = int(fillTile) & 255;
+        for (var i = 0; i < width * height; i += 1)
+            self.tilesMap[i] = fill;
+    }
+
+    def setTile(x, y, tileX, tileY, rotation)
+    {
+        if (x < 0 || x >= self.tilesInMapWidth)  return;
+        if (y < 0 || y >= self.tilesInMapHeight) return;
+        // empacota: bits 0-2 = tileX, 3-5 = tileY, 6-7 = rotation
+        var byte = (tileX & 7) | ((tileY & 7) << 3) | ((rotation & 3) << 6);
+        self.tilesMap[x + y * self.tilesInMapWidth] = byte;
+    }
+
+    def getTile(x, y)
+    {
+        if (x < 0 || x >= self.tilesInMapWidth)  return self.defaultTile;
+        if (y < 0 || y >= self.tilesInMapHeight) return self.defaultTile;
+        return int(self.tilesMap[x + y * self.tilesInMapWidth]);
+    }
+
+    // ----------------------------------------------------------
+    // Pre-calcula vértices do patch (igual para todos os patches)
+    // patch no plano XZ (Y = 0), depois rodamos 90 graus em render
+    // ----------------------------------------------------------
+
+    def _buildPatchGeometry()
+    {
+        var n = self.tilesInPatchSide;
+        var step = self.patchSideLength / n;
+        var quadCount = n * n;
+        self.vertexArray = @(quadCount * 8, TYPE_FLOAT);
+        self.texCoordArray = @(quadCount * 8, TYPE_FLOAT);
+
+        var index = 0;
+        for (var x = 0; x < n; x += 1)
+        for (var y = 0; y < n; y += 1)
+        {
+            self.vertexArray[index + 0] = x * step;
+            self.vertexArray[index + 1] = y * step;
+            self.vertexArray[index + 2] = x * step;
+            self.vertexArray[index + 3] = y * step + step;
+            self.vertexArray[index + 4] = x * step + step;
+            self.vertexArray[index + 5] = y * step + step;
+            self.vertexArray[index + 6] = x * step + step;
+            self.vertexArray[index + 7] = y * step;
+            index += 8;
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Frustum cull simples — testa se o patch está dentro do far plane
+    // usa distância ao centro do patch
+    // ----------------------------------------------------------
+
+    def _isClipped(camX, camY, camZ, patchCX, patchCZ, patchSize, farPlane)
+    {
+        var dx = patchCX - camX;
+        var dz = patchCZ - camZ;
+        var dist = sqrt(dx*dx + dz*dz);
+        return dist > farPlane + patchSize;
+    }
+
+    // ----------------------------------------------------------
+    // Preenche texCoordArray para um patch na posição (patchX, patchY) do mapa
+    // ----------------------------------------------------------
+
+    def _fillTexCoords(startX, startY, showDefault)
+    {
+        var n = self.tilesInPatchSide;
+        var stepUV = 1.0 / self.tilesInTextureSide;
+        var index = 0;
+        var w = self.tilesInMapWidth;
+        var defTile = int(max(0, self.defaultTile));
+
+        if (showDefault)
+        {
+            var tileX = stepUV * (7 & defTile);
+            var tileXX = tileX + stepUV;
+            var tileY = stepUV * (7 & (defTile >> 3));
+            var tileYY = tileY + stepUV;
+
+            for (var x = 0; x < n; x += 1)
+            for (var y = 0; y < n; y += 1)
+            {
+                self.texCoordArray[index + 0] = tileX;
+                self.texCoordArray[index + 1] = tileY;
+                self.texCoordArray[index + 2] = tileX;
+                self.texCoordArray[index + 3] = tileYY;
+                self.texCoordArray[index + 4] = tileXX;
+                self.texCoordArray[index + 5] = tileYY;
+                self.texCoordArray[index + 6] = tileXX;
+                self.texCoordArray[index + 7] = tileY;
+                index += 8;
+            }
+            return;
+        }
+
+        for (var x = 0; x < n; x += 1)
+        for (var y = 0; y < n; y += 1)
+        {
+            var tile = int(self.tilesMap[startX + x + (startY + y) * w]);
+            var tileX = stepUV * (7 & tile);
+            var tileXX = tileX + stepUV;
+            var tileY = stepUV * (7 & (tile >> 3));
+            var tileYY = tileY + stepUV;
+            var rotaz = int(tile >> 6);
+
+            if (rotaz == 0)
+            {
+                self.texCoordArray[index + 0] = tileX;
+                self.texCoordArray[index + 1] = tileY;
+                self.texCoordArray[index + 2] = tileX;
+                self.texCoordArray[index + 3] = tileYY;
+                self.texCoordArray[index + 4] = tileXX;
+                self.texCoordArray[index + 5] = tileYY;
+                self.texCoordArray[index + 6] = tileXX;
+                self.texCoordArray[index + 7] = tileY;
+            }
+            elif (rotaz == 1)
+            {
+                self.texCoordArray[index + 0] = tileXX;
+                self.texCoordArray[index + 1] = tileY;
+                self.texCoordArray[index + 2] = tileX;
+                self.texCoordArray[index + 3] = tileY;
+                self.texCoordArray[index + 4] = tileX;
+                self.texCoordArray[index + 5] = tileYY;
+                self.texCoordArray[index + 6] = tileXX;
+                self.texCoordArray[index + 7] = tileYY;
+            }
+            elif (rotaz == 2)
+            {
+                self.texCoordArray[index + 0] = tileXX;
+                self.texCoordArray[index + 1] = tileYY;
+                self.texCoordArray[index + 2] = tileXX;
+                self.texCoordArray[index + 3] = tileY;
+                self.texCoordArray[index + 4] = tileX;
+                self.texCoordArray[index + 5] = tileY;
+                self.texCoordArray[index + 6] = tileX;
+                self.texCoordArray[index + 7] = tileYY;
+            }
+            else
+            {
+                self.texCoordArray[index + 0] = tileX;
+                self.texCoordArray[index + 1] = tileYY;
+                self.texCoordArray[index + 2] = tileXX;
+                self.texCoordArray[index + 3] = tileYY;
+                self.texCoordArray[index + 4] = tileXX;
+                self.texCoordArray[index + 5] = tileY;
+                self.texCoordArray[index + 6] = tileX;
+                self.texCoordArray[index + 7] = tileY;
+            }
+            index += 8;
+        }
+    }
+
+    // ----------------------------------------------------------
+    // Render — camX/Y/Z = posição da câmera, farPlane = distância máxima
+    // ----------------------------------------------------------
+
+    def render(camX, camY, camZ, farPlane)
+    {
+        if (self.texId == 0) return;
+        if (self.tilesInMapWidth <= 0 || self.tilesInMapHeight <= 0) return;
+
+        self.patchesRendered = 0;
+        self.patchesCulled   = 0;
+
+        var patchLen    = self.patchSideLength;
+        var patchLen2   = patchLen * 0.5;
+        var patchSize   = patchLen2 * 1.556;
+        var invPatchLen = 1.0 / patchLen;
+        var dd          = int(farPlane * invPatchLen + 0.5);
+
+        var camPX = int(camX * invPatchLen);
+        var camPZ = int(camZ * invPatchLen);
+
+        glPushMatrix();
+        glRotatef(90.0, 1.0, 0.0, 0.0);
+
+        glDisable(GL_LIGHTING);
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, self.texId);
+        glColor3f(self.colorR, self.colorG, self.colorB);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glVertexPointer(2, GL_FLOAT, 0, self.vertexArray, 0);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+        for (var yy = camPZ - dd; yy <= camPZ + dd; yy += 1)
+        for (var xx = camPX - dd; xx <= camPX + dd; xx += 1)
+        {
+            var posX = xx * patchLen;
+            var posZ = yy * patchLen;
+            var cX   = posX + patchLen2;
+            var cZ   = posZ + patchLen2;
+
+            if (self._isClipped(camX, camY, camZ, cX, cZ, patchSize, farPlane))
+            {
+                self.patchesCulled += 1;
+                continue;
+            }
+
+            var startX = xx * self.tilesInPatchSide;
+            var startY = yy * self.tilesInPatchSide;
+
+            var showDefault = false;
+            if (startX < 0 || startX >= self.tilesInMapWidth)
+            {
+                if (self.defaultTile < 0)
+                {
+                    startX = ((startX % self.tilesInMapWidth) + self.tilesInMapWidth) % self.tilesInMapWidth;
+                }
+                else
+                {
+                    showDefault = true;
+                }
+            }
+
+            if (startY < 0)
+            {
+                if (self.defaultTile < 0)
+                {
+                    startY = ((startY % self.tilesInMapHeight) + self.tilesInMapHeight) % self.tilesInMapHeight;
+                }
+                else
+                {
+                    showDefault = true;
+                }
+            }
+            elif (startY >= self.tilesInMapHeight)
+            {
+                if (self.defaultTile < 0)
+                {
+                    startY = startY % self.tilesInMapHeight;
+                }
+                else
+                {
+                    showDefault = true;
+                }
+            }
+
+            self._fillTexCoords(startX, startY, showDefault);
+            glTexCoordPointer(2, GL_FLOAT, 0, self.texCoordArray, 0);
+
+            glPushMatrix();
+            glTranslatef(posX, posZ, 0.0);
+            glDrawArrays(GL_QUADS, 0, self.tilesInPatchSide * self.tilesInPatchSide * 4);
+            glPopMatrix();
+
+            self.patchesRendered += 1;
+        }
+
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glEnable(GL_LIGHTING);
+        glPopMatrix();
+    }
+
+ 
+
+    // ----------------------------------------------------------
+    // Utilitários
+    // ----------------------------------------------------------
+
+    def setColor(r, g, b)
+    {
+        self.colorR = r; self.colorG = g; self.colorB = b;
+    }
+
+    def worldToTile(worldX, worldZ)
+    {
+        var tx = int(worldX / (self.patchSideLength / self.tilesInPatchSide));
+        var ty = int(worldZ / (self.patchSideLength / self.tilesInPatchSide));
+        return (tx, ty);
+    }
+
+    def stats()
+    {
+        return (self.patchesRendered, self.patchesCulled,
+                self.tilesInMapWidth, self.tilesInMapHeight);
+    }
+}

@@ -1,0 +1,306 @@
+// ================================================================
+// Demo: B3D + lib_collision.bu
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+
+include "lib_camera_fps.bu";
+include "lib_b3d.bu";
+include "lib_collision.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.22, 0.26, 0.30, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+def drawAxes(size)
+{
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(2.0);
+    glBegin(GL_LINES);
+    glColor3f(1.0, 0.2, 0.2); glVertex3f(0,0,0); glVertex3f(size,0,0);
+    glColor3f(0.2, 1.0, 0.2); glVertex3f(0,0,0); glVertex3f(0,size,0);
+    glColor3f(0.2, 0.6, 1.0); glVertex3f(0,0,0); glVertex3f(0,0,size);
+    glEnd();
+    glLineWidth(1.0);
+}
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+SetGLAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+if (!SDL.Init("BuGL - B3D Collision", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.07, 0.10, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+var showGrid = true;
+var showAxes = true;
+var fpsSmooth = 60.0;
+var wireframe = false;
+
+var modelPath = resolveAssetPath("assets/b3d/castel/castel.b3d", "../assets/b3d/castel/castel.b3d");
+var texturePath = resolveAssetPath("assets/b3d/castel/textures/", "../assets/b3d/castel/textures/");
+if (modelPath == nil || texturePath == nil)
+{
+    print("B3D castle asset not found");
+    Close();
+    return;
+}
+
+var model = B3DModel();
+model.load(modelPath, texturePath);
+model.scaleVal = 0.05;
+model.update(0);
+
+var cam = CameraFPS(-1.0, 5.2, 36.0);
+cam.sensitivity = 0.12;
+cam.speed = 10.0;
+cam.yaw = -90;
+cam.mouseButton = 1;
+cam.lookOnly = true;
+
+var colMesh = CollisionMesh();
+for (var si = 0; si < len(model.surfaces); si += 1)
+{
+    colMesh.addSurfaceScaled(model.surfaces[si].vertices, model.surfaces[si].indices, model.scaleVal);
+}
+
+print("Collision mesh: " + colMesh.triCount() + " triangulos");
+
+var GRAVITY = -18.0;
+var PLAYER_RADIUS = 0.4;
+var PLAYER_HALF_HEIGHT = 1.9;
+var PLAYER_SPEED = 5.0;
+var JUMP_SPEED = 12.0;
+var SLIDE_EPS = 0.01;
+
+var velY = 0.0;
+var onGround = false;
+var showColMesh = false;
+var showLastHitTri = false;
+var useGravity = true;
+var showOctree = false;
+var showVisitedOnly = false;
+var showLeafOnly = false;
+var octreeDepth = 5;
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05) dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
+    if (IsKeyPressed(KEY_O)) showOctree = !showOctree;
+    if (IsKeyPressed(KEY_V)) showVisitedOnly = !showVisitedOnly;
+    if (IsKeyPressed(KEY_L)) showLeafOnly = !showLeafOnly;
+    if (IsKeyPressed(KEY_P))
+    {
+        wireframe = !wireframe;
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+    cam.update(dt);
+
+    var fwd = cam.getForward();
+    var right = cam.getRight();
+
+    var moveX = 0.0; var moveY = 0.0; var moveZ = 0.0;
+    var mv = PLAYER_SPEED * dt;
+    if (IsKeyDown(KEY_LEFT_SHIFT)) mv = mv * 2.0;
+
+    if (IsKeyDown(KEY_W)) { moveX += fwd.x * mv; moveZ += fwd.z * mv; }
+    if (IsKeyDown(KEY_S)) { moveX -= fwd.x * mv; moveZ -= fwd.z * mv; }
+    if (IsKeyDown(KEY_A)) { moveX += right.x * mv; moveZ += right.z * mv; }
+    if (IsKeyDown(KEY_D)) { moveX -= right.x * mv; moveZ -= right.z * mv; }
+
+    var gravityStep = Vector3(0.0, 0.0, 0.0);
+    if (useGravity)
+    {
+        // Irrlicht-style: falling velocity is always integrated.
+        if (onGround && IsKeyPressed(KEY_SPACE))
+        {
+            velY = JUMP_SPEED;
+            onGround = false;
+        }
+
+        velY += GRAVITY * dt;
+        gravityStep.y = velY * dt;
+        moveY = 0.0;
+    }
+    else
+    {
+        if (IsKeyDown(KEY_Q)) moveY -= mv;
+        if (IsKeyDown(KEY_E)) moveY += mv;
+    }
+
+    var result = colMesh.collideEllipsoidWithWorld(
+        Vector3(cam.x, cam.y, cam.z),
+        Vector3(PLAYER_RADIUS, PLAYER_HALF_HEIGHT + PLAYER_RADIUS, PLAYER_RADIUS),
+        Vector3(moveX, moveY, moveZ),
+        SLIDE_EPS,
+        gravityStep
+    );
+    var (statTris, statNodes, statLeafs, statVisited, statTested) = colMesh.stats();
+
+    cam.x = result.finalPosition.x;
+    cam.y = result.finalPosition.y;
+    cam.z = result.finalPosition.z;
+
+    if (useGravity)
+    {
+        onGround = !result.falling;
+        if (onGround && velY < 0.0) velY = 0.0;
+    }
+
+    if (IsResized()) glViewport(0, 0, GetWidth(), GetHeight());
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 70.0 * deg2rad, 0.05, 2000.0);
+    var eye = cam.getEye();
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+    if (showGrid) drawGrid(-0.02, 50, 2.0);
+    if (showAxes) drawAxes(1.0);
+
+    model.draw();
+    if (showColMesh) colMesh.draw();
+    if (showLastHitTri) colMesh.drawLastHit();
+    if (showOctree) colMesh.drawOctree(octreeDepth, showVisitedOnly, showLeafOnly);
+
+    var panel = ImGui.Begin("B3D Collision");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Text("mode: lib_collision ellipsoid");
+        ImGui.Separator();
+
+        var (chAxes, nextAxes) = ImGui.Checkbox("Axes", showAxes);
+        if (chAxes) showAxes = nextAxes;
+        var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
+        if (chGrid) showGrid = nextGrid;
+
+        var (chWire, nextWire) = ImGui.Checkbox("Wireframe (P)", wireframe);
+        if (chWire)
+        {
+            wireframe = nextWire;
+            if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        }
+
+        ImGui.Separator();
+        var (chColMesh, nextColMesh) = ImGui.Checkbox("Show Collision Mesh", showColMesh);
+        if (chColMesh) showColMesh = nextColMesh;
+        var (chLastHit, nextLastHit) = ImGui.Checkbox("Show Last Hit Triangle", showLastHitTri);
+        if (chLastHit) showLastHitTri = nextLastHit;
+        var (chOctree, nextOctree) = ImGui.Checkbox("Show Octree (O)", showOctree);
+        if (chOctree) showOctree = nextOctree;
+        var (chVisited, nextVisited) = ImGui.Checkbox("Visited Nodes Only (V)", showVisitedOnly);
+        if (chVisited) showVisitedOnly = nextVisited;
+        var (chLeafs, nextLeafs) = ImGui.Checkbox("Leaf Nodes Only (L)", showLeafOnly);
+        if (chLeafs) showLeafOnly = nextLeafs;
+
+        if (ImGui.Button("Depth -") && octreeDepth > 0) octreeDepth -= 1;
+        ImGui.SameLine();
+        if (ImGui.Button("Depth +") && octreeDepth < 12) octreeDepth += 1;
+        ImGui.SameLine();
+        ImGui.Text("draw depth: " + octreeDepth);
+
+        var (chGravity, nextGravity) = ImGui.Checkbox("Use Gravity", useGravity);
+        if (chGravity)
+        {
+            useGravity = nextGravity;
+            if (!useGravity)
+            {
+                velY = 0.0;
+                onGround = false;
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Camera:");
+        ImGui.Text("  eye: " + int(eye.x * 100) / 100.0 + ", " +
+                               int(eye.y * 100) / 100.0 + ", " +
+                               int(eye.z * 100) / 100.0);
+
+        ImGui.Separator();
+        ImGui.Text("Collision:");
+        ImGui.Text("  triangles: " + colMesh.triCount());
+        ImGui.Text("  octree nodes: " + statNodes + "  leafs: " + statLeafs);
+        ImGui.Text("  visited nodes: " + statVisited + "  tested tris: " + statTested);
+        ImGui.Text("  falling: " + result.falling);
+        ImGui.Text("  triangle hits: " + result.triangleHits);
+
+        ImGui.Separator();
+        ImGui.Text("Controls:");
+        ImGui.Text("  Mouse: look");
+        ImGui.Text("  G: grid");
+        ImGui.Text("  P: wireframe");
+        ImGui.Text("  O: octree");
+        ImGui.Text("  V: visited only");
+        ImGui.Text("  L: leafs only");
+        if (useGravity) ImGui.Text("  Space: jump");
+        else ImGui.Text("  Q/E: vertical fly");
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+Close();

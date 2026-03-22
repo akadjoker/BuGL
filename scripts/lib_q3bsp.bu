@@ -137,6 +137,30 @@ class Q3Face
     }
 }
 
+class Q3MeshBuffer
+{
+    var textureIdx;
+    var lmIdx;
+    var texId;
+    var lmId;
+    var verts;       // Float32Array interleaved: pos3,nrm3,col3,uv0_2,uv1_2
+    var vertexCount;
+    var minX; var minY; var minZ;
+    var maxX; var maxY; var maxZ;
+
+    def init()
+    {
+        self.textureIdx = -1;
+        self.lmIdx      = -1;
+        self.texId      = 0;
+        self.lmId       = 0;
+        self.verts      = Float32Array(0);
+        self.vertexCount= 0;
+        self.minX = 0.0; self.minY = 0.0; self.minZ = 0.0;
+        self.maxX = 0.0; self.maxY = 0.0; self.maxZ = 0.0;
+    }
+}
+
 // ============================================================
 // BSP Node
 // ============================================================
@@ -276,6 +300,11 @@ class Q3BSP
     var meshVerts;    // array of int  (índices relativos ao firstVert)
     var faces;        // array of Q3Face
     var lightmapIds;  // array of GL texture ids
+    var meshBuffers;      // array<Q3MeshBuffer> agrupado por (textureIdx,lmIdx)
+    var faceToBuffer;     // faceIdx -> meshBuffer idx
+    var bufferDrawn;      // bitset por meshBuffer
+    var visibleBuffers;   // meshBuffers visíveis no frame
+    var visiblePatchFaces;// patch faces visíveis no frame
     var nodes;        // array of Q3Node
     var leaves;       // array of Q3Leaf
     var leafFaces;    // array of int
@@ -294,6 +323,24 @@ class Q3BSP
     var scale;
 
     var facesDrawn;   // bitset para evitar desenhar a mesma face 2x por frame
+    var patchTess;    // nível de tesselação para faces PATCH
+    var patchVerts;   // por face: array de Q3Vertex já tessellado
+    var patchIndices; // por face: índices triangulados
+    var frustumActive;
+    var frustumEyeX; var frustumEyeY; var frustumEyeZ;
+    var frustumFwdX; var frustumFwdY; var frustumFwdZ;
+    var frustumRightX; var frustumRightY; var frustumRightZ;
+    var frustumUpX; var frustumUpY; var frustumUpZ;
+    var frustumNear;
+    var frustumFar;
+    var frustumTanH;
+    var frustumTanV;
+    var statVisibleBuffers;
+    var statVisiblePatches;
+    var statDrawnBuffers;
+    var statDrawnPatches;
+    var statCulledBuffers;
+    var statDrawnTris;
 
     var brightness = 8.0; // multiplicador de brilho para lightmaps (pode ser ajustado dinamicamente)
 
@@ -305,6 +352,11 @@ class Q3BSP
         self.meshVerts   = [];
         self.faces       = [];
         self.lightmapIds = [];
+        self.meshBuffers = [];
+        self.faceToBuffer = [];
+        self.bufferDrawn = [];
+        self.visibleBuffers = [];
+        self.visiblePatchFaces = [];
         self.nodes       = [];
         self.leaves      = [];
         self.leafFaces   = [];
@@ -318,6 +370,24 @@ class Q3BSP
         self.baseDir     = "";
         self.scale       = 0.03;   // Q3 units → metros
         self.facesDrawn  = [];
+        self.patchTess   = 6;
+        self.patchVerts  = [];
+        self.patchIndices= [];
+        self.frustumActive = false;
+        self.frustumEyeX = 0.0; self.frustumEyeY = 0.0; self.frustumEyeZ = 0.0;
+        self.frustumFwdX = 0.0; self.frustumFwdY = 0.0; self.frustumFwdZ = 1.0;
+        self.frustumRightX = 1.0; self.frustumRightY = 0.0; self.frustumRightZ = 0.0;
+        self.frustumUpX = 0.0; self.frustumUpY = 1.0; self.frustumUpZ = 0.0;
+        self.frustumNear = 1.0;
+        self.frustumFar  = 1000.0;
+        self.frustumTanH = 1.0;
+        self.frustumTanV = 1.0;
+        self.statVisibleBuffers = 0;
+        self.statVisiblePatches = 0;
+        self.statDrawnBuffers = 0;
+        self.statDrawnPatches = 0;
+        self.statCulledBuffers = 0;
+        self.statDrawnTris = 0;
     }
 
     def destroy()
@@ -336,10 +406,17 @@ class Q3BSP
         self.meshVerts   = [];
         self.faces       = [];
         self.lightmapIds = [];
+        self.meshBuffers = [];
+        self.faceToBuffer = [];
+        self.bufferDrawn = [];
+        self.visibleBuffers = [];
+        self.visiblePatchFaces = [];
         self.nodes       = [];
         self.leaves      = [];
         self.leafFaces   = [];
         self.planes      = [];
+        self.patchVerts  = [];
+        self.patchIndices= [];
         self.ready       = false;
     }
 
@@ -402,6 +479,9 @@ class Q3BSP
         self.facesDrawn = [];
         for (var i = 0; i < len(self.faces); i += 1)
             self.facesDrawn.push(0);
+
+        self.buildMeshBuffers();
+        self.buildPatchMeshes();
 
         self.ready = len(self.faces) > 0 && len(self.vertices) > 0;
         print("Q3BSP loaded: " + len(self.faces) + " faces, " +
@@ -739,6 +819,13 @@ def readLeafBrushes(buf)
     def vertexCount()    { return len(self.vertices); }
     def lightmapCount()  { return len(self.lightmapIds); }
     def textureCount()   { return len(self.textures); }
+    def meshBufferCount(){ return len(self.meshBuffers); }
+    def frameStats()
+    {
+        return (self.statVisibleBuffers, self.statVisiblePatches,
+                self.statDrawnBuffers, self.statDrawnPatches,
+                self.statCulledBuffers, self.statDrawnTris);
+    }
 
     // ----------------------------------------------------------
     // BSP traversal — encontra a leaf que contém o ponto
@@ -764,19 +851,39 @@ def readLeafBrushes(buf)
     // Draw — brute force todas as faces (fase 1)
     // ----------------------------------------------------------
 
+    def _resetFrameVisibility()
+    {
+        for (var i = 0; i < len(self.facesDrawn); i += 1)
+            self.facesDrawn[i] = 0;
+        for (var i = 0; i < len(self.bufferDrawn); i += 1)
+            self.bufferDrawn[i] = 0;
+        self.visibleBuffers.clear();
+        self.visiblePatchFaces.clear();
+        self.statVisibleBuffers = 0;
+        self.statVisiblePatches = 0;
+        self.statDrawnBuffers = 0;
+        self.statDrawnPatches = 0;
+        self.statCulledBuffers = 0;
+        self.statDrawnTris = 0;
+    }
+
     def draw()
     {
         if (!self.ready) return;
 
+        self.frustumActive = false;
+        self._resetFrameVisibility();
+
         glPushMatrix();
         glScalef(self.scale, self.scale, self.scale);
 
-        // Reset bitset
-        for (var i = 0; i < len(self.facesDrawn); i += 1)
-            self.facesDrawn[i] = 0;
+        for (var bi = 0; bi < len(self.meshBuffers); bi += 1)
+            self.visibleBuffers.push(bi);
+        for (var fi = 0; fi < len(self.faces); fi += 1)
+            if (self.faces[fi].faceType == Q3_FACE_PATCH)
+                self.visiblePatchFaces.push(fi);
 
-        for (var i = 0; i < len(self.faces); i += 1)
-            self.drawFace(i);
+        self.renderCollected();
 
         glPopMatrix();
     }
@@ -786,9 +893,7 @@ def readLeafBrushes(buf)
     {
         if (!self.ready) return;
 
-        // Reset bitset
-        for (var i = 0; i < len(self.facesDrawn); i += 1)
-            self.facesDrawn[i] = 0;
+        self._resetFrameVisibility();
 
         glPushMatrix();
         glScalef(self.scale, self.scale, self.scale);
@@ -798,7 +903,92 @@ def readLeafBrushes(buf)
         var qy = camY / self.scale;
         var qz = camZ / self.scale;
 
+        self.frustumActive = false;
         self.drawNode(0, qx, qy, qz);
+        self.renderCollected();
+
+        glPopMatrix();
+    }
+
+    def _aabbVisible(minX, minY, minZ, maxX, maxY, maxZ)
+    {
+        var cx = (minX + maxX) * 0.5;
+        var cy = (minY + maxY) * 0.5;
+        var cz = (minZ + maxZ) * 0.5;
+        var ex = (maxX - minX) * 0.5;
+        var ey = (maxY - minY) * 0.5;
+        var ez = (maxZ - minZ) * 0.5;
+
+        var vx = cx - self.frustumEyeX;
+        var vy = cy - self.frustumEyeY;
+        var vz = cz - self.frustumEyeZ;
+
+        var x = vx * self.frustumRightX + vy * self.frustumRightY + vz * self.frustumRightZ;
+        var y = vx * self.frustumUpX    + vy * self.frustumUpY    + vz * self.frustumUpZ;
+        var z = vx * self.frustumFwdX   + vy * self.frustumFwdY   + vz * self.frustumFwdZ;
+
+        var rx = ex * abs(self.frustumRightX) + ey * abs(self.frustumRightY) + ez * abs(self.frustumRightZ);
+        var ry = ex * abs(self.frustumUpX)    + ey * abs(self.frustumUpY)    + ez * abs(self.frustumUpZ);
+        var rz = ex * abs(self.frustumFwdX)   + ey * abs(self.frustumFwdY)   + ez * abs(self.frustumFwdZ);
+
+        if (z + rz < self.frustumNear) return false;
+        if (z - rz > self.frustumFar)  return false;
+
+        var zMax = z + rz;
+        if (zMax <= 0.0) return false;
+
+        if ( x - rx > zMax * self.frustumTanH) return false;
+        if (-x - rx > zMax * self.frustumTanH) return false;
+        if ( y - ry > zMax * self.frustumTanV) return false;
+        if (-y - ry > zMax * self.frustumTanV) return false;
+
+        return true;
+    }
+
+    // Frustum culling com parâmetros da camera 
+    def drawFromCameraFrustum(camX, camY, camZ,
+                              fwdX, fwdY, fwdZ,
+                              rightX, rightY, rightZ,
+                              fovY, aspect, nearPlane, farPlane)
+    {
+        if (!self.ready) return;
+
+        self._resetFrameVisibility();
+
+        glPushMatrix();
+        glScalef(self.scale, self.scale, self.scale);
+
+        var qx = camX / self.scale;
+        var qy = camY / self.scale;
+        var qz = camZ / self.scale;
+        var qNear = nearPlane / self.scale;
+        var qFar  = farPlane / self.scale;
+
+        var flen = sqrt(fwdX * fwdX + fwdY * fwdY + fwdZ * fwdZ);
+        if (flen > 0.000001) { fwdX = fwdX / flen; fwdY = fwdY / flen; fwdZ = fwdZ / flen; }
+
+        var rlen = sqrt(rightX * rightX + rightY * rightY + rightZ * rightZ);
+        if (rlen > 0.000001) { rightX = rightX / rlen; rightY = rightY / rlen; rightZ = rightZ / rlen; }
+
+        var upX = rightY * fwdZ - rightZ * fwdY;
+        var upY = rightZ * fwdX - rightX * fwdZ;
+        var upZ = rightX * fwdY - rightY * fwdX;
+        var ulen = sqrt(upX * upX + upY * upY + upZ * upZ);
+        if (ulen > 0.000001) { upX = upX / ulen; upY = upY / ulen; upZ = upZ / ulen; }
+
+        self.frustumEyeX = qx; self.frustumEyeY = qy; self.frustumEyeZ = qz;
+        self.frustumFwdX = fwdX; self.frustumFwdY = fwdY; self.frustumFwdZ = fwdZ;
+        self.frustumRightX = rightX; self.frustumRightY = rightY; self.frustumRightZ = rightZ;
+        self.frustumUpX = upX; self.frustumUpY = upY; self.frustumUpZ = upZ;
+        self.frustumNear = qNear;
+        self.frustumFar  = qFar;
+        self.frustumTanV = tan(fovY * 0.5);
+        self.frustumTanH = self.frustumTanV * aspect;
+
+        self.frustumActive = true;
+        self.drawNode(0, qx, qy, qz);
+        self.renderCollected();
+        self.frustumActive = false;
 
         glPopMatrix();
     }
@@ -810,6 +1000,11 @@ def readLeafBrushes(buf)
             // É uma leaf
             var leafIdx = -(nodeIdx + 1);
             if (leafIdx < 0 || leafIdx >= len(self.leaves)) return;
+            if (self.frustumActive)
+            {
+                var lf = self.leaves[leafIdx];
+                if (!self._aabbVisible(lf.minX, lf.minY, lf.minZ, lf.maxX, lf.maxY, lf.maxZ)) return;
+            }
             self.drawLeaf(leafIdx);
             return;
         }
@@ -817,6 +1012,9 @@ def readLeafBrushes(buf)
         if (nodeIdx >= len(self.nodes)) return;
 
         var nd = self.nodes[nodeIdx];
+        if (self.frustumActive)
+            if (!self._aabbVisible(nd.minX, nd.minY, nd.minZ, nd.maxX, nd.maxY, nd.maxZ)) return;
+
         var pl = self.planes[nd.plane];
         var dist = pl.nx * camX + pl.ny * camY + pl.nz * camZ - pl.dist;
 
@@ -841,24 +1039,223 @@ def readLeafBrushes(buf)
             if (faceIdx < 0 || faceIdx >= len(self.faces)) continue;
             if (self.facesDrawn[faceIdx] == 1) continue;
             self.facesDrawn[faceIdx] = 1;
-            self.drawFace(faceIdx);
+
+            var f = self.faces[faceIdx];
+            if (f.faceType == Q3_FACE_PATCH)
+            {
+                self.visiblePatchFaces.push(faceIdx);
+                continue;
+            }
+
+            if (f.faceType != Q3_FACE_POLYGON && f.faceType != Q3_FACE_MESH) continue;
+            var bi = self.faceToBuffer[faceIdx];
+            if (bi < 0 || bi >= len(self.meshBuffers)) continue;
+            if (self.bufferDrawn[bi] == 1) continue;
+            self.bufferDrawn[bi] = 1;
+            self.visibleBuffers.push(bi);
+        }
+    }
+
+    def renderCollected()
+    {
+        self.statVisibleBuffers = len(self.visibleBuffers);
+        self.statVisiblePatches = len(self.visiblePatchFaces);
+
+        for (var i = 0; i < len(self.visibleBuffers); i += 1)
+        {
+            var bi = self.visibleBuffers[i];
+            if (bi < 0 || bi >= len(self.meshBuffers)) continue;
+            var mb = self.meshBuffers[bi];
+            if (self.frustumActive)
+                if (!self._aabbVisible(mb.minX, mb.minY, mb.minZ, mb.maxX, mb.maxY, mb.maxZ))
+                {
+                    self.statCulledBuffers += 1;
+                    continue;
+                }
+            self.drawMeshBuffer(mb);
+            self.statDrawnBuffers += 1;
+            self.statDrawnTris += mb.vertexCount / 3;
+        }
+
+        for (var i = 0; i < len(self.visiblePatchFaces); i += 1)
+        {
+            var faceIdx = self.visiblePatchFaces[i];
+            if (faceIdx < 0 || faceIdx >= len(self.faces)) continue;
+            self.drawPatchFace(faceIdx);
+            self.statDrawnPatches += 1;
+            if (faceIdx >= 0 && faceIdx < len(self.patchIndices))
+                self.statDrawnTris += len(self.patchIndices[faceIdx]) / 3;
         }
     }
 
     def drawFace(faceIdx)
     {
+        if (faceIdx < 0 || faceIdx >= len(self.faces)) return;
         var f = self.faces[faceIdx];
+        if (f.faceType == Q3_FACE_PATCH) { self.drawPatchFace(faceIdx); return; }
+        var bi = self.faceToBuffer[faceIdx];
+        if (bi < 0 || bi >= len(self.meshBuffers)) return;
+        self.drawMeshBuffer(self.meshBuffers[bi]);
+    }
 
-        // Só polígonos e meshes 
-        if (f.faceType != Q3_FACE_POLYGON && f.faceType != Q3_FACE_MESH) return;
-        if (f.numMeshVerts <= 0) return;
+    def buildMeshBuffers()
+    {
+        self.meshBuffers = [];
+        self.faceToBuffer = [];
+        self.bufferDrawn = [];
+        for (var i = 0; i < len(self.faces); i += 1)
+            self.faceToBuffer.push(-1);
 
-        // Bind textura
+        var gTex = [];
+        var gLm = [];
+        var gFaces = [];
+
+        for (var fi = 0; fi < len(self.faces); fi += 1)
+        {
+            var f = self.faces[fi];
+            if (f.faceType != Q3_FACE_POLYGON && f.faceType != Q3_FACE_MESH) continue;
+            if (f.numMeshVerts <= 0) continue;
+
+            var gi = -1;
+            for (var k = 0; k < len(gTex); k += 1)
+                if (gTex[k] == f.textureIdx && gLm[k] == f.lmIdx) { gi = k; break; }
+
+            if (gi < 0)
+            {
+                gTex.push(f.textureIdx);
+                gLm.push(f.lmIdx);
+                gFaces.push([]);
+                gi = len(gFaces) - 1;
+            }
+            gFaces[gi].push(fi);
+        }
+
+        for (var gi = 0; gi < len(gFaces); gi += 1)
+        {
+            var list = gFaces[gi];
+            var totalVerts = 0;
+            for (var i = 0; i < len(list); i += 1)
+                totalVerts += self.faces[list[i]].numMeshVerts;
+            if (totalVerts <= 0) continue;
+
+            var mb = Q3MeshBuffer();
+            mb.textureIdx = gTex[gi];
+            mb.lmIdx = gLm[gi];
+            if (mb.textureIdx >= 0 && mb.textureIdx < len(self.textures))
+                mb.texId = self.textures[mb.textureIdx].texId;
+            if (mb.lmIdx >= 0 && mb.lmIdx < len(self.lightmapIds))
+                mb.lmId = self.lightmapIds[mb.lmIdx];
+
+            var verts = Float32Array(totalVerts * 13);
+            var first = true;
+
+            var newId = len(self.meshBuffers);
+            for (var i = 0; i < len(list); i += 1)
+            {
+                var fi = list[i];
+                self.faceToBuffer[fi] = newId;
+                var f = self.faces[fi];
+                for (var t = 0; t < f.numMeshVerts; t += 1)
+                {
+                    var mvi = f.firstMeshVert + t;
+                    if (mvi < 0 || mvi >= len(self.meshVerts)) continue;
+                    var mvIdx = self.meshVerts[mvi];
+                    var vIdx = f.firstVert + mvIdx;
+                    if (vIdx < 0 || vIdx >= len(self.vertices)) continue;
+                    var vt = self.vertices[vIdx];
+
+                    verts.add(vt.x, vt.y, vt.z,
+                              vt.nx, vt.ny, vt.nz,
+                              vt.r, vt.g, vt.b,
+                              vt.u, vt.v, vt.lu, vt.lv);
+
+                    if (first)
+                    {
+                        mb.minX = vt.x; mb.minY = vt.y; mb.minZ = vt.z;
+                        mb.maxX = vt.x; mb.maxY = vt.y; mb.maxZ = vt.z;
+                        first = false;
+                    }
+                    else
+                    {
+                        if (vt.x < mb.minX) mb.minX = vt.x;
+                        if (vt.y < mb.minY) mb.minY = vt.y;
+                        if (vt.z < mb.minZ) mb.minZ = vt.z;
+                        if (vt.x > mb.maxX) mb.maxX = vt.x;
+                        if (vt.y > mb.maxY) mb.maxY = vt.y;
+                        if (vt.z > mb.maxZ) mb.maxZ = vt.z;
+                    }
+                }
+            }
+
+            mb.verts = verts;
+            mb.vertexCount = verts.length() / 13;
+            self.meshBuffers.push(mb);
+            self.bufferDrawn.push(0);
+        }
+    }
+
+    def drawMeshBuffer(mb)
+    {
+        var count = mb.vertexCount;
+        if (count <= 0) return;
+
+        var cpu = mb.verts;
+        var stride = 13 * 4;
+        var offPos = 0;
+        var offNrm = 3 * 4;
+        var offCol = 6 * 4;
+        var offUV0 = 9 * 4;
+        var offUV1 = 11 * 4;
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glActiveTexture(GL_TEXTURE0);
+        if (mb.texId > 0) { glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, mb.texId); }
+        else           { glDisable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, 0); }
+
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glEnableClientState(GL_COLOR_ARRAY);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+        glVertexPointer(3, GL_FLOAT, stride, cpu, offPos);
+        glNormalPointer(GL_FLOAT, stride, cpu, offNrm);
+        glColorPointer(3, GL_FLOAT, stride, cpu, offCol);
+        glTexCoordPointer(2, GL_FLOAT, stride, cpu, offUV0);
+        glDrawArrays(GL_TRIANGLES, 0, count);
+
+        if (mb.lmId > 0)
+        {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, mb.lmId);
+            glDisableClientState(GL_COLOR_ARRAY);
+            glColor4f(1.0, 1.0, 1.0, 1.0);
+            glTexCoordPointer(2, GL_FLOAT, stride, cpu, offUV1);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_DST_COLOR, GL_ZERO);
+            glDepthFunc(GL_EQUAL);
+            glDrawArrays(GL_TRIANGLES, 0, count);
+            glDepthFunc(GL_LEQUAL);
+            glDisable(GL_BLEND);
+            glEnableClientState(GL_COLOR_ARRAY);
+        }
+
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisableClientState(GL_COLOR_ARRAY);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+    }
+
+    def bindFaceTextures(f)
+    {
         var texId = 0;
         if (f.textureIdx >= 0 && f.textureIdx < len(self.textures))
             texId = self.textures[f.textureIdx].texId;
 
-        // Bind lightmap na unidade 1
         var lmId = 0;
         if (f.lmIdx >= 0 && f.lmIdx < len(self.lightmapIds))
             lmId = self.lightmapIds[f.lmIdx];
@@ -871,20 +1268,38 @@ def readLeafBrushes(buf)
         glEnable(GL_TEXTURE_2D);
         if (lmId > 0) glBindTexture(GL_TEXTURE_2D, lmId);
 
-        // Combiner: tex0 * tex1 * 2 (lightmap multiply)
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
         glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+    }
+
+    def unbindFaceTextures()
+    {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+    }
+
+    def drawPatchFace(faceIdx)
+    {
+        if (faceIdx < 0 || faceIdx >= len(self.patchIndices)) return;
+        var idx = self.patchIndices[faceIdx];
+        if (len(idx) <= 0) return;
+
+        var verts = self.patchVerts[faceIdx];
+        if (len(verts) <= 0) return;
+
+        var f = self.faces[faceIdx];
+        self.bindFaceTextures(f);
 
         glBegin(GL_TRIANGLES);
-        for (var i = 0; i < f.numMeshVerts; i += 1)
+        for (var i = 0; i < len(idx); i += 1)
         {
-            var mvIdx = self.meshVerts[f.firstMeshVert + i];
-            var vIdx  = f.firstVert + mvIdx;
-            if (vIdx < 0 || vIdx >= len(self.vertices)) continue;
-
-            var vt = self.vertices[vIdx];
-
-            // Multitexture: UV0 = surface, UV1 = lightmap
+            var vIdx = idx[i];
+            if (vIdx < 0 || vIdx >= len(verts)) continue;
+            var vt = verts[vIdx];
             glMultiTexCoord2f(GL_TEXTURE0, vt.u,  vt.v);
             glMultiTexCoord2f(GL_TEXTURE1, vt.lu, vt.lv);
             glNormal3f(vt.nx, vt.ny, vt.nz);
@@ -893,13 +1308,156 @@ def readLeafBrushes(buf)
         }
         glEnd();
 
-        // Cleanup
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glDisable(GL_TEXTURE_2D);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glDisable(GL_TEXTURE_2D);
+        self.unbindFaceTextures();
+    }
+
+    def patchBasis(t)
+    {
+        var it = 1.0 - t;
+        var b0 = it * it;
+        var b1 = 2.0 * t * it;
+        var b2 = t * t;
+        return (b0, b1, b2);
+    }
+
+    def patchEvalScalar(p00, p10, p20, p01, p11, p21, p02, p12, p22, bu0, bu1, bu2, bv0, bv1, bv2)
+    {
+        var r0 = p00 * bu0 + p10 * bu1 + p20 * bu2;
+        var r1 = p01 * bu0 + p11 * bu1 + p21 * bu2;
+        var r2 = p02 * bu0 + p12 * bu1 + p22 * bu2;
+        return r0 * bv0 + r1 * bv1 + r2 * bv2;
+    }
+
+    def evalPatchVertex(c00, c10, c20, c01, c11, c21, c02, c12, c22, u, v)
+    {
+        var (bu0, bu1, bu2) = self.patchBasis(u);
+        var (bv0, bv1, bv2) = self.patchBasis(v);
+
+        var out = Q3Vertex();
+        out.x  = self.patchEvalScalar(c00.x,  c10.x,  c20.x,  c01.x,  c11.x,  c21.x,  c02.x,  c12.x,  c22.x,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.y  = self.patchEvalScalar(c00.y,  c10.y,  c20.y,  c01.y,  c11.y,  c21.y,  c02.y,  c12.y,  c22.y,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.z  = self.patchEvalScalar(c00.z,  c10.z,  c20.z,  c01.z,  c11.z,  c21.z,  c02.z,  c12.z,  c22.z,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.u  = self.patchEvalScalar(c00.u,  c10.u,  c20.u,  c01.u,  c11.u,  c21.u,  c02.u,  c12.u,  c22.u,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.v  = self.patchEvalScalar(c00.v,  c10.v,  c20.v,  c01.v,  c11.v,  c21.v,  c02.v,  c12.v,  c22.v,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.lu = self.patchEvalScalar(c00.lu, c10.lu, c20.lu, c01.lu, c11.lu, c21.lu, c02.lu, c12.lu, c22.lu, bu0, bu1, bu2, bv0, bv1, bv2);
+        out.lv = self.patchEvalScalar(c00.lv, c10.lv, c20.lv, c01.lv, c11.lv, c21.lv, c02.lv, c12.lv, c22.lv, bu0, bu1, bu2, bv0, bv1, bv2);
+        out.nx = self.patchEvalScalar(c00.nx, c10.nx, c20.nx, c01.nx, c11.nx, c21.nx, c02.nx, c12.nx, c22.nx, bu0, bu1, bu2, bv0, bv1, bv2);
+        out.ny = self.patchEvalScalar(c00.ny, c10.ny, c20.ny, c01.ny, c11.ny, c21.ny, c02.ny, c12.ny, c22.ny, bu0, bu1, bu2, bv0, bv1, bv2);
+        out.nz = self.patchEvalScalar(c00.nz, c10.nz, c20.nz, c01.nz, c11.nz, c21.nz, c02.nz, c12.nz, c22.nz, bu0, bu1, bu2, bv0, bv1, bv2);
+        out.r  = self.patchEvalScalar(c00.r,  c10.r,  c20.r,  c01.r,  c11.r,  c21.r,  c02.r,  c12.r,  c22.r,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.g  = self.patchEvalScalar(c00.g,  c10.g,  c20.g,  c01.g,  c11.g,  c21.g,  c02.g,  c12.g,  c22.g,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.b  = self.patchEvalScalar(c00.b,  c10.b,  c20.b,  c01.b,  c11.b,  c21.b,  c02.b,  c12.b,  c22.b,  bu0, bu1, bu2, bv0, bv1, bv2);
+        out.a  = self.patchEvalScalar(c00.a,  c10.a,  c20.a,  c01.a,  c11.a,  c21.a,  c02.a,  c12.a,  c22.a,  bu0, bu1, bu2, bv0, bv1, bv2);
+
+        var nlen = sqrt(out.nx * out.nx + out.ny * out.ny + out.nz * out.nz);
+        if (nlen > 0.000001)
+        {
+            out.nx = out.nx / nlen;
+            out.ny = out.ny / nlen;
+            out.nz = out.nz / nlen;
+        }
+        else
+        {
+            out.nx = 0.0; out.ny = 1.0; out.nz = 0.0;
+        }
+        return out;
+    }
+
+    def buildPatchFace(faceIdx)
+    {
+        var f = self.faces[faceIdx];
+        if (f.faceType != Q3_FACE_PATCH) return;
+        if (f.patchW < 3 || f.patchH < 3) return;
+
+        var tess = max(1, self.patchTess);
+        var row = tess + 1;
+
+        var verts = [];
+        var indices = [];
+
+        for (var by = 0; by + 2 < f.patchH; by += 2)
+        {
+            for (var bx = 0; bx + 2 < f.patchW; bx += 2)
+            {
+                var i00 = f.firstVert + (by + 0) * f.patchW + (bx + 0);
+                var i10 = f.firstVert + (by + 0) * f.patchW + (bx + 1);
+                var i20 = f.firstVert + (by + 0) * f.patchW + (bx + 2);
+                var i01 = f.firstVert + (by + 1) * f.patchW + (bx + 0);
+                var i11 = f.firstVert + (by + 1) * f.patchW + (bx + 1);
+                var i21 = f.firstVert + (by + 1) * f.patchW + (bx + 2);
+                var i02 = f.firstVert + (by + 2) * f.patchW + (bx + 0);
+                var i12 = f.firstVert + (by + 2) * f.patchW + (bx + 1);
+                var i22 = f.firstVert + (by + 2) * f.patchW + (bx + 2);
+
+                if (i00 < 0 || i00 >= len(self.vertices)) continue;
+                if (i10 < 0 || i10 >= len(self.vertices)) continue;
+                if (i20 < 0 || i20 >= len(self.vertices)) continue;
+                if (i01 < 0 || i01 >= len(self.vertices)) continue;
+                if (i11 < 0 || i11 >= len(self.vertices)) continue;
+                if (i21 < 0 || i21 >= len(self.vertices)) continue;
+                if (i02 < 0 || i02 >= len(self.vertices)) continue;
+                if (i12 < 0 || i12 >= len(self.vertices)) continue;
+                if (i22 < 0 || i22 >= len(self.vertices)) continue;
+
+                var c00 = self.vertices[i00]; var c10 = self.vertices[i10]; var c20 = self.vertices[i20];
+                var c01 = self.vertices[i01]; var c11 = self.vertices[i11]; var c21 = self.vertices[i21];
+                var c02 = self.vertices[i02]; var c12 = self.vertices[i12]; var c22 = self.vertices[i22];
+
+                var base = len(verts);
+                for (var iy = 0; iy <= tess; iy += 1)
+                {
+                    var fv = iy / (tess + 0.0);
+                    for (var ix = 0; ix <= tess; ix += 1)
+                    {
+                        var fu = ix / (tess + 0.0);
+                        verts.push(self.evalPatchVertex(c00, c10, c20, c01, c11, c21, c02, c12, c22, fu, fv));
+                    }
+                }
+
+                for (var iy = 0; iy < tess; iy += 1)
+                {
+                    for (var ix = 0; ix < tess; ix += 1)
+                    {
+                        var i0 = base + iy * row + ix;
+                        var i1 = i0 + 1;
+                        var i2 = i0 + row;
+                        var i3 = i2 + 1;
+                        indices.push(i0); indices.push(i2); indices.push(i1);
+                        indices.push(i1); indices.push(i2); indices.push(i3);
+                    }
+                }
+            }
+        }
+
+        self.patchVerts[faceIdx] = verts;
+        self.patchIndices[faceIdx] = indices;
+    }
+
+    def buildPatchMeshes()
+    {
+        self.patchVerts = [];
+        self.patchIndices = [];
+        for (var i = 0; i < len(self.faces); i += 1)
+        {
+            self.patchVerts.push([]);
+            self.patchIndices.push([]);
+        }
+
+        var patchFaces = 0;
+        var patchTris  = 0;
+        for (var i = 0; i < len(self.faces); i += 1)
+        {
+            if (self.faces[i].faceType != Q3_FACE_PATCH) continue;
+            self.buildPatchFace(i);
+            if (len(self.patchIndices[i]) > 0)
+            {
+                patchFaces += 1;
+                patchTris += len(self.patchIndices[i]) / 3;
+            }
+        }
+
+        if (patchFaces > 0)
+            print("Q3BSP: Bezier patches tessellated: " + patchFaces + " faces, " + patchTris + " tris (tess=" + self.patchTess + ")");
     }
  
     def traceSphereAll(px, py, pz, dx, dy, dz, radius)

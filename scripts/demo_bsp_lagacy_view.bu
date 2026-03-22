@@ -89,7 +89,7 @@ var bsp = Q3BSP();
  
  
 var bspLoaded = false;
-    bspLoaded = bsp.load("../assets/maps/level.bsp","../assets/"); // tenta carregar texturas na pasta assets/textures/
+    bspLoaded = bsp.load("../assets/maps/oa_rpg3dm/maps/oa_rpg3dm2.bsp","../assets/maps/oa_rpg3dm/"); // tenta carregar texturas na pasta assets/textures/
 
 if (!bspLoaded)
 {
@@ -107,28 +107,16 @@ if (!bspLoaded)
 // ============================================================
 
 var cam = CameraFPS(50.0, 0.2, -10.0); // Posição inicial (X, Y, Z)
-cam.lookOnly = true;          // só mouse look, movimento pelo slide
-//cam.alwaysCapture = true;
+cam.alwaysCapture = false;
 cam.sensitivity = 0.12;
 cam.speed = 8.0;
-
-var velY = 0.0;
-var onGround = false;
-var GRAVITY = -20.0;
-var PLAYER_RADIUS = 0.35;
-var PLAYER_HALF_HEIGHT = 0.45;   // total height = halfHeight*2 + radius*2 ≈ 1.7 + 0.7 = 2.4m... 
-
-
-var player = Q3Player();
-player.spawn(50.0, 0.2, -10.0);
-
-//SetMouseRelative(true);
-
+  
 // ============================================================
 // State
 // ============================================================
 
 var useBSPTraversal = true;
+var useFrustum      = true;
 var showGrid        = true;
 var showAxes        = true;
 var fpsSmooth       = 60.0;
@@ -136,7 +124,7 @@ var bspScale        = 0.03;
 var wireframe       = false;
 
 print("Q3 BSP demo ready");
-print("F: toggle BSP traversal  G: grid  W: wireframe  ESC: quit");
+print("F: toggle BSP traversal  H: toggle frustum  G: grid  W: wireframe  ESC: quit");
 
 // ============================================================
 // Main loop
@@ -156,6 +144,11 @@ while (Running())
         useBSPTraversal = !useBSPTraversal;
         print("BSP traversal: " + useBSPTraversal);
     }
+    if (IsKeyPressed(KEY_H))
+    {
+        useFrustum = !useFrustum;
+        print("Frustum culling: " + useFrustum);
+    }
     if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
     if (IsKeyPressed(KEY_P))
     {
@@ -166,67 +159,9 @@ while (Running())
 
  
 
-    // // 1 — só mouse look (sem mover)
+ 
     cam.update(dt);  // mantém o yaw/pitch mas vamos ignorar o movimento
-
-    // // 2 — recalcula o forward/right a partir do yaw da câmera
-    // var fwd = cam.getForward();
-    // var right = cam.getRight();
-
-    // // 3 — input de movimento
-    // var moveX = 0.0; var moveY = 0.0; var moveZ = 0.0;
-    // var mv = cam.speed * dt;
-    // if (IsKeyDown(KEY_LEFT_SHIFT)) mv = mv * 2.0;
-
-    // if (IsKeyDown(KEY_W)) { moveX += fwd.x * mv; moveZ += fwd.z * mv; }
-    // if (IsKeyDown(KEY_S)) { moveX -= fwd.x * mv; moveZ -= fwd.z * mv; }
-    // if (IsKeyDown(KEY_A)) { moveX += right.x * mv; moveZ += right.z * mv; }
-    // if (IsKeyDown(KEY_D)) { moveX -= right.x * mv; moveZ -= right.z * mv; }
-
-    // // gravidade
-    //  velY += GRAVITY * dt;
-    //  moveY = velY * dt;
-
-    // // 4 — slide move (máx 3 iterações)
-    // var dx = moveX; 
-    // var dy = moveY; 
-    // var dz = moveZ;
-
-    // for (var iter = 0; iter < 3; iter += 1)
-    // {
-    //     var (frac,nx,ny,nz,hit) = bsp.traceCapsule(cam.x, cam.y, cam.z, dx, dy, dz, PLAYER_RADIUS, PLAYER_HALF_HEIGHT);
-
-    //     cam.x += dx * frac;
-    //     cam.y += dy * frac;
-    //     cam.z += dz * frac;
-
-    //     print("trace: frac=" , frac, " normal=(", nx, ny, nz, ") hit=", hit);
-
-    //     if (!hit) break;
-
-    //     // slide — remove componente normal
-    //     var dot = dx * nx + dy * ny + dz * nz;
-    //     dx -= nx * dot;
-    //     dy -= ny * dot;
-    //     dz -= nz * dot;
-
-    //     // chão
-    //     if (ny > 0.7)
-    //     {
-    //         velY = 0.0;
-    //         onGround = true;
-    //     }
-    // }
-
-    // // 5 — jump
-    // if (onGround && IsKeyPressed(KEY_SPACE))
-    // {
-    //     velY = 6.0;
-    //     onGround = false;
-    // }
-
-    player.update(dt, bsp, cam);
-
+ 
 
 
     if (IsResized())
@@ -261,7 +196,23 @@ while (Running())
         bsp.scale = bspScale;
 
         if (useBSPTraversal)
-            bsp.drawFromCamera(eye.x, eye.y, eye.z);
+        {
+            if (useFrustum)
+            {
+                var fwd = cam.getForward();
+                var right = cam.getRight();
+                bsp.drawFromCameraFrustum(
+                    eye.x, eye.y, eye.z,
+                    fwd.x, fwd.y, fwd.z,
+                    right.x, right.y, right.z,
+                    70.0 * deg2rad, aspect, 0.05, 2000.0
+                );
+            }
+            else
+            {
+                bsp.drawFromCamera(eye.x, eye.y, eye.z);
+            }
+        }
         else
             bsp.draw();
     }
@@ -305,6 +256,8 @@ while (Running())
 
             var (chBSP, nextBSP) = ImGui.Checkbox("BSP traversal (F)", useBSPTraversal);
             if (chBSP) useBSPTraversal = nextBSP;
+            var (chFrustum, nextFrustum) = ImGui.Checkbox("Frustum culling (H)", useFrustum);
+            if (chFrustum) useFrustum = nextFrustum;
 
             var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
             if (chGrid) showGrid = nextGrid;
@@ -346,6 +299,7 @@ while (Running())
         ImGui.Text("  Mouse: look");
         ImGui.Text("  W/A/S/D: move");
         ImGui.Text("  F: BSP traversal");
+        ImGui.Text("  H: frustum culling");
         ImGui.Text("  G: grid");
         ImGui.Text("  W: wireframe");
     }

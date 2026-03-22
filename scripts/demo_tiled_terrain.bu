@@ -1,0 +1,207 @@
+// ================================================================
+// Demo: Tiled Terrain only (no BSP)
+//
+// Controls:
+//   - Mouse: look around
+//   - W/A/S/D: move
+//   - G: toggle grid
+//   - ESC: quit
+// ================================================================
+
+import SDL;
+using SDL;
+import OpenGl;
+using OpenGl;
+import ImGui;
+using ImGui;
+import math;
+using math;
+import GLM;
+using GLM;
+import path;
+
+include "lib_camera_fps.bu";
+include "lib_tiled_terrain.bu";
+
+var deg2rad = 0.017453292519943295;
+
+def resolveAssetPath(rootPath, scriptPath)
+{
+    if (path.exists(rootPath)) return rootPath;
+    if (path.exists(scriptPath)) return scriptPath;
+    return nil;
+}
+
+def applyCamera(view, proj)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(MatrixToBuffer(proj));
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(MatrixToBuffer(view));
+}
+
+def drawGrid(y, halfSize, step)
+{
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.22, 0.26, 0.30, 1.0);
+    glBegin(GL_LINES);
+    for (var i = -halfSize; i <= halfSize; i = i + step)
+    {
+        glVertex3f(i, y, -halfSize);
+        glVertex3f(i, y,  halfSize);
+        glVertex3f(-halfSize, y, i);
+        glVertex3f( halfSize, y, i);
+    }
+    glEnd();
+}
+
+SetGLVersion(2, 1, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+SetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+SetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+SetGLAttribute(SDL_GL_STENCIL_SIZE, 8);
+
+if (!SDL.Init("BuGL - Tiled Terrain", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE)) return;
+if (!SDL.InitImGui()) return;
+
+ImGui.StyleColorsDark();
+
+glViewport(0, 0, GetWidth(), GetHeight());
+glClearColor(0.05, 0.07, 0.10, 1.0);
+glEnable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glDisable(GL_BLEND);
+
+var cam = CameraFPS(0.0, 2.0, 0.0);
+cam.alwaysCapture = false;
+cam.sensitivity = 0.12;
+cam.speed = 10.0;
+
+var terrain = TiledTerrain();
+terrain.tilesInTextureSide = 8;
+terrain.tilesInPatchSide   = 8;
+terrain.patchSideLength    = 32.0;
+terrain.defaultTile        = -1;
+
+var texPath = resolveAssetPath("assets/circleTextures64.jpg", "../assets/circleTextures64.jpg");
+var tilemapPath = resolveAssetPath("assets/tilemap.png", "../assets/tilemap.png");
+if (tilemapPath == nil)
+    tilemapPath = resolveAssetPath("assets/tiles.png", "../assets/tiles.png");
+
+var terrainReady = false;
+var terrainFromTilemap = false;
+if (texPath != nil && tilemapPath != nil)
+{
+    terrainReady = terrain.load(texPath, tilemapPath, 8, 32.0, 8, -1);
+    terrainFromTilemap = terrainReady;
+}
+
+if (!terrainReady && texPath != nil)
+{
+    terrain.texId = terrain._loadTexture(texPath);
+    if (terrain.texId != 0)
+    {
+        terrain.createProceduralMap(128, 128, 0);
+        for (var y = 0; y < 128; y += 1)
+        for (var x = 0; x < 128; x += 1)
+        {
+            var tx = int(x / 2) % 8;
+            var ty = int(y / 2) % 8;
+            var rot = (x + y) % 4;
+            terrain.setTile(x, y, tx, ty, rot);
+        }
+        terrain._buildPatchGeometry();
+        terrainReady = true;
+    }
+}
+
+if (!terrainReady)
+{
+    print("Failed to init tiled terrain.");
+    print("Expected texture atlas: assets/circleTextures64.jpg");
+    print("Expected classification map: assets/tilemap.png (grayscale)");
+}
+else
+{
+    if (terrainFromTilemap) print("Tiled terrain demo ready (tilemap mode)");
+    else                    print("Tiled terrain demo ready (procedural fallback)");
+}
+
+var showGrid = true;
+var terrainFar = 140.0;
+var fpsSmooth = 60.0;
+
+while (Running())
+{
+    var dt = GetDeltaTime();
+    if (dt < 0.0001) dt = 0.0001;
+    if (dt > 0.05)   dt = 0.05;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+
+    if (IsKeyPressed(KEY_ESCAPE)) Quit();
+    if (IsKeyPressed(KEY_G)) showGrid = !showGrid;
+
+    cam.update(dt);
+
+    if (IsResized())
+        glViewport(0, 0, GetWidth(), GetHeight());
+
+    var w = GetWidth();
+    var h = GetHeight();
+    if (h < 1) h = 1;
+    var aspect = w / h;
+
+    var view = cam.getViewMatrix();
+    var proj = cam.getProjectionMatrix(aspect, 70.0 * deg2rad, 0.05, 2000.0);
+    var eye  = cam.getEye();
+
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    applyCamera(view, proj);
+
+    if (showGrid) drawGrid(-0.02, 200, 4.0);
+
+    if (terrainReady)
+        terrain.render(eye.x, eye.y, eye.z, terrainFar);
+
+    var panel = ImGui.Begin("Tiled Terrain");
+    if (panel != nil && panel)
+    {
+        ImGui.Text("fps: " + int(fpsSmooth + 0.5));
+        ImGui.Separator();
+
+        var (chGrid, nextGrid) = ImGui.Checkbox("Grid (G)", showGrid);
+        if (chGrid) showGrid = nextGrid;
+
+        var (chFar, nextFar) = ImGui.SliderFloat("Far", terrainFar, 40.0, 300.0, "%.1f");
+        if (chFar) terrainFar = nextFar;
+
+        ImGui.Separator();
+        ImGui.Text("Camera:");
+        ImGui.Text("  eye: " + int(eye.x*100)/100.0 + ", " +
+                               int(eye.y*100)/100.0 + ", " +
+                               int(eye.z*100)/100.0);
+
+        if (terrainReady)
+        {
+            var (drawn, culled, mw, mh) = terrain.stats();
+            ImGui.Separator();
+            ImGui.Text("Terrain:");
+            ImGui.Text("  map: " + mw + " x " + mh);
+            ImGui.Text("  patches drawn: " + drawn);
+            ImGui.Text("  patches culled: " + culled);
+            ImGui.Text("  texture: " + path.basename(texPath));
+            if (terrainFromTilemap) ImGui.Text("  source: tilemap.png");
+            else                    ImGui.Text("  source: procedural fallback");
+        }
+        else
+        {
+            ImGui.Separator();
+            ImGui.Text("Terrain not ready");
+        }
+    }
+    ImGui.End();
+
+    Flip();
+}
+
+Close();
